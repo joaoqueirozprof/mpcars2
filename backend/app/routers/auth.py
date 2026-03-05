@@ -38,7 +38,13 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
-@router.post("/login", response_model=TokenResponse)
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
+@router.post("/login", response_model=LoginResponse)
 def login(request: LoginRequest, db: Session = Depends(get_db)):
     """Login with email and password."""
     user = db.query(User).filter(User.email == request.email).first()
@@ -54,7 +60,17 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
         )
 
     access_token = create_access_token(data={"sub": user.email})
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "nome": user.nome,
+            "perfil": user.perfil,
+            "ativo": user.ativo,
+        },
+    }
 
 
 @router.post("/register", response_model=TokenResponse)

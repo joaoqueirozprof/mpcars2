@@ -52,28 +52,21 @@ const AppRoutes: React.FC = () => {
 
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
-
-      {isAuthenticated && (
-        <>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/clientes" element={<Clientes />} />
-          <Route path="/veiculos" element={<Veiculos />} />
-          <Route path="/contratos" element={<Contratos />} />
-          <Route path="/empresas" element={<Empresas />} />
-          <Route path="/financeiro" element={<Financeiro />} />
-          <Route path="/seguros" element={<Seguros />} />
-          <Route path="/ipva" element={<Ipva />} />
-          <Route path="/multas" element={<Multas />} />
-          <Route path="/manutencoes" element={<Manutencoes />} />
-          <Route path="/reservas" element={<Reservas />} />
-          <Route path="/relatorios" element={<Relatorios />} />
-          <Route path="/configuracoes" element={<Configuracoes />} />
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        </>
-      )}
-
-      <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />} />
+      <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />} />
+      <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+      <Route path="/clientes" element={<ProtectedRoute><Clientes /></ProtectedRoute>} />
+      <Route path="/veiculos" element={<ProtectedRoute><Veiculos /></ProtectedRoute>} />
+      <Route path="/contratos" element={<ProtectedRoute><Contratos /></ProtectedRoute>} />
+      <Route path="/empresas" element={<ProtectedRoute><Empresas /></ProtectedRoute>} />
+      <Route path="/financeiro" element={<ProtectedRoute><Financeiro /></ProtectedRoute>} />
+      <Route path="/seguros" element={<ProtectedRoute><Seguros /></ProtectedRoute>} />
+      <Route path="/ipva" element={<ProtectedRoute><Ipva /></ProtectedRoute>} />
+      <Route path="/multas" element={<ProtectedRoute><Multas /></ProtectedRoute>} />
+      <Route path="/manutencoes" element={<ProtectedRoute><Manutencoes /></ProtectedRoute>} />
+      <Route path="/reservas" element={<ProtectedRoute><Reservas /></ProtectedRoute>} />
+      <Route path="/relatorios" element={<ProtectedRoute><Relatorios /></ProtectedRoute>} />
+      <Route path="/configuracoes" element={<ProtectedRoute><Configuracoes /></ProtectedRoute>} />
+      <Route path="/" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />} />
       <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />} />
     </Routes>
   )
