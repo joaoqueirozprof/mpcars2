@@ -435,7 +435,8 @@ const Veiculos: React.FC = () => {
             </div>
 
             {/* Modal Body */}
-            <form onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)]">
+            <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
+            <div className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)]">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Placa */}
                 <div>
@@ -588,7 +589,6 @@ const Veiculos: React.FC = () => {
                   />
                 </div>
               </div>
-
             </div>
 
             {/* Modal Footer */}
@@ -612,6 +612,7 @@ const Veiculos: React.FC = () => {
             </div>
           </form>
         </div>
+      </div>
       )}
 
       {/* Delete Confirmation Modal */}
