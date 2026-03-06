@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime
@@ -67,7 +67,7 @@ def list_seguros(
     current_user: User = Depends(get_current_user),
 ):
     """List all insurance policies with pagination."""
-    query = db.query(Seguro)
+    query = db.query(Seguro).options(joinedload(Seguro.veiculo))
     return paginate(
         query=query,
         page=page,

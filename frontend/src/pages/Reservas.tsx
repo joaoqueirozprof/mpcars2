@@ -45,16 +45,20 @@ const Reservas: React.FC = () => {
   const { data: clientes } = useQuery({
     queryKey: ['clientes-select'],
     queryFn: async () => {
-      const { data } = await api.get<PaginatedResponse<Cliente>>('/clientes', { params: { limit: 1000 } })
-      return data.data
+      const { data } = await api.get<PaginatedResponse<any>>('/clientes', { params: { limit: 1000 } })
+      return data.data || []
     },
   })
 
   const { data: veiculos } = useQuery({
     queryKey: ['veiculos-select'],
     queryFn: async () => {
-      const { data } = await api.get<PaginatedResponse<Veiculo>>('/veiculos', { params: { limit: 1000 } })
-      return data.data.filter((v) => v.status === 'disponivel')
+      const { data } = await api.get<PaginatedResponse<any>>('/veiculos', { params: { limit: 1000 } })
+      return (data.data || []).map((v: any) => ({
+        ...v,
+        quilometragem: v.km_atual || 0,
+        cor: v.cor || '',
+      })).filter((v) => v.status === 'disponivel')
     },
   })
 

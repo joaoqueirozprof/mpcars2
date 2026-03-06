@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime
@@ -52,7 +52,7 @@ def list_multas(
     current_user: User = Depends(get_current_user),
 ):
     """List all fines with pagination."""
-    query = db.query(Multa)
+    query = db.query(Multa).options(joinedload(Multa.veiculo), joinedload(Multa.cliente))
     return paginate(
         query=query,
         page=page,

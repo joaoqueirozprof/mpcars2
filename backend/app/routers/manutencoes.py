@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime, timedelta
@@ -57,7 +57,7 @@ def list_manutencoes(
     current_user: User = Depends(get_current_user),
 ):
     """List all maintenance records with pagination."""
-    query = db.query(Manutencao)
+    query = db.query(Manutencao).options(joinedload(Manutencao.veiculo))
     extra = {}
     if tipo:
         extra["tipo"] = tipo

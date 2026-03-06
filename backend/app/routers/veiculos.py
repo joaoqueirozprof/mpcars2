@@ -36,15 +36,35 @@ class VeiculoUpdate(BaseModel):
     placa: Optional[str] = None
     marca: Optional[str] = None
     modelo: Optional[str] = None
+    ano: Optional[int] = None
+    cor: Optional[str] = None
+    chassis: Optional[str] = None
+    renavam: Optional[str] = None
+    combustivel: Optional[str] = None
+    capacidade_tanque: Optional[float] = None
     km_atual: Optional[float] = None
+    data_aquisicao: Optional[date] = None
+    valor_aquisicao: Optional[float] = None
     status: Optional[str] = None
     ativo: Optional[bool] = None
 
 
-class VeiculoResponse(VeiculoBase):
+class VeiculoResponse(BaseModel):
     id: int
-    status: str
-    ativo: bool
+    placa: str
+    marca: str
+    modelo: str
+    ano: Optional[int] = None
+    cor: Optional[str] = None
+    chassis: Optional[str] = None
+    renavam: Optional[str] = None
+    combustivel: Optional[str] = None
+    capacidade_tanque: Optional[float] = None
+    km_atual: Optional[float] = 0
+    data_aquisicao: Optional[date] = None
+    valor_aquisicao: Optional[float] = None
+    status: str = "disponivel"
+    ativo: bool = True
 
     class Config:
         from_attributes = True
@@ -194,6 +214,29 @@ def update_veiculo(
     current_user: User = Depends(get_current_user),
 ):
     """Update a vehicle."""
+    veiculo = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
+    if not veiculo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
+        )
+
+    update_data = veiculo_data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(veiculo, key, value)
+
+    db.commit()
+    db.refresh(veiculo)
+    return veiculo
+
+
+@router.patch("/{veiculo_id}", response_model=VeiculoResponse)
+def patch_veiculo(
+    veiculo_id: int,
+    veiculo_data: VeiculoUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Partially update a vehicle."""
     veiculo = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
     if not veiculo:
         raise HTTPException(

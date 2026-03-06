@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -78,7 +78,7 @@ def list_contratos(
     current_user: User = Depends(get_current_user),
 ):
     """List all contracts with pagination."""
-    query = db.query(Contrato)
+    query = db.query(Contrato).options(joinedload(Contrato.cliente), joinedload(Contrato.veiculo))
     return paginate(
         query=query,
         page=page,

@@ -56,6 +56,7 @@ class Cliente(Base):
     empresa_id = Column(Integer, ForeignKey("empresas.id"))
     data_cadastro = Column(DateTime, server_default=func.now())
     ativo = Column(Boolean, default=True)
+    empresa = relationship("Empresa", foreign_keys=[empresa_id], lazy="select")
 
 
 class Veiculo(Base):
@@ -110,6 +111,8 @@ class Contrato(Base):
     observacoes = Column(Text)
     data_criacao = Column(DateTime, server_default=func.now())
     data_finalizacao = Column(DateTime)
+    cliente = relationship("Cliente", foreign_keys=[cliente_id], lazy="select")
+    veiculo = relationship("Veiculo", foreign_keys=[veiculo_id], lazy="select")
 
 
 class Quilometragem(Base):
@@ -218,6 +221,7 @@ class Seguro(Base):
     status = Column(String, default="ativo")
     qtd_parcelas = Column(Integer)
     data_criacao = Column(DateTime, server_default=func.now())
+    veiculo = relationship("Veiculo", foreign_keys=[veiculo_id], lazy="select")
 
 
 class ParcelaSeguro(Base):
@@ -259,6 +263,7 @@ class IpvaRegistro(Base):
     data_vencimento = Column(Date)
     status = Column(String, default="pendente")
     data_criacao = Column(DateTime, server_default=func.now())
+    veiculo = relationship("Veiculo", foreign_keys=[veiculo_id], lazy="select")
 
 
 class Reserva(Base):
@@ -272,6 +277,8 @@ class Reserva(Base):
     status = Column(String, default="pendente")
     valor_estimado = Column(Numeric(10, 2))
     data_criacao = Column(DateTime, server_default=func.now())
+    cliente = relationship("Cliente", foreign_keys=[cliente_id], lazy="select")
+    veiculo = relationship("Veiculo", foreign_keys=[veiculo_id], lazy="select")
 
 
 class CheckinCheckout(Base):
@@ -301,6 +308,9 @@ class Multa(Base):
     status = Column(String, default="pendente")
     responsavel = Column(String)
     data_criacao = Column(DateTime, server_default=func.now())
+    veiculo = relationship("Veiculo", foreign_keys=[veiculo_id], lazy="select")
+    cliente = relationship("Cliente", foreign_keys=[cliente_id], lazy="select")
+    contrato = relationship("Contrato", foreign_keys=[contrato_id], lazy="select")
 
 
 class Manutencao(Base):
@@ -318,6 +328,7 @@ class Manutencao(Base):
     oficina = Column(String)
     status = Column(String, default="pendente")
     data_criacao = Column(DateTime, server_default=func.now())
+    veiculo = relationship("Veiculo", foreign_keys=[veiculo_id], lazy="select")
 
 
 class UsoVeiculoEmpresa(Base):

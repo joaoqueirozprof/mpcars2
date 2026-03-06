@@ -110,6 +110,31 @@ def create_aliquota(
     return db_aliquota
 
 
+@router.get("/")
+def list_ipva(
+    page: int = 1,
+    limit: int = 50,
+    status: Optional[str] = None,
+    veiculo_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all IPVA records with pagination (frontend endpoint)."""
+    from sqlalchemy.orm import joinedload
+    query = db.query(IpvaRegistro).options(joinedload(IpvaRegistro.veiculo))
+    extra = {}
+    if veiculo_id:
+        extra["veiculo_id"] = veiculo_id
+    return paginate(
+        query=query,
+        page=page,
+        limit=limit,
+        model=IpvaRegistro,
+        status_filter=status,
+        extra_filters=extra if extra else None,
+    )
+
+
 @router.get("/registros")
 def list_registros(
     page: int = 1,

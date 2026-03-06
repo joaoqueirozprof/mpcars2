@@ -47,10 +47,16 @@ const Veiculos: React.FC = () => {
   const { data: vehiclesData, isLoading: isLoadingVehicles } = useQuery({
     queryKey: ['veiculos'],
     queryFn: async () => {
-      const { data } = await api.get<{ data: Veiculo[]; total: number }>('/veiculos', {
+      const { data } = await api.get<{ data: any[]; total: number }>('/veiculos', {
         params: { limit: 1000 },
       })
-      return data.data || []
+      return (data.data || []).map((v: any) => ({
+        ...v,
+        quilometragem: v.km_atual || 0,
+        data_compra: v.data_aquisicao || '',
+        observacoes: '',
+        cor: v.cor || '',
+      }))
     },
   })
 
@@ -66,10 +72,10 @@ const Veiculos: React.FC = () => {
       const search = searchTerm.toLowerCase()
       filtered = filtered.filter(
         (v) =>
-          v.placa.toLowerCase().includes(search) ||
-          v.marca.toLowerCase().includes(search) ||
-          v.modelo.toLowerCase().includes(search) ||
-          v.cor.toLowerCase().includes(search),
+          (v.placa || '').toLowerCase().includes(search) ||
+          (v.marca || '').toLowerCase().includes(search) ||
+          (v.modelo || '').toLowerCase().includes(search) ||
+          (v.cor || '').toLowerCase().includes(search),
       )
     }
 
@@ -192,10 +198,22 @@ const Veiculos: React.FC = () => {
       return
     }
 
+    const payload = {
+      placa: formData.placa,
+      marca: formData.marca,
+      modelo: formData.modelo,
+      ano: formData.ano,
+      cor: formData.cor,
+      km_atual: formData.quilometragem,
+      status: formData.status,
+      valor_aquisicao: formData.valor_aquisicao,
+      data_aquisicao: formData.data_compra || null,
+    }
+
     if (editingVehicle) {
-      updateMutation.mutate(formData)
+      updateMutation.mutate(payload)
     } else {
-      createMutation.mutate(formData)
+      createMutation.mutate(payload)
     }
   }
 
@@ -378,7 +396,7 @@ const Veiculos: React.FC = () => {
                         </div>
                       </td>
                       <td className="table-cell">
-                        <span className="text-slate-900">{vehicle.quilometragem.toLocaleString('pt-BR')} km</span>
+                        <span className="text-slate-900">{(vehicle.quilometragem || 0).toLocaleString('pt-BR')} km</span>
                       </td>
                       <td className="table-cell text-center">
                         <div className="flex items-center justify-center gap-2">

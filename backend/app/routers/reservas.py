@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -49,7 +49,7 @@ def list_reservas(
     current_user: User = Depends(get_current_user),
 ):
     """List all reservations with pagination."""
-    query = db.query(Reserva)
+    query = db.query(Reserva).options(joinedload(Reserva.cliente), joinedload(Reserva.veiculo))
     return paginate(
         query=query,
         page=page,

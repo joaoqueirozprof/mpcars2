@@ -48,8 +48,12 @@ const Seguros: React.FC = () => {
   const { data: veiculos } = useQuery({
     queryKey: ['veiculos-select'],
     queryFn: async () => {
-      const { data } = await api.get<PaginatedResponse<Veiculo>>('/veiculos', { params: { limit: 1000 } })
-      return data.data
+      const { data } = await api.get<PaginatedResponse<any>>('/veiculos', { params: { limit: 1000 } })
+      return (data.data || []).map((v: any) => ({
+        ...v,
+        quilometragem: v.km_atual || 0,
+        cor: v.cor || '',
+      }))
     },
   })
 

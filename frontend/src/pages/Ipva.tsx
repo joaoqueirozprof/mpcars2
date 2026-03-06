@@ -40,15 +40,26 @@ const Ipva: React.FC = () => {
           veiculo_id: vehicleFilter || undefined,
         },
       })
-      return data
+      // Map backend field names to frontend
+      const mappedData = (data.data || []).map((item: any) => ({
+        ...item,
+        ano: item.ano_referencia || item.ano,
+        valor: item.valor_ipva != null ? item.valor_ipva : item.valor,
+        data_pagamento: item.data_pagamento || (item.valor_pago > 0 ? item.data_vencimento : ''),
+      }))
+      return { ...data, data: mappedData }
     },
   })
 
   const { data: veiculos } = useQuery({
     queryKey: ['veiculos-select'],
     queryFn: async () => {
-      const { data } = await api.get<PaginatedResponse<Veiculo>>('/veiculos', { params: { limit: 1000 } })
-      return data.data
+      const { data } = await api.get<PaginatedResponse<any>>('/veiculos', { params: { limit: 1000 } })
+      return (data.data || []).map((v: any) => ({
+        ...v,
+        quilometragem: v.km_atual || 0,
+        cor: v.cor || '',
+      }))
     },
   })
 
@@ -120,10 +131,20 @@ const Ipva: React.FC = () => {
       return
     }
 
+    const payload = {
+      veiculo_id: parseInt(formData.veiculo_id as any),
+      ano_referencia: formData.ano,
+      valor_venal: formData.valor * 10, // estimate
+      aliquota: 3.0,
+      valor_ipva: formData.valor,
+      data_vencimento: formData.data_vencimento,
+      status: formData.status,
+    }
+
     if (editingIPVA) {
-      updateMutation.mutate(formData)
+      updateMutation.mutate({ valor_pago: formData.status === 'pago' ? formData.valor : 0, status: formData.status })
     } else {
-      createMutation.mutate(formData)
+      createMutation.mutate(payload)
     }
   }
 
