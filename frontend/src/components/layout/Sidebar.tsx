@@ -22,7 +22,7 @@ const Sidebar: React.FC = () => {
     { icon: Building2, label: 'Empresas', href: '/empresas' },
     { icon: DollarSign, label: 'Financeiro', href: '/financeiro' },
     { icon: ShieldAlert, label: 'Seguros', href: '/seguros' },
-    { icon: FileCheck, label: 'IPVA', href: '/ipva' },
+    { icon: FileCheck, label: 'Licenciamento', href: '/ipva' },
     { icon: AlertCircle, label: 'Multas', href: '/multas' },
     { icon: Wrench, label: 'Manutencoes', href: '/manutencoes' },
     { icon: Calendar, label: 'Reservas', href: '/reservas' },

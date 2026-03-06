@@ -13,6 +13,11 @@ from app.models import Seguro, ParcelaSeguro, Veiculo
 router = APIRouter(prefix="/seguros", tags=["Seguros"])
 
 
+class ParcelaInput(BaseModel):
+    valor: float
+    vencimento: date
+
+
 class SeguroBase(BaseModel):
     veiculo_id: int
     seguradora: str
@@ -26,7 +31,7 @@ class SeguroBase(BaseModel):
 
 
 class SeguroCreate(SeguroBase):
-    pass
+    parcelas: Optional[List[ParcelaInput]] = None
 
 
 class SeguroUpdate(BaseModel):
@@ -104,27 +109,39 @@ def create_seguro(
             detail="Número de apólice já cadastrado",
         )
 
-    db_seguro = Seguro(**seguro.model_dump())
+    db_seguro = Seguro(**seguro.model_dump(exclude={'parcelas'}))
     db.add(db_seguro)
     db.commit()
     db.refresh(db_seguro)
 
-    # Create installments (guard against division by zero)
-    qtd = seguro.qtd_parcelas if seguro.qtd_parcelas and seguro.qtd_parcelas > 0 else 1
-    dias_entre = (seguro.data_fim - seguro.data_inicio).days
-    dias_por_parcela = max(1, dias_entre // qtd)
-    valor_parcela = seguro.valor / qtd
+    # Create installments - use client-specified parcelas if provided
+    if seguro.parcelas and len(seguro.parcelas) > 0:
+        for i, p in enumerate(seguro.parcelas, 1):
+            parcela = ParcelaSeguro(
+                seguro_id=db_seguro.id,
+                veiculo_id=seguro.veiculo_id,
+                numero_parcela=i,
+                valor=p.valor,
+                vencimento=p.vencimento,
+            )
+            db.add(parcela)
+    else:
+        # Auto-calculate parcelas
+        qtd = seguro.qtd_parcelas if seguro.qtd_parcelas and seguro.qtd_parcelas > 0 else 1
+        dias_entre = (seguro.data_fim - seguro.data_inicio).days
+        dias_por_parcela = max(1, dias_entre // qtd)
+        valor_parcela = seguro.valor / qtd
 
-    for i in range(1, qtd + 1):
-        vencimento = seguro.data_inicio + timedelta(days=dias_por_parcela * i)
-        parcela = ParcelaSeguro(
-            seguro_id=db_seguro.id,
-            veiculo_id=seguro.veiculo_id,
-            numero_parcela=i,
-            valor=valor_parcela,
-            vencimento=vencimento,
-        )
-        db.add(parcela)
+        for i in range(1, qtd + 1):
+            vencimento = seguro.data_inicio + timedelta(days=dias_por_parcela * i)
+            parcela = ParcelaSeguro(
+                seguro_id=db_seguro.id,
+                veiculo_id=seguro.veiculo_id,
+                numero_parcela=i,
+                valor=valor_parcela,
+                vencimento=vencimento,
+            )
+            db.add(parcela)
 
     db.commit()
     return db_seguro
@@ -181,7 +198,7 @@ def get_seguro(
     return seguro
 
 
-@router.put("/{seguro_id}", response_model=SeguroResponse)
+@router.patch("/{seguro_id}", response_model=SeguroResponse)
 def update_seguro(
     seguro_id: int,
     seguro_data: SeguroUpdate,

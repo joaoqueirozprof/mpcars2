@@ -10,7 +10,12 @@ from app.models.user import User
 from app.models import IpvaAliquota, IpvaRegistro, IpvaParcela, Veiculo
 
 
-router = APIRouter(prefix="/ipva", tags=["IPVA"])
+router = APIRouter(prefix="/ipva", tags=["Licenciamento"])
+
+
+class ParcelaInput(BaseModel):
+    valor: float
+    vencimento: date
 
 
 class IpvaAliquotaBase(BaseModel):
@@ -42,6 +47,7 @@ class IpvaRegistroBase(BaseModel):
 
 class IpvaRegistroCreate(IpvaRegistroBase):
     qtd_parcelas: Optional[int] = 1
+    parcelas: Optional[List[ParcelaInput]] = None
 
 
 class IpvaRegistroUpdate(BaseModel):
@@ -131,7 +137,7 @@ def list_ipva(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all IPVA records with pagination (frontend endpoint)."""
+    """List all licensing records with pagination (frontend endpoint)."""
     from sqlalchemy.orm import joinedload
     query = db.query(IpvaRegistro).options(joinedload(IpvaRegistro.veiculo))
     extra = {}
@@ -155,7 +161,7 @@ def list_registros(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all IPVA records with pagination."""
+    """List all licensing records with pagination."""
     from sqlalchemy.orm import joinedload
     query = db.query(IpvaRegistro).options(joinedload(IpvaRegistro.veiculo))
     return paginate(
@@ -173,32 +179,44 @@ def create_registro(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create a new IPVA record."""
+    """Create a new licensing record."""
     veiculo = db.query(Veiculo).filter(Veiculo.id == registro.veiculo_id).first()
     if not veiculo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
         )
 
-    db_registro = IpvaRegistro(**registro.model_dump(exclude={'qtd_parcelas'}))
+    db_registro = IpvaRegistro(**registro.model_dump(exclude={'qtd_parcelas', 'parcelas'}))
     db.add(db_registro)
     db.commit()
     db.refresh(db_registro)
 
-    # Create installments
-    qtd = registro.qtd_parcelas if registro.qtd_parcelas and registro.qtd_parcelas > 0 else 1
-    valor_parcela = registro.valor_ipva / qtd
+    # Create installments - use client-specified parcelas if provided
+    if registro.parcelas and len(registro.parcelas) > 0:
+        for i, p in enumerate(registro.parcelas, 1):
+            parcela = IpvaParcela(
+                ipva_id=db_registro.id,
+                veiculo_id=registro.veiculo_id,
+                numero_parcela=i,
+                valor=p.valor,
+                vencimento=p.vencimento,
+            )
+            db.add(parcela)
+    else:
+        # Auto-calculate parcelas
+        qtd = registro.qtd_parcelas if registro.qtd_parcelas and registro.qtd_parcelas > 0 else 1
+        valor_parcela = registro.valor_ipva / qtd
 
-    for i in range(1, qtd + 1):
-        vencimento = registro.data_vencimento + timedelta(days=30 * (i - 1))
-        parcela = IpvaParcela(
-            ipva_id=db_registro.id,
-            veiculo_id=registro.veiculo_id,
-            numero_parcela=i,
-            valor=valor_parcela,
-            vencimento=vencimento,
-        )
-        db.add(parcela)
+        for i in range(1, qtd + 1):
+            vencimento = registro.data_vencimento + timedelta(days=30 * (i - 1))
+            parcela = IpvaParcela(
+                ipva_id=db_registro.id,
+                veiculo_id=registro.veiculo_id,
+                numero_parcela=i,
+                valor=valor_parcela,
+                vencimento=vencimento,
+            )
+            db.add(parcela)
 
     db.commit()
     return db_registro
@@ -210,11 +228,11 @@ def get_registro(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get a specific IPVA record."""
+    """Get a specific licensing record."""
     registro = db.query(IpvaRegistro).filter(IpvaRegistro.id == registro_id).first()
     if not registro:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Registro IPVA não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Registro não encontrado"
         )
     return registro
 
@@ -226,11 +244,11 @@ def update_registro(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Update an IPVA record."""
+    """Update a licensing record."""
     registro = db.query(IpvaRegistro).filter(IpvaRegistro.id == registro_id).first()
     if not registro:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Registro IPVA não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Registro não encontrado"
         )
 
     update_data = registro_data.model_dump(exclude_unset=True)
@@ -249,11 +267,11 @@ def pagar_ipva(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Mark IPVA as paid."""
+    """Mark licensing as paid."""
     registro = db.query(IpvaRegistro).filter(IpvaRegistro.id == registro_id).first()
     if not registro:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Registro IPVA não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Registro não encontrado"
         )
 
     registro.valor_pago = valor_pago
@@ -271,15 +289,13 @@ def calcular_ipva(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Calculate IPVA for a vehicle."""
+    """Calculate licensing for a vehicle."""
     veiculo = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
     if not veiculo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
         )
 
-    # Get the state from vehicle (would need to be added to vehicle model)
-    # For now, use a default state
     estado = "SP"
     tipo_veiculo = "Automovel"
 
@@ -312,7 +328,7 @@ def get_ipva_vencendo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get IPVA records expiring soon."""
+    """Get licensing records expiring soon."""
     agora = date.today()
     fim = agora + timedelta(days=dias)
 
@@ -328,7 +344,7 @@ def get_resumo_ipva(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get IPVA summary."""
+    """Get licensing summary."""
     total_registros = db.query(IpvaRegistro).count()
     registros_pendentes = db.query(IpvaRegistro).filter(
         IpvaRegistro.status == "pendente"
@@ -348,11 +364,11 @@ def get_ipva_parcelas(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get installments for an IPVA record."""
+    """Get installments for a licensing record."""
     registro = db.query(IpvaRegistro).filter(IpvaRegistro.id == registro_id).first()
     if not registro:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Registro IPVA não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Registro não encontrado"
         )
     parcelas = db.query(IpvaParcela).filter(
         IpvaParcela.ipva_id == registro_id
@@ -366,7 +382,7 @@ def pagar_parcela_ipva(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Mark an IPVA installment as paid."""
+    """Mark a licensing installment as paid."""
     parcela = db.query(IpvaParcela).filter(IpvaParcela.id == parcela_id).first()
     if not parcela:
         raise HTTPException(
@@ -385,11 +401,11 @@ def delete_registro(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete an IPVA record."""
+    """Delete a licensing record."""
     registro = db.query(IpvaRegistro).filter(IpvaRegistro.id == registro_id).first()
     if not registro:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Registro IPVA não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Registro não encontrado"
         )
     db.query(IpvaParcela).filter(IpvaParcela.ipva_id == registro_id).delete(synchronize_session=False)
     db.delete(registro)
