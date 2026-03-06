@@ -191,77 +191,112 @@ class PDFService:
             return y - height
 
         def draw_car_inspection_diagram(x, y, width=200, height=120):
-            """Draw a simple top-down and side-view sedan car for inspection marking."""
+            """Draw a top-down view of a sedan car for inspection damage marking."""
+            c.saveState()
             c.setStrokeColor(colors.black)
-            c.setLineWidth(1.5)
-            c.setFillColor(colors.HexColor("#f0f0f0"))
+            c.setLineWidth(0.8)
 
-            # Top view section label
+            # Title
             c.setFont("Helvetica-Bold", 6)
-            c.drawString(x, y, "TOP VIEW")
+            c.setFillColor(colors.black)
+            c.drawString(x, y, "DIAGRAMA DE VISTORIA")
 
-            # Top view car outline (simple sedan shape from above)
-            tv_x = x + 10
-            tv_y = y - 20
-            tv_w = 60
-            tv_h = 40
+            # --- TOP-DOWN VIEW (bird's eye sedan) ---
+            cx = x + width / 2  # center x
+            cy = y - 55  # center y
+            bw = 50  # body width
+            bh = 90  # body height (length of car)
 
-            # Car body (rectangle with rounded corners approximated with lines)
-            c.rect(tv_x + 5, tv_y - tv_h, tv_w - 10, tv_h, fill=1)
+            # Car body outline using path
+            p = c.beginPath()
+            # Start bottom-center, go clockwise
+            r = 8  # corner radius
+            left = cx - bw / 2
+            right = cx + bw / 2
+            top = cy + bh / 2
+            bottom = cy - bh / 2
 
-            # Windows outline
+            # Rounded rectangle for body
+            p.moveTo(left + r, bottom)
+            p.lineTo(right - r, bottom)
+            p.arcTo(right - 2 * r, bottom, right, bottom + 2 * r, -90, 90)
+            p.lineTo(right, top - r)
+            p.arcTo(right - 2 * r, top - 2 * r, right, top, 0, 90)
+            p.lineTo(left + r, top)
+            p.arcTo(left, top - 2 * r, left + 2 * r, top, 90, 90)
+            p.lineTo(left, bottom + r)
+            p.arcTo(left, bottom, left + 2 * r, bottom + 2 * r, 180, 90)
+            p.close()
+
+            c.setFillColor(colors.HexColor("#f5f5f5"))
+            c.drawPath(p, fill=1, stroke=1)
+
+            # Windshield (front - bottom of diagram = front of car)
             c.setLineWidth(0.5)
-            c.rect(tv_x + 8, tv_y - 15, 15, 8, fill=0)  # front window
-            c.rect(tv_x + 28, tv_y - 15, 15, 8, fill=0)  # rear window
+            ws_w = bw - 12
+            c.rect(cx - ws_w / 2, bottom + 12, ws_w, 14, fill=0)
+            c.setFont("Helvetica", 4)
+            c.setFillColor(colors.black)
+            c.drawCentredString(cx, bottom + 17, "PARA-BRISA")
 
-            # Wheels (top view dots)
-            c.circle(tv_x + 12, tv_y - 8, 2)
-            c.circle(tv_x + 48, tv_y - 8, 2)
-            c.circle(tv_x + 12, tv_y - 28, 2)
-            c.circle(tv_x + 48, tv_y - 28, 2)
+            # Rear window (top of diagram = rear)
+            c.rect(cx - ws_w / 2, top - 26, ws_w, 14, fill=0)
+            c.drawCentredString(cx, top - 21, "VIDRO TRAS.")
 
-            # Side view section label
-            c.drawString(x + 90, y, "SIDE VIEW")
+            # Side windows
+            sw_h = 25
+            sw_w = 6
+            # Left side windows
+            c.rect(left + 1, cy - sw_h / 2, sw_w, sw_h, fill=0)
+            # Right side windows
+            c.rect(right - sw_w - 1, cy - sw_h / 2, sw_w, sw_h, fill=0)
 
-            # Side view car outline (sedan profile)
-            sv_x = x + 95
-            sv_y = y - 20
-            sv_w = 80
-            sv_h = 35
+            # Wheels (4 small black rectangles)
+            c.setFillColor(colors.HexColor("#333333"))
+            wh = 10
+            ww = 5
+            # Front left
+            c.rect(left - ww + 1, bottom + 8, ww, wh, fill=1)
+            # Front right
+            c.rect(right - 1, bottom + 8, ww, wh, fill=1)
+            # Rear left
+            c.rect(left - ww + 1, top - 8 - wh, ww, wh, fill=1)
+            # Rear right
+            c.rect(right - 1, top - 8 - wh, ww, wh, fill=1)
 
-            # Main body
-            c.setLineWidth(1.5)
-            c.setFillColor(colors.HexColor("#e8e8e8"))
+            # Center line (hood to trunk)
+            c.setStrokeColor(colors.HexColor("#cccccc"))
+            c.setLineWidth(0.3)
+            c.setDash(2, 2)
+            c.line(cx, bottom + 28, cx, top - 28)
+            c.setDash()
 
-            # Car profile: front bumper, hood, windshield, roof, trunk, rear bumper
-            body_points = [
-                (sv_x, sv_y - sv_h + 10),           # bottom front
-                (sv_x + 10, sv_y - sv_h),            # front wheel top
-                (sv_x + 15, sv_y - sv_h - 3),        # hood start
-                (sv_x + 25, sv_y - sv_h - 8),        # windshield start
-                (sv_x + 55, sv_y - sv_h - 8),        # windshield end
-                (sv_x + 65, sv_y - sv_h - 3),        # trunk start
-                (sv_x + 70, sv_y - sv_h),            # rear wheel top
-                (sv_x + sv_w, sv_y - sv_h + 10),     # bottom rear
+            # Labels
+            c.setFont("Helvetica", 4)
+            c.setFillColor(colors.black)
+            c.drawCentredString(cx, bottom - 4, "FRENTE")
+            c.drawCentredString(cx, top + 4, "TRASEIRA")
+            c.drawString(left - 12, cy - 2, "ESQ")
+            c.drawRightString(right + 14, cy - 2, "DIR")
+
+            # Damage marking boxes around the car
+            c.setStrokeColor(colors.HexColor("#999999"))
+            c.setLineWidth(0.3)
+            spots = [
+                (left - 6, bottom + 2, "1"),
+                (right + 2, bottom + 2, "2"),
+                (left - 6, top - 8, "3"),
+                (right + 2, top - 8, "4"),
+                (cx - 3, bottom - 8, "5"),
+                (cx - 3, top + 8, "6"),
             ]
+            c.setFont("Helvetica", 4)
+            for sx, sy, label in spots:
+                c.rect(sx, sy, 6, 6, fill=0)
+                c.drawCentredString(sx + 3, sy + 1.5, label)
 
-            c.setLineWidth(1)
-            c.setFillColor(colors.HexColor("#f0f0f0"))
-            c.drawPolygon(body_points, fill=1, stroke=1)
-
-            # Door line
-            c.setLineWidth(0.5)
-            c.line(sv_x + 30, sv_y - sv_h - 8, sv_x + 30, sv_y - sv_h + 5)
-
-            # Windows (side view)
-            c.rect(sv_x + 18, sv_y - sv_h - 6, 12, 6, fill=0)  # front window
-            c.rect(sv_x + 35, sv_y - sv_h - 6, 12, 6, fill=0)  # rear window
-
-            # Wheels (side view)
-            c.circle(sv_x + 10, sv_y - sv_h + 10, 3)
-            c.circle(sv_x + 70, sv_y - sv_h + 10, 3)
-
-            return y - 50
+            c.restoreState()
+            return y - height
 
         # --- LEFT COLUMN: LOCATARIO ---
         y = y_line - 4
