@@ -68,6 +68,18 @@ app.add_middleware(
 def startup():
     """Create tables and seed database on startup."""
     Base.metadata.create_all(bind=engine)
+
+    # Run column migrations for existing tables
+    from sqlalchemy import text, inspect
+    with engine.connect() as conn:
+        inspector = inspect(engine)
+        # Add foto_url to veiculos if missing
+        if "veiculos" in inspector.get_table_names():
+            columns = [c["name"] for c in inspector.get_columns("veiculos")]
+            if "foto_url" not in columns:
+                conn.execute(text("ALTER TABLE veiculos ADD COLUMN foto_url VARCHAR"))
+                conn.commit()
+
     from app.services.seed import seed_database
     from app.core.database import SessionLocal
 
