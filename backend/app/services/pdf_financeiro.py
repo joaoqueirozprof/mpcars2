@@ -216,12 +216,29 @@ class PDFFinanceiroService:
         ).with_entities(ParcelaSeguro.valor).all()
         total_seguros = sum([p[0] or Decimal('0') for p in parcela_seguro])
 
+        # Fallback: Seguro records WITHOUT parcelas (legacy records)
+        from sqlalchemy import exists
+        seguros_sem_parcela = db.query(Seguro).filter(
+            Seguro.data_inicio >= data_inicio_dt,
+            Seguro.data_inicio <= data_fim_dt,
+            ~exists().where(ParcelaSeguro.seguro_id == Seguro.id),
+        ).with_entities(Seguro.valor).all()
+        total_seguros += sum([s[0] or Decimal('0') for s in seguros_sem_parcela])
+
         # Licenciamento - parcelas with vencimento in period
         parcela_lic = db.query(IpvaParcela).filter(
             IpvaParcela.vencimento >= data_inicio_dt,
             IpvaParcela.vencimento <= data_fim_dt,
         ).with_entities(IpvaParcela.valor).all()
         total_licenciamento = sum([p[0] or Decimal('0') for p in parcela_lic])
+
+        # Fallback: IpvaRegistro records WITHOUT parcelas (legacy records)
+        registros_sem_parcela = db.query(IpvaRegistro).filter(
+            IpvaRegistro.data_vencimento >= data_inicio_dt,
+            IpvaRegistro.data_vencimento <= data_fim_dt,
+            ~exists().where(IpvaParcela.ipva_id == IpvaRegistro.id),
+        ).with_entities(IpvaRegistro.valor_ipva).all()
+        total_licenciamento += sum([r[0] or Decimal('0') for r in registros_sem_parcela])
 
         # Fines
         multas = db.query(Multa).filter(
@@ -365,13 +382,48 @@ class PDFFinanceiroService:
                 'status': status_label,
                 'valor': parcela.valor or Decimal('0')
             })
+
+        # Fallback: Seguro records WITHOUT parcelas (legacy data)
+        from sqlalchemy import exists
+        seguros_legacy = db.query(Seguro).options(
+            joinedload(Seguro.veiculo)
+        ).filter(
+            Seguro.data_inicio >= data_inicio_dt,
+            Seguro.data_inicio <= data_fim_dt,
+            ~exists().where(ParcelaSeguro.seguro_id == Seguro.id),
+        ).all()
+
+        for seg in seguros_legacy:
+            veiculo_info = "-"
+            if seg.veiculo:
+                placa = seg.veiculo.placa or ""
+                marca = seg.veiculo.marca or ""
+                modelo = seg.veiculo.modelo or ""
+                veiculo_info = f"{placa} - {marca} {modelo}".strip(" -")
+
+            status_label = "Pago" if seg.status == "pago" else "Pendente"
+
+            dados.append({
+                'seguradora': seg.seguradora or "-",
+                'apolice': seg.numero_apolice or "-",
+                'veiculo': veiculo_info,
+                'parcela': "Única",
+                'vencimento': PDFFinanceiroService._format_date(seg.data_inicio),
+                'status': status_label,
+                'valor': seg.valor or Decimal('0')
+            })
+
         return dados
 
     @staticmethod
     def _get_despesas_licenciamento(db, data_inicio: str, data_fim: str) -> List:
-        """Get licensing installments whose vencimento falls within the period."""
+        """Get licensing installments whose vencimento falls within the period.
+        Also includes legacy IpvaRegistro records that have no parcelas."""
         data_inicio_dt, data_fim_dt = PDFFinanceiroService._get_date_range(data_inicio, data_fim)
         from sqlalchemy.orm import joinedload
+        from sqlalchemy import exists
+
+        # 1) Parcelas with vencimento in period
         parcelas = db.query(IpvaParcela).options(
             joinedload(IpvaParcela.ipva).joinedload(IpvaRegistro.veiculo)
         ).filter(
@@ -401,6 +453,35 @@ class PDFFinanceiroService:
                 'status': status_label,
                 'valor': parcela.valor or Decimal('0')
             })
+
+        # 2) Fallback: IpvaRegistro records WITHOUT parcelas (legacy data)
+        registros_legacy = db.query(IpvaRegistro).options(
+            joinedload(IpvaRegistro.veiculo)
+        ).filter(
+            IpvaRegistro.data_vencimento >= data_inicio_dt,
+            IpvaRegistro.data_vencimento <= data_fim_dt,
+            ~exists().where(IpvaParcela.ipva_id == IpvaRegistro.id),
+        ).all()
+
+        for reg in registros_legacy:
+            veiculo_info = "-"
+            if reg.veiculo:
+                placa = reg.veiculo.placa or ""
+                marca = reg.veiculo.marca or ""
+                modelo = reg.veiculo.modelo or ""
+                veiculo_info = f"{placa} - {marca} {modelo}".strip(" -")
+
+            status_label = "Pago" if reg.status == "pago" else "Pendente"
+
+            dados.append({
+                'veiculo': veiculo_info,
+                'ano_ref': str(reg.ano_referencia or "-"),
+                'parcela': "Única",
+                'vencimento': PDFFinanceiroService._format_date(reg.data_vencimento),
+                'status': status_label,
+                'valor': reg.valor_ipva or Decimal('0')
+            })
+
         return dados
 
     @staticmethod
