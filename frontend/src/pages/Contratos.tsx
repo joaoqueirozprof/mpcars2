@@ -14,6 +14,9 @@ import {
   X,
   CheckCircle,
   Clock,
+  Download,
+  Printer,
+  Loader2,
 } from 'lucide-react'
 import api from '@/services/api'
 import AppLayout from '@/components/layout/AppLayout'
@@ -43,6 +46,49 @@ const Contratos: React.FC = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos')
   const [dateError, setDateError] = useState<string>('')
+  const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null)
+
+  const handleDownloadPdf = async (contratoId: string, numero: string) => {
+    setDownloadingPdf(contratoId)
+    try {
+      const response = await api.get(`/relatorios/contrato/${contratoId}/pdf`, {
+        responseType: 'blob',
+      })
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `contrato_${numero}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+      toast.success('PDF do contrato gerado com sucesso!')
+    } catch (error) {
+      toast.error('Erro ao gerar PDF do contrato')
+    } finally {
+      setDownloadingPdf(null)
+    }
+  }
+
+  const handlePrintPdf = async (contratoId: string) => {
+    setDownloadingPdf(contratoId)
+    try {
+      const response = await api.get(`/relatorios/contrato/${contratoId}/pdf`, {
+        responseType: 'blob',
+      })
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+      const printWindow = window.open(url, '_blank')
+      if (printWindow) {
+        printWindow.onload = () => printWindow.print()
+      }
+    } catch (error) {
+      toast.error('Erro ao imprimir contrato')
+    } finally {
+      setDownloadingPdf(null)
+    }
+  }
 
   const [formData, setFormData] = useState<FormData>({
     cliente_id: '',
@@ -419,20 +465,35 @@ const Contratos: React.FC = () => {
                         </span>
                       </td>
                       <td className="table-cell text-center">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => handleDownloadPdf(contrato.id, contrato.numero)}
+                            disabled={downloadingPdf === contrato.id}
+                            className="p-1.5 text-slate-600 hover:text-green-600 hover:bg-green-50 rounded transition-colors disabled:opacity-50"
+                            title="Baixar PDF"
+                          >
+                            {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                          </button>
+                          <button
+                            onClick={() => handlePrintPdf(contrato.id)}
+                            className="p-1.5 text-slate-600 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                            title="Imprimir"
+                          >
+                            <Printer size={16} />
+                          </button>
                           <button
                             onClick={() => handleOpenModal(contrato)}
-                            className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                            className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                             title="Editar"
                           >
-                            <Edit size={18} />
+                            <Edit size={16} />
                           </button>
                           <button
                             onClick={() => setDeleteConfirm({ isOpen: true, id: contrato.id })}
-                            className="p-2 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            className="p-1.5 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                             title="Deletar"
                           >
-                            <Trash2 size={18} />
+                            <Trash2 size={16} />
                           </button>
                         </div>
                       </td>
