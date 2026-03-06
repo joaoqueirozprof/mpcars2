@@ -362,12 +362,18 @@ class UsoVeiculoEmpresa(Base):
     contrato_id = Column(Integer, ForeignKey("contratos.id"))
     km_inicial = Column(Float)
     km_final = Column(Float)
+    km_percorrido = Column(Float)
     data_inicio = Column(DateTime)
     data_fim = Column(DateTime)
     km_referencia = Column(Float)
     valor_km_extra = Column(Numeric(10, 2))
+    valor_diaria_empresa = Column(Numeric(10, 2))
     status = Column(String, default="ativo")
     data_criacao = Column(DateTime, server_default=func.now())
+    veiculo = relationship("Veiculo", foreign_keys=[veiculo_id], lazy="select")
+    empresa = relationship("Empresa", foreign_keys=[empresa_id], lazy="select")
+    contrato = relationship("Contrato", foreign_keys=[contrato_id], lazy="select")
+    despesas = relationship("DespesaNF", foreign_keys="DespesaNF.uso_id", lazy="select")
 
 
 class RelatorioNF(Base):

@@ -33,6 +33,11 @@ def run_migration():
         ("multas", "data_pagamento", "DATE"),
         # IpvaRegistro new field
         ("ipva_registro", "data_pagamento", "DATE"),
+        # UsoVeiculoEmpresa new fields
+        ("uso_veiculo_empresa", "km_percorrido", "FLOAT"),
+        ("uso_veiculo_empresa", "valor_diaria_empresa", "NUMERIC(10,2)"),
+        # DespesaNF fields
+        ("despesa_nf", "tipo", "VARCHAR"),
     ]
     
     with engine.connect() as conn:

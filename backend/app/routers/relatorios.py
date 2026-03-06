@@ -85,15 +85,18 @@ def get_financeiro_pdf(
 
 
 # ============================================================
-# PDF 3 - NOTA FISCAL DE USO (spec route)
+# PDF 3 - NOTA FISCAL DE USO (single vehicle)
 # ============================================================
 @router.get("/nf/{uso_id}/pdf")
 def get_nf_pdf(
     uso_id: int,
+    km_percorrido: Optional[float] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate NF PDF report for UsoVeiculoEmpresa."""
+    """Generate NF PDF for a single vehicle usage.
+    km_percorrido: KM digitado pelo usuario (se omitido, usa o do registro).
+    """
     uso = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id == uso_id).first()
     if not uso:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Uso de veiculo nao encontrado")
@@ -102,14 +105,79 @@ def get_nf_pdf(
     if not empresa:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Empresa nao encontrada para este uso")
 
+    # Save km_percorrido if provided
+    if km_percorrido is not None:
+        uso.km_percorrido = km_percorrido
+        db.commit()
+
     try:
-        pdf_buffer = PDFNFService.generate_nf_pdf(db, uso_id)
+        pdf_buffer = PDFNFService.generate_nf_pdf(db, uso_id, km_percorrido)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Erro ao gerar NF: {}".format(str(e)))
 
     cnpj_clean = (empresa.cnpj or "").replace(".", "").replace("/", "").replace("-", "")
     mes_ano = datetime.now().strftime("%m_%Y")
-    filename = "nf_{}_{}_{}.pdf".format(uso_id, cnpj_clean, mes_ano)
+    veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+    placa = (veiculo.placa or "000") if veiculo else "000"
+    filename = "nf_{}_{}_{}.pdf".format(placa, cnpj_clean, mes_ano)
+
+    return StreamingResponse(
+        iter([pdf_buffer.getvalue()]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="{}"'.format(filename)},
+    )
+
+
+# ============================================================
+# PDF 3B - NF CONSOLIDADA (múltiplos veículos de uma empresa)
+# ============================================================
+from pydantic import BaseModel as PydanticBase
+from typing import List as TypingList
+
+
+class VeiculoKM(PydanticBase):
+    uso_id: int
+    km_percorrido: float
+
+
+class NFEmpresaRequest(PydanticBase):
+    empresa_id: int
+    veiculos: TypingList[VeiculoKM]
+
+
+@router.post("/nf/empresa/pdf")
+def get_nf_empresa_pdf(
+    request: NFEmpresaRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate consolidated NF PDF for multiple vehicles of a company.
+    Send empresa_id + list of {uso_id, km_percorrido} for each vehicle.
+    """
+    empresa = db.query(Empresa).filter(Empresa.id == request.empresa_id).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa nao encontrada")
+
+    if not request.veiculos:
+        raise HTTPException(status_code=400, detail="Nenhum veiculo informado")
+
+    # Save km_percorrido for each vehicle
+    for item in request.veiculos:
+        uso = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id == item.uso_id).first()
+        if uso:
+            uso.km_percorrido = item.km_percorrido
+    db.commit()
+
+    veiculos_km = [{"uso_id": v.uso_id, "km_percorrido": v.km_percorrido} for v in request.veiculos]
+
+    try:
+        pdf_buffer = PDFNFService.generate_nf_empresa_pdf(db, request.empresa_id, veiculos_km)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Erro ao gerar NF empresa: {}".format(str(e)))
+
+    cnpj_clean = (empresa.cnpj or "").replace(".", "").replace("/", "").replace("-", "")
+    mes_ano = datetime.now().strftime("%m_%Y")
+    filename = "nf_consolidada_{}_{}.pdf".format(cnpj_clean, mes_ano)
 
     return StreamingResponse(
         iter([pdf_buffer.getvalue()]),
