@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
@@ -242,10 +242,11 @@ def get_contrato_pdf(
         )
 
     pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
-    return FileResponse(
-        iter([pdf_buffer.getvalue()]),
+    pdf_buffer.seek(0)
+    return StreamingResponse(
+        pdf_buffer,
         media_type="application/pdf",
-        filename=f"contrato_{contrato.numero}.pdf",
+        headers={"Content-Disposition": f'attachment; filename="contrato_{contrato.numero}.pdf"'},
     )
 
 
