@@ -57,14 +57,14 @@ const Login: React.FC = () => {
               <label className="block text-sm font-medium text-slate-700 mb-2">
                 Email
               </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-3.5 text-slate-400" size={18} />
+              <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
+                <Mail size={18} className="text-slate-400 flex-shrink-0" />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="seu@email.com"
-                  className="input-field pl-10"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
                   disabled={isLoading}
                 />
               </div>
@@ -74,14 +74,14 @@ const Login: React.FC = () => {
               <label className="block text-sm font-medium text-slate-700 mb-2">
                 Senha
               </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-3.5 text-slate-400" size={18} />
+              <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
+                <Lock size={18} className="text-slate-400 flex-shrink-0" />
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="input-field pl-10"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
                   disabled={isLoading}
                 />
               </div>

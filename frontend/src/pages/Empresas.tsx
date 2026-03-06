@@ -224,22 +224,22 @@ const Empresas: React.FC = () => {
       </div>
 
       {isModalOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-display font-bold text-slate-900">
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setIsModalOpen(false)}>
+          <div className="modal-content max-w-2xl w-full flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">
                 {editingCompany ? 'Editar Empresa' : 'Nova Empresa'}
-              </h2>
+              </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="p-2 hover:bg-slate-100 rounded transition-colors"
+                className="btn-icon"
                 title="Fechar"
               >
                 <X size={20} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)] space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="input-label">Nome *</label>
@@ -351,24 +351,26 @@ const Empresas: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex gap-3 justify-end pt-6 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="btn-secondary"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                >
-                  {createMutation.isPending || updateMutation.isPending ? 'Processando...' : editingCompany ? 'Atualizar Empresa' : 'Criar Empresa'}
-                </button>
-              </div>
             </form>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="btn-secondary"
+                disabled={createMutation.isPending || updateMutation.isPending}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={createMutation.isPending || updateMutation.isPending}
+                onClick={handleSubmit}
+              >
+                {createMutation.isPending || updateMutation.isPending ? 'Processando...' : editingCompany ? 'Atualizar Empresa' : 'Criar Empresa'}
+              </button>
+            </div>
           </div>
         </div>
       )}

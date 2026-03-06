@@ -303,8 +303,8 @@ const Clientes: React.FC = () => {
             </div>
 
             {/* Search Bar */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+            <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all w-full">
+              <Search size={18} className="text-slate-400 flex-shrink-0" />
               <input
                 type="text"
                 placeholder="Buscar por nome, email ou telefone..."
@@ -313,7 +313,7 @@ const Clientes: React.FC = () => {
                   setSearchQuery(e.target.value)
                   setCurrentPage(1)
                 }}
-                className="input-field pl-10 w-full"
+                className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
               />
             </div>
 
@@ -483,27 +483,27 @@ const Clientes: React.FC = () => {
 
       {/* Modal */}
       {isModalOpen && (
-        <div className="modal-overlay" onClick={() => !isLoadingState && setIsModalOpen(false)}>
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !isLoadingState && setIsModalOpen(false)}>
           <div
-            className="modal-content max-w-2xl max-h-[90vh] overflow-y-auto"
+            className="modal-content max-w-2xl w-full flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-slate-200">
-              <h2 className="text-2xl font-bold text-slate-900">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">
                 {editingClient ? 'Editar Cliente' : 'Novo Cliente'}
-              </h2>
+              </h3>
               <button
                 onClick={() => !isLoadingState && setIsModalOpen(false)}
-                className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
+                className="btn-icon"
                 disabled={isLoadingState}
               >
-                <X size={24} className="text-slate-500" />
+                <X size={20} />
               </button>
             </div>
 
             {/* Modal Body */}
-            <form onSubmit={handleSubmit} className="p-6 space-y-6">
+            <form onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)] space-y-6">
               {/* Type Selection */}
               <div>
                 <input-label>Tipo de Cliente</input-label>
@@ -686,51 +686,68 @@ const Clientes: React.FC = () => {
                 </div>
               </div>
 
-              {/* Modal Footer */}
-              <div className="flex gap-3 justify-end pt-4 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="btn-secondary"
-                  disabled={isLoadingState}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary flex items-center gap-2"
-                  disabled={isLoadingState}
-                >
-                  {isLoadingState && <Loader size={16} className="animate-spin" />}
-                  {editingClient ? 'Atualizar' : 'Criar'} Cliente
-                </button>
-              </div>
             </form>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="btn-secondary"
+                disabled={isLoadingState}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="btn-primary flex items-center gap-2"
+                disabled={isLoadingState}
+                onClick={handleSubmit}
+              >
+                {isLoadingState && <Loader size={16} className="animate-spin" />}
+                {editingClient ? 'Atualizar' : 'Criar'} Cliente
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Delete Confirmation Modal */}
       {deleteConfirm.isOpen && (
-        <div className="modal-overlay" onClick={() => setDeleteConfirm({ isOpen: false })}>
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !deleteMutation.isPending && setDeleteConfirm({ isOpen: false })}>
           <div
-            className="modal-content max-w-sm"
+            className="modal-content max-w-sm w-full flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-center w-12 h-12 mx-auto bg-red-100 rounded-full mb-4">
-              <AlertCircle size={24} className="text-red-600" />
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">Deletar Cliente</h3>
+              <button
+                onClick={() => setDeleteConfirm({ isOpen: false })}
+                className="btn-icon"
+                disabled={deleteMutation.isPending}
+              >
+                <X size={20} />
+              </button>
             </div>
 
-            <h3 className="text-lg font-semibold text-slate-900 text-center mb-2">Deletar Cliente</h3>
-            <p className="text-slate-600 text-center mb-6">
-              Tem certeza que deseja deletar este cliente? Esta ação não pode ser desfeita.
-            </p>
+            {/* Modal Body */}
+            <div className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)]">
+              <div className="flex items-center justify-center w-12 h-12 mx-auto bg-red-100 rounded-full mb-4">
+                <AlertCircle size={24} className="text-red-600" />
+              </div>
 
-            <div className="flex gap-3">
+              <p className="text-slate-600 text-center">
+                Tem certeza que deseja deletar este cliente? Esta ação não pode ser desfeita.
+              </p>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
               <button
                 type="button"
                 onClick={() => setDeleteConfirm({ isOpen: false })}
-                className="btn-secondary flex-1"
+                className="btn-secondary"
                 disabled={deleteMutation.isPending}
               >
                 Cancelar
@@ -738,7 +755,7 @@ const Clientes: React.FC = () => {
               <button
                 type="button"
                 onClick={() => deleteConfirm.id && deleteMutation.mutate(deleteConfirm.id)}
-                className="btn-danger flex-1 flex items-center justify-center gap-2"
+                className="btn-danger flex items-center justify-center gap-2"
                 disabled={deleteMutation.isPending}
               >
                 {deleteMutation.isPending && <Loader size={16} className="animate-spin" />}

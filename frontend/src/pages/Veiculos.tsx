@@ -274,14 +274,14 @@ const Veiculos: React.FC = () => {
         </div>
 
         {/* Search Bar */}
-        <div className="relative">
-          <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
+        <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
+          <Search size={18} className="text-slate-400 flex-shrink-0" />
           <input
             type="text"
             placeholder="Buscar por placa, marca, modelo ou cor..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="input-field pl-12 w-full transition-all duration-200"
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
           />
         </div>
 
@@ -415,32 +415,27 @@ const Veiculos: React.FC = () => {
 
       {/* Create/Edit Modal */}
       {isModalOpen && (
-        <div className="modal-overlay" onClick={() => !isMutating && setIsModalOpen(false)}>
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !isMutating && setIsModalOpen(false)}>
           <div
-            className="modal-content max-w-2xl transition-all duration-200"
+            className="modal-content max-w-2xl w-full flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between pb-6 border-b border-slate-200">
-              <div>
-                <h2 className="text-2xl font-bold text-slate-900">
-                  {editingVehicle ? 'Editar Veículo' : 'Novo Veículo'}
-                </h2>
-                <p className="text-sm text-slate-600 mt-1">
-                  {editingVehicle ? 'Atualize as informações do veículo' : 'Adicione um novo veículo à frota'}
-                </p>
-              </div>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">
+                {editingVehicle ? 'Editar Veículo' : 'Novo Veículo'}
+              </h3>
               <button
                 onClick={() => !isMutating && setIsModalOpen(false)}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors duration-200"
+                className="btn-icon"
                 disabled={isMutating}
               >
-                <X size={24} className="text-slate-500" />
+                <X size={20} />
               </button>
             </div>
 
             {/* Modal Body */}
-            <form onSubmit={handleSubmit} className="py-6">
+            <form onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)]">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Placa */}
                 <div>
@@ -594,27 +589,28 @@ const Veiculos: React.FC = () => {
                 </div>
               </div>
 
-              {/* Modal Footer */}
-              <div className="flex gap-3 justify-end pt-6 border-t border-slate-200 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="btn-secondary"
-                  disabled={isMutating}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary inline-flex items-center gap-2"
-                  disabled={isMutating}
-                >
-                  {isMutating && <div className="animate-spin">⟳</div>}
-                  {editingVehicle ? 'Atualizar' : 'Criar'} Veículo
-                </button>
-              </div>
-            </form>
-          </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="btn-secondary"
+                disabled={isMutating}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="btn-primary inline-flex items-center gap-2"
+                disabled={isMutating}
+              >
+                {isMutating && <div className="animate-spin">⟳</div>}
+                {editingVehicle ? 'Atualizar' : 'Criar'} Veículo
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
@@ -622,40 +618,55 @@ const Veiculos: React.FC = () => {
       {deleteConfirm.isOpen && (
         <div
           className="modal-overlay"
-          onClick={() => !deleteMutation.isPending && setDeleteConfirm({ isOpen: false })}
+          onClick={(e) => e.target === e.currentTarget && !deleteMutation.isPending && setDeleteConfirm({ isOpen: false })}
         >
           <div
-            className="modal-content max-w-md transition-all duration-200"
+            className="modal-content max-w-sm w-full flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex flex-col items-center text-center">
-              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                <AlertCircle size={24} className="text-red-600" />
-              </div>
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">Deletar Veículo</h3>
+              <button
+                onClick={() => setDeleteConfirm({ isOpen: false })}
+                className="btn-icon"
+                disabled={deleteMutation.isPending}
+              >
+                <X size={20} />
+              </button>
+            </div>
 
-              <h3 className="text-lg font-bold text-slate-900">Deletar Veículo</h3>
-              <p className="text-slate-600 mt-2">
-                Tem certeza que deseja deletar o veículo <span className="font-semibold">{deleteConfirm.placa}</span>?
-              </p>
-              <p className="text-sm text-slate-500 mt-2">Esta ação não pode ser desfeita.</p>
+            {/* Modal Body */}
+            <div className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)]">
+              <div className="flex flex-col items-center text-center">
+                <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                  <AlertCircle size={24} className="text-red-600" />
+                </div>
 
-              <div className="flex gap-3 justify-center mt-8 w-full">
-                <button
-                  onClick={() => setDeleteConfirm({ isOpen: false })}
-                  className="btn-secondary flex-1"
-                  disabled={deleteMutation.isPending}
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => deleteConfirm.id && deleteMutation.mutate(deleteConfirm.id)}
-                  className="btn-danger flex-1 inline-flex items-center justify-center gap-2"
-                  disabled={deleteMutation.isPending}
-                >
-                  {deleteMutation.isPending && <div className="animate-spin">⟳</div>}
-                  Deletar
-                </button>
+                <p className="text-slate-600 mt-2">
+                  Tem certeza que deseja deletar o veículo <span className="font-semibold">{deleteConfirm.placa}</span>?
+                </p>
+                <p className="text-sm text-slate-500 mt-2">Esta ação não pode ser desfeita.</p>
               </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+              <button
+                onClick={() => setDeleteConfirm({ isOpen: false })}
+                className="btn-secondary"
+                disabled={deleteMutation.isPending}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => deleteConfirm.id && deleteMutation.mutate(deleteConfirm.id)}
+                className="btn-danger inline-flex items-center justify-center gap-2"
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending && <div className="animate-spin">⟳</div>}
+                Deletar
+              </button>
             </div>
           </div>
         </div>

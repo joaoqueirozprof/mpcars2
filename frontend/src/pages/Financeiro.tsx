@@ -359,14 +359,14 @@ const FinanceiroPage: React.FC = () => {
 
             {/* Search */}
             <div className="border-t border-slate-200 pt-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
+              <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
+                <Search size={18} className="text-slate-400 flex-shrink-0" />
                 <input
                   type="text"
                   placeholder="Buscar por descrição, categoria ou ID..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="input-field pl-10"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
                 />
               </div>
             </div>
@@ -544,22 +544,22 @@ const FinanceiroPage: React.FC = () => {
 
       {/* Modal Form */}
       {isModalOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content max-w-lg">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-slate-900">
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setIsModalOpen(false)}>
+          <div className="modal-content max-w-lg w-full flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">
                 {editingRecord ? 'Editar Registro' : 'Novo Registro'}
-              </h2>
+              </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                className="btn-icon"
                 disabled={createMutation.isPending || updateMutation.isPending}
               >
-                <X size={24} />
+                <X size={20} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)] space-y-5">
               {/* Tipo - Radio Buttons */}
               <div>
                 <label className="input-label">Tipo de Transação *</label>
@@ -635,8 +635,8 @@ const FinanceiroPage: React.FC = () => {
                 <label htmlFor="valor" className="input-label">
                   Valor *
                 </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-600">R$</span>
+                <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
+                  <span className="text-slate-600 flex-shrink-0">R$</span>
                   <input
                     id="valor"
                     type="number"
@@ -645,7 +645,7 @@ const FinanceiroPage: React.FC = () => {
                     step="0.01"
                     min="0"
                     placeholder="0,00"
-                    className="input-field pl-10"
+                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
                     disabled={createMutation.isPending || updateMutation.isPending}
                   />
                 </div>
@@ -684,57 +684,71 @@ const FinanceiroPage: React.FC = () => {
                 </select>
               </div>
 
-              {/* Form Actions */}
-              <div className="flex gap-3 justify-end pt-6 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="btn-secondary"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                >
-                  {createMutation.isPending || updateMutation.isPending ? (
-                    <span className="flex items-center gap-2">
-                      <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Salvando...
-                    </span>
-                  ) : editingRecord ? (
-                    'Atualizar'
-                  ) : (
-                    'Criar'
-                  )}
-                </button>
-              </div>
             </form>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="btn-secondary"
+                disabled={createMutation.isPending || updateMutation.isPending}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={createMutation.isPending || updateMutation.isPending}
+                onClick={handleSubmit}
+              >
+                {createMutation.isPending || updateMutation.isPending ? (
+                  <span className="flex items-center gap-2">
+                    <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Salvando...
+                  </span>
+                ) : editingRecord ? (
+                  'Atualizar'
+                ) : (
+                  'Criar'
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Delete Confirmation Modal */}
       {deleteConfirm.isOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content max-w-md">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
-                <AlertCircle className="h-6 w-6 text-red-600" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-slate-900">Deletar Registro</h3>
-                <p className="text-sm text-slate-600 mt-1">Esta ação não pode ser desfeita</p>
-              </div>
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !deleteMutation.isPending && setDeleteConfirm({ isOpen: false })}>
+          <div className="modal-content max-w-sm w-full flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">Deletar Registro</h3>
+              <button
+                onClick={() => setDeleteConfirm({ isOpen: false })}
+                className="btn-icon"
+                disabled={deleteMutation.isPending}
+              >
+                <X size={20} />
+              </button>
             </div>
 
-            <p className="text-slate-700 mb-6">
-              Tem certeza que deseja deletar este registro? Todos os dados associados serão removidos permanentemente.
-            </p>
+            {/* Modal Body */}
+            <div className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)]">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
+                  <AlertCircle className="h-6 w-6 text-red-600" />
+                </div>
+                <p className="text-sm text-slate-600">Esta ação não pode ser desfeita</p>
+              </div>
 
-            <div className="flex gap-3 justify-end">
+              <p className="text-slate-700">
+                Tem certeza que deseja deletar este registro? Todos os dados associados serão removidos permanentemente.
+              </p>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
               <button
                 onClick={() => setDeleteConfirm({ isOpen: false })}
                 className="btn-secondary"

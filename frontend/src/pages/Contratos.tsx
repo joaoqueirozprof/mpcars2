@@ -345,8 +345,8 @@ const Contratos: React.FC = () => {
         {/* Filters and Search */}
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-3 text-slate-400" size={20} />
+            <div className="flex-1 flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
+              <Search size={18} className="text-slate-400 flex-shrink-0" />
               <input
                 type="text"
                 placeholder="Buscar por número, cliente ou veículo..."
@@ -355,7 +355,7 @@ const Contratos: React.FC = () => {
                   setSearchTerm(e.target.value)
                   setPagination({ ...pagination, page: 1 })
                 }}
-                className="input-field pl-10"
+                className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
               />
             </div>
           </div>
@@ -489,21 +489,23 @@ const Contratos: React.FC = () => {
 
       {/* Modal */}
       {isModalOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content max-w-2xl">
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setIsModalOpen(false)}>
+          <div className="modal-content max-w-2xl w-full flex flex-col" onClick={(e) => e.stopPropagation()}>
             {/* Modal Header */}
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-200">
-              <h2 className="text-2xl font-bold text-slate-900">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">
                 {editingContract ? 'Editar Contrato' : 'Novo Contrato'}
-              </h2>
+              </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="p-1 hover:bg-slate-100 rounded transition-colors"
+                className="btn-icon"
               >
-                <X size={24} />
+                <X size={20} />
               </button>
             </div>
 
+            {/* Modal Body */}
+            <div className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)]">
             {/* Step Indicator */}
             <div className="mb-8">
               <div className="flex items-center justify-between">
@@ -737,51 +739,54 @@ const Contratos: React.FC = () => {
                 </div>
               )}
 
-              {/* Action Buttons */}
-              <div className="flex gap-3 justify-between pt-6 border-t border-slate-200">
-                <div className="flex gap-2">
-                  {step > 1 && (
-                    <button
-                      type="button"
-                      onClick={handlePrevStep}
-                      className="btn-secondary btn-sm flex items-center gap-2"
-                      disabled={createMutation.isPending || updateMutation.isPending}
-                    >
-                      Voltar
-                    </button>
-                  )}
-                </div>
+              </div>
+            </div>
 
-                <div className="flex gap-2">
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+              <div className="flex gap-2">
+                {step > 1 && (
                   <button
                     type="button"
-                    onClick={() => setIsModalOpen(false)}
-                    className="btn-secondary"
+                    onClick={handlePrevStep}
+                    className="btn-secondary btn-sm flex items-center gap-2"
                     disabled={createMutation.isPending || updateMutation.isPending}
                   >
-                    Cancelar
+                    Voltar
                   </button>
-
-                  {step < 3 ? (
-                    <button
-                      type="button"
-                      onClick={handleNextStep}
-                      className="btn-primary flex items-center gap-2"
-                    >
-                      Próximo
-                      <ChevronRight size={18} />
-                    </button>
-                  ) : (
-                    <button
-                      type="submit"
-                      className="btn-primary"
-                      disabled={createMutation.isPending || updateMutation.isPending}
-                    >
-                      {createMutation.isPending || updateMutation.isPending ? 'Processando...' : 'Confirmar'}
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="btn-secondary"
+                  disabled={createMutation.isPending || updateMutation.isPending}
+                >
+                  Cancelar
+                </button>
+
+                {step < 3 ? (
+                  <button
+                    type="button"
+                    onClick={handleNextStep}
+                    className="btn-primary flex items-center gap-2"
+                  >
+                    Próximo
+                    <ChevronRight size={18} />
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    className="btn-primary"
+                    disabled={createMutation.isPending || updateMutation.isPending}
+                  >
+                    {createMutation.isPending || updateMutation.isPending ? 'Processando...' : 'Confirmar'}
+                  </button>
+                )}
+              </div>
+            </div>
             </form>
           </div>
         </div>
@@ -789,29 +794,44 @@ const Contratos: React.FC = () => {
 
       {/* Delete Confirmation Modal */}
       {deleteConfirm.isOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content max-w-sm">
-            <div className="flex items-start gap-4">
-              <div className="bg-red-100 rounded-lg p-3">
-                <AlertCircle className="text-red-600" size={24} />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-bold text-slate-900">Deletar Contrato?</h3>
-                <p className="text-slate-600 text-sm mt-1">Esta ação não pode ser desfeita. O contrato será removido do sistema.</p>
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !deleteMutation.isPending && setDeleteConfirm({ isOpen: false })}>
+          <div className="modal-content max-w-sm w-full flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">Deletar Contrato</h3>
+              <button
+                onClick={() => setDeleteConfirm({ isOpen: false })}
+                className="btn-icon"
+                disabled={deleteMutation.isPending}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)]">
+              <div className="flex items-start gap-4">
+                <div className="bg-red-100 rounded-lg p-3">
+                  <AlertCircle className="text-red-600" size={24} />
+                </div>
+                <div className="flex-1">
+                  <p className="text-slate-600 text-sm">Esta ação não pode ser desfeita. O contrato será removido do sistema.</p>
+                </div>
               </div>
             </div>
 
-            <div className="flex gap-3 mt-6 pt-6 border-t border-slate-200">
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
               <button
                 onClick={() => setDeleteConfirm({ isOpen: false })}
-                className="btn-secondary flex-1"
+                className="btn-secondary"
                 disabled={deleteMutation.isPending}
               >
                 Cancelar
               </button>
               <button
                 onClick={() => deleteConfirm.id && deleteMutation.mutate(deleteConfirm.id)}
-                className="btn-danger flex-1"
+                className="btn-danger"
                 disabled={deleteMutation.isPending}
               >
                 {deleteMutation.isPending ? 'Deletando...' : 'Deletar'}
