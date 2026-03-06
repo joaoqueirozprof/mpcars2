@@ -1,3 +1,4 @@
+import os
 from io import BytesIO
 from datetime import datetime, date
 from decimal import Decimal
@@ -194,96 +195,22 @@ class PDFService:
             return y - height
 
         def draw_car_top_view(x, y, car_w=150, car_h=90):
-            """Draw a TOP-DOWN view of a car for inspection (matching reference image)."""
-            c.saveState()
-            c.setStrokeColor(colors.black)
-            c.setLineWidth(1.2)
-
-            # x, y is top-left corner of bounding area
-            # The car is drawn horizontally (front=left, rear=right)
-            cx = x + car_w / 2  # center x
-            cy = y - car_h / 2  # center y
-            bw = car_w - 10  # body width (horizontal = length)
-            bh = car_h * 0.55  # body height (vertical = width of car)
-
-            left = cx - bw / 2  # front of car
-            right = cx + bw / 2  # rear of car
-            top = cy + bh / 2  # left side of car
-            bottom = cy - bh / 2  # right side of car
-
-            # --- Main body outline (rounded rectangle) ---
-            r = 10  # corner radius
-            p = c.beginPath()
-            p.moveTo(left + r, bottom)
-            p.lineTo(right - r, bottom)
-            p.arcTo(right - 2 * r, bottom, right, bottom + 2 * r, -90, 90)
-            p.lineTo(right, top - r)
-            p.arcTo(right - 2 * r, top - 2 * r, right, top, 0, 90)
-            p.lineTo(left + r, top)
-            p.arcTo(left, top - 2 * r, left + 2 * r, top, 90, 90)
-            p.lineTo(left, bottom + r)
-            p.arcTo(left, bottom, left + 2 * r, bottom + 2 * r, 180, 90)
-            p.close()
-            c.setFillColor(colors.white)
-            c.drawPath(p, fill=1, stroke=1)
-
-            # --- Windshield (front window - near left/front) ---
-            c.setLineWidth(0.8)
-            ws_inset = bh * 0.12
-            ws_x = left + bw * 0.18
-            ws_w = bw * 0.14
-            c.rect(ws_x, bottom + ws_inset, ws_w, bh - 2 * ws_inset, fill=0)
-
-            # --- Rear window ---
-            rw_x = right - bw * 0.30
-            rw_w = bw * 0.12
-            c.rect(rw_x, bottom + ws_inset, rw_w, bh - 2 * ws_inset, fill=0)
-
-            # --- Side windows (top and bottom of car body) ---
-            sw_x = ws_x + ws_w + bw * 0.02
-            sw_end = rw_x - bw * 0.02
-            sw_w = sw_end - sw_x
-            sw_h = bh * 0.08
-
-            # Top side windows (left side of car in top-down view)
-            c.rect(sw_x, top - ws_inset - sw_h, sw_w, sw_h, fill=0)
-            # Bottom side windows (right side)
-            c.rect(sw_x, bottom + ws_inset, sw_w, sw_h, fill=0)
-
-            # Center pillar (B-pillar dividing side windows)
-            pillar_x = sw_x + sw_w * 0.48
-            c.setLineWidth(0.6)
-            c.line(pillar_x, top - ws_inset - sw_h, pillar_x, top - ws_inset)
-            c.line(pillar_x, bottom + ws_inset, pillar_x, bottom + ws_inset + sw_h)
-
-            # --- Wheels (4 ovals/ellipses outside body) ---
-            c.setLineWidth(1.0)
-            c.setFillColor(colors.black)
-            wh = bh * 0.22  # wheel height (how much sticks out)
-            ww = bw * 0.13  # wheel width
-
-            # Front-left wheel
-            fl_x = left + bw * 0.12
-            c.ellipse(fl_x, top, fl_x + ww, top + wh, fill=1)
-            # Front-right wheel
-            c.ellipse(fl_x, bottom - wh, fl_x + ww, bottom, fill=1)
-            # Rear-left wheel
-            rl_x = right - bw * 0.12 - ww
-            c.ellipse(rl_x, top, rl_x + ww, top + wh, fill=1)
-            # Rear-right wheel
-            c.ellipse(rl_x, bottom - wh, rl_x + ww, bottom, fill=1)
-
-            # --- Axle lines connecting wheels ---
-            c.setStrokeColor(colors.black)
-            c.setLineWidth(0.5)
-            # Front axle
-            c.line(fl_x + ww / 2, bottom, fl_x + ww / 2, top)
-            # Rear axle
-            c.line(rl_x + ww / 2, bottom, rl_x + ww / 2, top)
-            # Drive shaft (center line connecting axles)
-            c.line(fl_x + ww / 2, cy, rl_x + ww / 2, cy)
-
-            c.restoreState()
+            """Draw the car inspection diagram by embedding the reference image."""
+            # Path to the static car inspection image
+            img_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "vistoria_carro.png")
+            if os.path.exists(img_path):
+                # drawImage: x, y is bottom-left in ReportLab
+                # We receive y as top of area, so bottom-left = (x, y - car_h)
+                c.drawImage(img_path, x, y - car_h, width=car_w, height=car_h, preserveAspectRatio=True, mask='auto')
+            else:
+                # Fallback: draw a simple placeholder rectangle
+                c.saveState()
+                c.setStrokeColor(colors.black)
+                c.setLineWidth(0.5)
+                c.rect(x, y - car_h, car_w, car_h)
+                c.setFont("Helvetica", 6)
+                c.drawCentredString(x + car_w / 2, y - car_h / 2, "DIAGRAMA DO VEICULO")
+                c.restoreState()
             return y - car_h
 
         # --- LEFT COLUMN: LOCATARIO ---
