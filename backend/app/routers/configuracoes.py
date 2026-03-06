@@ -21,7 +21,7 @@ class ConfiguracaoResponse(BaseModel):
 
 
 class ConfiguracaoBatch(BaseModel):
-    dados: List[dict]
+    items: List[dict]
 
 
 @router.get("/", response_model=List[ConfiguracaoResponse])
@@ -31,6 +31,51 @@ def get_all_configuracoes(
 ):
     """Get all configurations."""
     return db.query(Configuracao).all()
+
+
+# IMPORTANT: batch/update MUST come before /{chave} to avoid being caught by the parameterized route
+@router.put("/batch/update")
+def update_batch_configuracoes(
+    batch: ConfiguracaoBatch,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update multiple configurations at once."""
+    for item in batch.items:
+        config = db.query(Configuracao).filter(
+            Configuracao.chave == item.get("chave")
+        ).first()
+        if config:
+            config.valor = item.get("valor")
+        else:
+            new_config = Configuracao(
+                chave=item.get("chave"), valor=item.get("valor")
+            )
+            db.add(new_config)
+
+    db.commit()
+    return {"status": "atualizado"}
+
+
+@router.post("/", response_model=ConfiguracaoResponse)
+def create_configuracao(
+    chave: str,
+    valor: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a new configuration."""
+    existing = db.query(Configuracao).filter(Configuracao.chave == chave).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Chave já existe"
+        )
+
+    config = Configuracao(chave=chave, valor=valor)
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+    return config
 
 
 @router.get("/{chave}", response_model=ConfiguracaoResponse)
@@ -63,50 +108,6 @@ def update_configuracao(
         )
 
     config.valor = valor
-    db.commit()
-    db.refresh(config)
-    return config
-
-
-@router.put("/batch/update")
-def update_batch_configuracoes(
-    batch: ConfiguracaoBatch,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Update multiple configurations at once."""
-    for item in batch.dados:
-        config = db.query(Configuracao).filter(
-            Configuracao.chave == item.get("chave")
-        ).first()
-        if config:
-            config.valor = item.get("valor")
-        else:
-            new_config = Configuracao(
-                chave=item.get("chave"), valor=item.get("valor")
-            )
-            db.add(new_config)
-
-    db.commit()
-    return {"status": "atualizado"}
-
-
-@router.post("/", response_model=ConfiguracaoResponse)
-def create_configuracao(
-    chave: str,
-    valor: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Create a new configuration."""
-    existing = db.query(Configuracao).filter(Configuracao.chave == chave).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Chave já existe"
-        )
-
-    config = Configuracao(chave=chave, valor=valor)
-    db.add(config)
     db.commit()
     db.refresh(config)
     return config

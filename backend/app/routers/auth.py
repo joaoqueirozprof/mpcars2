@@ -110,3 +110,49 @@ def refresh_token(current_user: User = Depends(get_current_user)):
     """Refresh access token."""
     access_token = create_access_token(data={"sub": current_user.email})
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+class ChangePasswordRequest(BaseModel):
+    senha_atual: str
+    senha_nova: str
+
+
+@router.put("/change-password")
+def change_password(
+    request: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Change current user password."""
+    if not verify_password(request.senha_atual, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Senha atual incorreta",
+        )
+
+    current_user.hashed_password = get_password_hash(request.senha_nova)
+    db.commit()
+    return {"status": "senha alterada com sucesso"}
+
+
+@router.put("/profile", response_model=UserResponse)
+def update_profile(
+    nome: str = None,
+    email: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update current user profile."""
+    if nome:
+        current_user.nome = nome
+    if email:
+        existing = db.query(User).filter(User.email == email, User.id != current_user.id).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email já em uso por outro usuário",
+            )
+        current_user.email = email
+    db.commit()
+    db.refresh(current_user)
+    return current_user

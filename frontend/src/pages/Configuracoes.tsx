@@ -99,13 +99,28 @@ const Configuracoes: React.FC = () => {
 
     setIsSaving(true)
     try {
-      if (userForm.senhaNova) {
-        toast.info('Alteração de senha requer implementação de backend')
+      // Update profile (nome/email) if changed
+      if (userForm.nome || userForm.email) {
+        const params = new URLSearchParams()
+        if (userForm.nome) params.append('nome', userForm.nome)
+        if (userForm.email) params.append('email', userForm.email)
+        await api.put(`/auth/profile?${params.toString()}`)
       }
+
+      // Change password if provided
+      if (userForm.senhaNova && userForm.senhaAtual) {
+        await api.put('/auth/change-password', {
+          senha_atual: userForm.senhaAtual,
+          senha_nova: userForm.senhaNova,
+        })
+        toast.success('Senha alterada com sucesso!')
+      }
+
       toast.success('Dados do usuário atualizados com sucesso!')
       setUserForm({ ...userForm, senhaAtual: '', senhaNova: '', confirmarSenha: '' })
-    } catch (error) {
-      toast.error('Erro ao atualizar dados do usuário')
+    } catch (error: any) {
+      const msg = error?.response?.data?.detail || 'Erro ao atualizar dados do usuário'
+      toast.error(msg)
     } finally {
       setIsSaving(false)
     }

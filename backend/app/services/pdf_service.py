@@ -118,9 +118,7 @@ class PDFService:
 
     @staticmethod
     def generate_contrato_pdf(db: Session, contrato_id: int) -> BytesIO:
-        """Generate contract PDF matching the MPCARS official template."""
-        from reportlab.platypus import Frame, NextPageTemplate, PageTemplate, BaseDocTemplate, FrameBreak
-        from reportlab.lib.pagesizes import A4
+        """Generate contract PDF matching the MPCARS official template with vehicle inspection diagram."""
         from reportlab.pdfgen import canvas as pdfcanvas
 
         contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
@@ -136,9 +134,6 @@ class PDFService:
         buffer = BytesIO()
         c = pdfcanvas.Canvas(buffer, pagesize=A4)
         w, h = A4  # 595.27 x 841.89
-
-        # === Fonts ===
-        c.setFont("Helvetica-Bold", 24)
 
         # === PAGE 1: CONTRACT FORM ===
         margin = 28
@@ -194,6 +189,79 @@ class PDFService:
             c.setFont("Helvetica", 7)
             c.drawString(x + 2, y - height + 3, str(value or ""))
             return y - height
+
+        def draw_car_inspection_diagram(x, y, width=200, height=120):
+            """Draw a simple top-down and side-view sedan car for inspection marking."""
+            c.setStrokeColor(colors.black)
+            c.setLineWidth(1.5)
+            c.setFillColor(colors.HexColor("#f0f0f0"))
+
+            # Top view section label
+            c.setFont("Helvetica-Bold", 6)
+            c.drawString(x, y, "TOP VIEW")
+
+            # Top view car outline (simple sedan shape from above)
+            tv_x = x + 10
+            tv_y = y - 20
+            tv_w = 60
+            tv_h = 40
+
+            # Car body (rectangle with rounded corners approximated with lines)
+            c.rect(tv_x + 5, tv_y - tv_h, tv_w - 10, tv_h, fill=1)
+
+            # Windows outline
+            c.setLineWidth(0.5)
+            c.rect(tv_x + 8, tv_y - 15, 15, 8, fill=0)  # front window
+            c.rect(tv_x + 28, tv_y - 15, 15, 8, fill=0)  # rear window
+
+            # Wheels (top view dots)
+            c.circle(tv_x + 12, tv_y - 8, 2)
+            c.circle(tv_x + 48, tv_y - 8, 2)
+            c.circle(tv_x + 12, tv_y - 28, 2)
+            c.circle(tv_x + 48, tv_y - 28, 2)
+
+            # Side view section label
+            c.drawString(x + 90, y, "SIDE VIEW")
+
+            # Side view car outline (sedan profile)
+            sv_x = x + 95
+            sv_y = y - 20
+            sv_w = 80
+            sv_h = 35
+
+            # Main body
+            c.setLineWidth(1.5)
+            c.setFillColor(colors.HexColor("#e8e8e8"))
+
+            # Car profile: front bumper, hood, windshield, roof, trunk, rear bumper
+            body_points = [
+                (sv_x, sv_y - sv_h + 10),           # bottom front
+                (sv_x + 10, sv_y - sv_h),            # front wheel top
+                (sv_x + 15, sv_y - sv_h - 3),        # hood start
+                (sv_x + 25, sv_y - sv_h - 8),        # windshield start
+                (sv_x + 55, sv_y - sv_h - 8),        # windshield end
+                (sv_x + 65, sv_y - sv_h - 3),        # trunk start
+                (sv_x + 70, sv_y - sv_h),            # rear wheel top
+                (sv_x + sv_w, sv_y - sv_h + 10),     # bottom rear
+            ]
+
+            c.setLineWidth(1)
+            c.setFillColor(colors.HexColor("#f0f0f0"))
+            c.drawPolygon(body_points, fill=1, stroke=1)
+
+            # Door line
+            c.setLineWidth(0.5)
+            c.line(sv_x + 30, sv_y - sv_h - 8, sv_x + 30, sv_y - sv_h + 5)
+
+            # Windows (side view)
+            c.rect(sv_x + 18, sv_y - sv_h - 6, 12, 6, fill=0)  # front window
+            c.rect(sv_x + 35, sv_y - sv_h - 6, 12, 6, fill=0)  # rear window
+
+            # Wheels (side view)
+            c.circle(sv_x + 10, sv_y - sv_h + 10, 3)
+            c.circle(sv_x + 70, sv_y - sv_h + 10, 3)
+
+            return y - 50
 
         # --- LEFT COLUMN: LOCATARIO ---
         y = y_line - 4
@@ -301,6 +369,11 @@ class PDFService:
             c.rect(lx + 4, y - 8, 8, 8)
             c.drawString(lx + 16, y - 7, item)
             y -= 11
+
+        # Vehicle inspection diagram
+        c.setFont("Helvetica-Bold", 7)
+        c.drawString(lx + 4, y - 6, "Vehicle Inspection Diagram:")
+        y = draw_car_inspection_diagram(lx + 4, y - 8, width=180, height=100)
 
         # Observacoes
         c.setFont("Helvetica-Bold", 6)
@@ -606,7 +679,7 @@ class PDFService:
             "pessoais esquecidos pelo(a) LOCATARIO(A) ou seus",
             "passageiros no Interior do veiculo ou em seus",
             "estabelecimentos, nem pelos danos ou depreciacao",
-            "sofridas por objetos transportados em seus veiculos.",
+            "sofrida por objetos transportados em seus veiculos.",
             "14) Este contrato se encerra:",
             "a) por haver expirado o prazo fixado no mesmo;",
             "b) por acordo expresso entre as partes;",
