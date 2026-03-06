@@ -27,7 +27,7 @@ def get_contrato_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate contract PDF report (spec-compliant 2-page layout)."""
+    """Generate contract PDF report (uses original layout matching physical form)."""
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contrato nao encontrado")
@@ -40,7 +40,7 @@ def get_contrato_pdf(
     data_str = datetime.now().strftime("%Y%m%d")
 
     try:
-        pdf_buffer = PDFContratoService.generate_contrato_pdf(db, contrato_id)
+        pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Erro ao gerar PDF do contrato: {}".format(str(e)))
 
