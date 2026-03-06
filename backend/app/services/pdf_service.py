@@ -193,143 +193,95 @@ class PDFService:
             c.drawString(x + 2, y - height + 3, str(value or ""))
             return y - height
 
-        def draw_car_side_view(x, y, car_w=140, car_h=65):
-            """Draw a SIDE VIEW of a sedan car for inspection damage marking."""
+        def draw_car_top_view(x, y, car_w=150, car_h=90):
+            """Draw a TOP-DOWN view of a car for inspection (matching reference image)."""
             c.saveState()
             c.setStrokeColor(colors.black)
-            c.setLineWidth(0.7)
-            c.setFillColor(colors.white)
+            c.setLineWidth(1.2)
 
-            # Car dimensions relative to bounding box
             # x, y is top-left corner of bounding area
-            # Car body sits in the middle-bottom of the area
-            body_bottom = y - car_h + 10
-            body_top = y - 18
-            body_left = x + 5
-            body_right = x + car_w - 5
-            body_w = body_right - body_left
-            body_h = body_top - body_bottom
+            # The car is drawn horizontally (front=left, rear=right)
+            cx = x + car_w / 2  # center x
+            cy = y - car_h / 2  # center y
+            bw = car_w - 10  # body width (horizontal = length)
+            bh = car_h * 0.55  # body height (vertical = width of car)
 
-            # --- Main body outline (side profile of sedan) ---
+            left = cx - bw / 2  # front of car
+            right = cx + bw / 2  # rear of car
+            top = cy + bh / 2  # left side of car
+            bottom = cy - bh / 2  # right side of car
+
+            # --- Main body outline (rounded rectangle) ---
+            r = 10  # corner radius
             p = c.beginPath()
-            # Start at bottom-left of body, go clockwise
-            # Bottom line (undercarriage)
-            p.moveTo(body_left + 8, body_bottom)
-            p.lineTo(body_right - 8, body_bottom)
-            # Right side (rear) - curve up
-            p.lineTo(body_right, body_bottom + 4)
-            # Rear vertical up to trunk
-            p.lineTo(body_right, body_bottom + body_h * 0.45)
-            # Trunk top
-            p.lineTo(body_right - 2, body_bottom + body_h * 0.5)
-            # Rear window slope
-            p.lineTo(body_right - body_w * 0.22, body_top)
-            # Roof line
-            p.lineTo(body_left + body_w * 0.35, body_top)
-            # Windshield slope
-            p.lineTo(body_left + body_w * 0.15, body_bottom + body_h * 0.5)
-            # Hood line
-            p.lineTo(body_left + 2, body_bottom + body_h * 0.42)
-            # Front bumper down
-            p.lineTo(body_left, body_bottom + 4)
-            p.lineTo(body_left + 8, body_bottom)
+            p.moveTo(left + r, bottom)
+            p.lineTo(right - r, bottom)
+            p.arcTo(right - 2 * r, bottom, right, bottom + 2 * r, -90, 90)
+            p.lineTo(right, top - r)
+            p.arcTo(right - 2 * r, top - 2 * r, right, top, 0, 90)
+            p.lineTo(left + r, top)
+            p.arcTo(left, top - 2 * r, left + 2 * r, top, 90, 90)
+            p.lineTo(left, bottom + r)
+            p.arcTo(left, bottom, left + 2 * r, bottom + 2 * r, 180, 90)
             p.close()
+            c.setFillColor(colors.white)
             c.drawPath(p, fill=1, stroke=1)
 
-            # --- Windows ---
-            c.setLineWidth(0.5)
-            # Front windshield
-            win_bottom = body_bottom + body_h * 0.55
-            p2 = c.beginPath()
-            p2.moveTo(body_left + body_w * 0.18, win_bottom)
-            p2.lineTo(body_left + body_w * 0.36, body_top - 2)
-            p2.lineTo(body_left + body_w * 0.38, body_top - 2)
-            p2.lineTo(body_left + body_w * 0.22, win_bottom)
-            p2.close()
-            c.drawPath(p2, fill=0, stroke=1)
+            # --- Windshield (front window - near left/front) ---
+            c.setLineWidth(0.8)
+            ws_inset = bh * 0.12
+            ws_x = left + bw * 0.18
+            ws_w = bw * 0.14
+            c.rect(ws_x, bottom + ws_inset, ws_w, bh - 2 * ws_inset, fill=0)
 
-            # Front side window
-            p3 = c.beginPath()
-            p3.moveTo(body_left + body_w * 0.24, win_bottom)
-            p3.lineTo(body_left + body_w * 0.40, body_top - 2)
-            p3.lineTo(body_left + body_w * 0.55, body_top - 2)
-            p3.lineTo(body_left + body_w * 0.55, win_bottom)
-            p3.close()
-            c.drawPath(p3, fill=0, stroke=1)
+            # --- Rear window ---
+            rw_x = right - bw * 0.30
+            rw_w = bw * 0.12
+            c.rect(rw_x, bottom + ws_inset, rw_w, bh - 2 * ws_inset, fill=0)
 
-            # Rear side window
-            p4 = c.beginPath()
-            p4.moveTo(body_left + body_w * 0.57, win_bottom)
-            p4.lineTo(body_left + body_w * 0.57, body_top - 2)
-            p4.lineTo(body_left + body_w * 0.72, body_top - 2)
-            p4.lineTo(body_left + body_w * 0.75, win_bottom)
-            p4.close()
-            c.drawPath(p4, fill=0, stroke=1)
+            # --- Side windows (top and bottom of car body) ---
+            sw_x = ws_x + ws_w + bw * 0.02
+            sw_end = rw_x - bw * 0.02
+            sw_w = sw_end - sw_x
+            sw_h = bh * 0.08
 
-            # Rear window (smaller, sloped)
-            p5 = c.beginPath()
-            p5.moveTo(body_left + body_w * 0.77, win_bottom)
-            p5.lineTo(body_left + body_w * 0.74, body_top - 2)
-            p5.lineTo(body_left + body_w * 0.78, body_top - 2)
-            p5.lineTo(body_right - body_w * 0.22, body_top - 1)
-            p5.lineTo(body_left + body_w * 0.80, win_bottom)
-            p5.close()
-            c.drawPath(p5, fill=0, stroke=1)
+            # Top side windows (left side of car in top-down view)
+            c.rect(sw_x, top - ws_inset - sw_h, sw_w, sw_h, fill=0)
+            # Bottom side windows (right side)
+            c.rect(sw_x, bottom + ws_inset, sw_w, sw_h, fill=0)
 
-            # --- Door line (vertical divider) ---
-            c.setLineWidth(0.4)
-            door_x = body_left + body_w * 0.55
-            c.line(door_x, body_bottom + 3, door_x, win_bottom)
-
-            # Door handle (small line)
+            # Center pillar (B-pillar dividing side windows)
+            pillar_x = sw_x + sw_w * 0.48
             c.setLineWidth(0.6)
-            c.line(door_x - 10, body_bottom + body_h * 0.35, door_x - 3, body_bottom + body_h * 0.35)
-            c.line(door_x + 3, body_bottom + body_h * 0.35, door_x + 10, body_bottom + body_h * 0.35)
+            c.line(pillar_x, top - ws_inset - sw_h, pillar_x, top - ws_inset)
+            c.line(pillar_x, bottom + ws_inset, pillar_x, bottom + ws_inset + sw_h)
 
-            # --- Wheels (2 circles, side view) ---
-            c.setLineWidth(0.7)
-            c.setFillColor(colors.HexColor("#333333"))
-            wheel_r = body_h * 0.22
-            wheel_y = body_bottom - 1
-
-            # Front wheel
-            fw_x = body_left + body_w * 0.20
-            c.circle(fw_x, wheel_y, wheel_r, fill=1)
-            c.setFillColor(colors.HexColor("#888888"))
-            c.circle(fw_x, wheel_y, wheel_r * 0.5, fill=1)
-            c.setFillColor(colors.HexColor("#333333"))
-            c.circle(fw_x, wheel_y, wheel_r * 0.2, fill=1)
-
-            # Rear wheel
-            rw_x = body_left + body_w * 0.78
-            c.setFillColor(colors.HexColor("#333333"))
-            c.circle(rw_x, wheel_y, wheel_r, fill=1)
-            c.setFillColor(colors.HexColor("#888888"))
-            c.circle(rw_x, wheel_y, wheel_r * 0.5, fill=1)
-            c.setFillColor(colors.HexColor("#333333"))
-            c.circle(rw_x, wheel_y, wheel_r * 0.2, fill=1)
-
-            # --- Headlights / taillights ---
-            c.setFillColor(colors.HexColor("#ffcc00"))
-            c.setLineWidth(0.3)
-            # Front headlight
-            c.rect(body_left, body_bottom + body_h * 0.25, 4, 6, fill=1)
-            # Rear taillight
-            c.setFillColor(colors.HexColor("#cc0000"))
-            c.rect(body_right - 3, body_bottom + body_h * 0.30, 3, 5, fill=1)
-
-            # --- Side mirror ---
+            # --- Wheels (4 ovals/ellipses outside body) ---
+            c.setLineWidth(1.0)
             c.setFillColor(colors.black)
-            c.setLineWidth(0.4)
-            mirror_x = body_left + body_w * 0.16
-            mirror_y = win_bottom + 2
-            c.rect(mirror_x - 3, mirror_y, 4, 3, fill=1)
+            wh = bh * 0.22  # wheel height (how much sticks out)
+            ww = bw * 0.13  # wheel width
 
-            # Labels: FRENTE and TRASEIRA
-            c.setFont("Helvetica", 4)
-            c.setFillColor(colors.black)
-            c.drawCentredString(body_left + 6, body_bottom - 10, "FRENTE")
-            c.drawCentredString(body_right - 6, body_bottom - 10, "TRASEIRA")
+            # Front-left wheel
+            fl_x = left + bw * 0.12
+            c.ellipse(fl_x, top, fl_x + ww, top + wh, fill=1)
+            # Front-right wheel
+            c.ellipse(fl_x, bottom - wh, fl_x + ww, bottom, fill=1)
+            # Rear-left wheel
+            rl_x = right - bw * 0.12 - ww
+            c.ellipse(rl_x, top, rl_x + ww, top + wh, fill=1)
+            # Rear-right wheel
+            c.ellipse(rl_x, bottom - wh, rl_x + ww, bottom, fill=1)
+
+            # --- Axle lines connecting wheels ---
+            c.setStrokeColor(colors.black)
+            c.setLineWidth(0.5)
+            # Front axle
+            c.line(fl_x + ww / 2, bottom, fl_x + ww / 2, top)
+            # Rear axle
+            c.line(rl_x + ww / 2, bottom, rl_x + ww / 2, top)
+            # Drive shaft (center line connecting axles)
+            c.line(fl_x + ww / 2, cy, rl_x + ww / 2, cy)
 
             c.restoreState()
             return y - car_h
@@ -462,9 +414,9 @@ class PDFService:
             c.drawString(lx + 14, check_y - 6, item)
             check_y -= 10
 
-        # Car side-view diagram (to the right of checklist)
+        # Car top-down diagram (to the right of checklist)
         car_y_start = y
-        draw_car_side_view(car_area_x, car_y_start, car_w=car_area_w, car_h=90)
+        draw_car_top_view(car_area_x, car_y_start, car_w=car_area_w, car_h=90)
 
         y = min(check_y, car_y_start - 90) - 4
 
