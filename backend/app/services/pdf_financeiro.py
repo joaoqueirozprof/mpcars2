@@ -209,36 +209,67 @@ class PDFFinanceiroService:
                 if data_inicio_date <= despesa_date <= data_fim_date:
                     total_desp_loja += despesa.valor or Decimal('0')
 
-        # Insurance - parcelas with vencimento in period
-        parcela_seguro = db.query(ParcelaSeguro).filter(
+        # Insurance - parcelas with vencimento in period (with vehicle info)
+        from sqlalchemy.orm import joinedload
+        from sqlalchemy import exists
+        parcelas_seguro = db.query(ParcelaSeguro).options(
+            joinedload(ParcelaSeguro.seguro).joinedload(Seguro.veiculo)
+        ).filter(
             ParcelaSeguro.vencimento >= data_inicio_dt,
             ParcelaSeguro.vencimento <= data_fim_dt,
-        ).with_entities(ParcelaSeguro.valor).all()
-        total_seguros = sum([p[0] or Decimal('0') for p in parcela_seguro])
+        ).all()
+        total_seguros = sum([p.valor or Decimal('0') for p in parcelas_seguro])
+
+        # Build per-vehicle breakdown for seguros
+        seguros_por_veiculo = {}
+        for p in parcelas_seguro:
+            placa = "Sem veículo"
+            if p.seguro and p.seguro.veiculo:
+                placa = p.seguro.veiculo.placa or "Sem placa"
+            seguros_por_veiculo[placa] = seguros_por_veiculo.get(placa, Decimal('0')) + (p.valor or Decimal('0'))
 
         # Fallback: Seguro records WITHOUT parcelas (legacy records)
-        from sqlalchemy import exists
-        seguros_sem_parcela = db.query(Seguro).filter(
+        seguros_legacy = db.query(Seguro).options(
+            joinedload(Seguro.veiculo)
+        ).filter(
             Seguro.data_inicio >= data_inicio_dt,
             Seguro.data_inicio <= data_fim_dt,
             ~exists().where(ParcelaSeguro.seguro_id == Seguro.id),
-        ).with_entities(Seguro.valor).all()
-        total_seguros += sum([s[0] or Decimal('0') for s in seguros_sem_parcela])
+        ).all()
+        for seg in seguros_legacy:
+            total_seguros += seg.valor or Decimal('0')
+            placa = seg.veiculo.placa if seg.veiculo else "Sem veículo"
+            seguros_por_veiculo[placa] = seguros_por_veiculo.get(placa, Decimal('0')) + (seg.valor or Decimal('0'))
 
-        # Licenciamento - parcelas with vencimento in period
-        parcela_lic = db.query(IpvaParcela).filter(
+        # Licenciamento - parcelas with vencimento in period (with vehicle info)
+        parcelas_lic = db.query(IpvaParcela).options(
+            joinedload(IpvaParcela.ipva).joinedload(IpvaRegistro.veiculo)
+        ).filter(
             IpvaParcela.vencimento >= data_inicio_dt,
             IpvaParcela.vencimento <= data_fim_dt,
-        ).with_entities(IpvaParcela.valor).all()
-        total_licenciamento = sum([p[0] or Decimal('0') for p in parcela_lic])
+        ).all()
+        total_licenciamento = sum([p.valor or Decimal('0') for p in parcelas_lic])
+
+        # Build per-vehicle breakdown for licenciamento
+        lic_por_veiculo = {}
+        for p in parcelas_lic:
+            placa = "Sem veículo"
+            if p.ipva and p.ipva.veiculo:
+                placa = p.ipva.veiculo.placa or "Sem placa"
+            lic_por_veiculo[placa] = lic_por_veiculo.get(placa, Decimal('0')) + (p.valor or Decimal('0'))
 
         # Fallback: IpvaRegistro records WITHOUT parcelas (legacy records)
-        registros_sem_parcela = db.query(IpvaRegistro).filter(
+        registros_legacy = db.query(IpvaRegistro).options(
+            joinedload(IpvaRegistro.veiculo)
+        ).filter(
             IpvaRegistro.data_vencimento >= data_inicio_dt,
             IpvaRegistro.data_vencimento <= data_fim_dt,
             ~exists().where(IpvaParcela.ipva_id == IpvaRegistro.id),
-        ).with_entities(IpvaRegistro.valor_ipva).all()
-        total_licenciamento += sum([r[0] or Decimal('0') for r in registros_sem_parcela])
+        ).all()
+        for reg in registros_legacy:
+            total_licenciamento += reg.valor_ipva or Decimal('0')
+            placa = reg.veiculo.placa if reg.veiculo else "Sem veículo"
+            lic_por_veiculo[placa] = lic_por_veiculo.get(placa, Decimal('0')) + (reg.valor_ipva or Decimal('0'))
 
         # Fines
         multas = db.query(Multa).filter(
@@ -262,6 +293,8 @@ class PDFFinanceiroService:
             'desp_licenciamento': total_licenciamento,
             'desp_multas': total_multas,
             'num_contratos': len(receita_total) if isinstance(receita_total, list) else 0,
+            'seguros_por_veiculo': seguros_por_veiculo,
+            'lic_por_veiculo': lic_por_veiculo,
         }
 
     @staticmethod
@@ -694,21 +727,39 @@ class PDFFinanceiroService:
         ]
 
         categorias = [
-            ("Despesas com Veículos", resumo['desp_veiculos']),
-            ("Despesas da Loja", resumo['desp_loja']),
-            ("Seguros (parcelas)", resumo['desp_seguros']),
-            ("Licenciamento (parcelas)", resumo['desp_licenciamento']),
-            ("Multas", resumo['desp_multas']),
+            ("Despesas com Veículos", resumo['desp_veiculos'], None),
+            ("Despesas da Loja", resumo['desp_loja'], None),
+            ("Seguros (parcelas)", resumo['desp_seguros'], resumo.get('seguros_por_veiculo', {})),
+            ("Licenciamento (parcelas)", resumo['desp_licenciamento'], resumo.get('lic_por_veiculo', {})),
+            ("Multas", resumo['desp_multas'], None),
         ]
 
+        sub_row_style = ParagraphStyle(
+            'SubRowLeft', parent=styles['normal_left'],
+            fontSize=8, textColor=colors.HexColor("#666666"),
+            leftIndent=16,
+        )
+        sub_row_right = ParagraphStyle(
+            'SubRowRight', parent=styles['normal_right'],
+            fontSize=8, textColor=colors.HexColor("#666666"),
+        )
+
         desp_total = resumo['despesa_total']
-        for cat_name, cat_val in categorias:
+        for cat_name, cat_val, per_vehicle in categorias:
             pct = float(cat_val / desp_total * 100) if desp_total > 0 else 0
             breakdown_data.append([
-                Paragraph(cat_name, styles['normal_left']),
+                Paragraph(f"<b>{cat_name}</b>" if per_vehicle else cat_name, styles['normal_left']),
                 Paragraph(PDFFinanceiroService._format_currency(cat_val), styles['normal_right']),
                 Paragraph(f"{pct:.1f}%", styles['normal_right']),
             ])
+            # Add per-vehicle sub-rows for seguros and licenciamento
+            if per_vehicle:
+                for placa, valor in sorted(per_vehicle.items()):
+                    breakdown_data.append([
+                        Paragraph(f"↳ {placa}", sub_row_style),
+                        Paragraph(PDFFinanceiroService._format_currency(valor), sub_row_right),
+                        Paragraph("", sub_row_right),
+                    ])
 
         breakdown_data.append([
             Paragraph("<b>TOTAL DESPESAS</b>", styles['normal_left']),
