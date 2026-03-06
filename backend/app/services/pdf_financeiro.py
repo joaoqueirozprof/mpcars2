@@ -198,15 +198,17 @@ class PDFFinanceiroService:
         ).with_entities(DespesaVeiculo.valor).all()
         total_desp_veiculo = sum([d[0] or Decimal('0') for d in despesa_veiculo])
 
-        # Shop expenses
+        # Shop expenses — compare by year/month overlap (not exact date)
         despesa_loja = db.query(DespesaLoja).all()
         total_desp_loja = Decimal('0')
         data_inicio_date = PDFFinanceiroService._parse_date(data_inicio).date()
         data_fim_date = PDFFinanceiroService._parse_date(data_fim).date()
+        inicio_ym = (data_inicio_date.year, data_inicio_date.month)
+        fim_ym = (data_fim_date.year, data_fim_date.month)
         for despesa in despesa_loja:
             if hasattr(despesa, 'mes') and hasattr(despesa, 'ano') and despesa.mes and despesa.ano:
-                despesa_date = date(despesa.ano, despesa.mes, 1)
-                if data_inicio_date <= despesa_date <= data_fim_date:
+                desp_ym = (despesa.ano, despesa.mes)
+                if inicio_ym <= desp_ym <= fim_ym:
                     total_desp_loja += despesa.valor or Decimal('0')
 
         # Insurance - parcelas with vencimento in period (with vehicle info)
@@ -363,13 +365,15 @@ class PDFFinanceiroService:
     def _get_despesas_loja(db, data_inicio: str, data_fim: str) -> List:
         data_inicio_date = PDFFinanceiroService._parse_date(data_inicio).date()
         data_fim_date = PDFFinanceiroService._parse_date(data_fim).date()
+        inicio_ym = (data_inicio_date.year, data_inicio_date.month)
+        fim_ym = (data_fim_date.year, data_fim_date.month)
         despesas = db.query(DespesaLoja).all()
 
         dados = []
         for despesa in despesas:
             if hasattr(despesa, 'mes') and hasattr(despesa, 'ano') and despesa.mes and despesa.ano:
-                despesa_date = date(despesa.ano, despesa.mes, 1)
-                if data_inicio_date <= despesa_date <= data_fim_date:
+                desp_ym = (despesa.ano, despesa.mes)
+                if inicio_ym <= desp_ym <= fim_ym:
                     dados.append({
                         'categoria': despesa.categoria or "-",
                         'descricao': despesa.descricao or "-",
