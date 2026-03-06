@@ -23,7 +23,7 @@ from reportlab.graphics import renderPDF
 
 from app.models import (
     Contrato, Cliente, Veiculo, DespesaVeiculo, DespesaLoja,
-    Seguro, ParcelaSeguro, IpvaRegistro, Multa, Configuracao
+    Seguro, ParcelaSeguro, IpvaRegistro, IpvaParcela, Multa, Configuracao
 )
 
 
@@ -50,7 +50,7 @@ class PDFFinanceiroService:
         colors.HexColor("#3498DB"),  # Veiculos - blue
         colors.HexColor("#E67E22"),  # Loja - orange
         colors.HexColor("#9B59B6"),  # Seguros - purple
-        colors.HexColor("#1ABC9C"),  # IPVA - teal
+        colors.HexColor("#1ABC9C"),  # Licenciamento - teal
         colors.HexColor("#E74C3C"),  # Multas - red
     ]
 
@@ -209,20 +209,19 @@ class PDFFinanceiroService:
                 if data_inicio_date <= despesa_date <= data_fim_date:
                     total_desp_loja += despesa.valor or Decimal('0')
 
-        # Insurance
+        # Insurance - parcelas with vencimento in period
         parcela_seguro = db.query(ParcelaSeguro).filter(
-            ParcelaSeguro.data_pagamento >= data_inicio_dt,
-            ParcelaSeguro.data_pagamento <= data_fim_dt,
-            ParcelaSeguro.status == 'pago'
+            ParcelaSeguro.vencimento >= data_inicio_dt,
+            ParcelaSeguro.vencimento <= data_fim_dt,
         ).with_entities(ParcelaSeguro.valor).all()
         total_seguros = sum([p[0] or Decimal('0') for p in parcela_seguro])
 
-        # IPVA
-        ipva_registros = db.query(IpvaRegistro).filter(
-            IpvaRegistro.data_pagamento >= data_inicio_dt,
-            IpvaRegistro.data_pagamento <= data_fim_dt
-        ).with_entities(IpvaRegistro.valor_ipva).all()
-        total_ipva = sum([i[0] or Decimal('0') for i in ipva_registros])
+        # Licenciamento - parcelas with vencimento in period
+        parcela_lic = db.query(IpvaParcela).filter(
+            IpvaParcela.vencimento >= data_inicio_dt,
+            IpvaParcela.vencimento <= data_fim_dt,
+        ).with_entities(IpvaParcela.valor).all()
+        total_licenciamento = sum([p[0] or Decimal('0') for p in parcela_lic])
 
         # Fines
         multas = db.query(Multa).filter(
@@ -231,7 +230,7 @@ class PDFFinanceiroService:
         ).with_entities(Multa.valor).all()
         total_multas = sum([m[0] or Decimal('0') for m in multas])
 
-        despesa_total = total_desp_veiculo + total_desp_loja + total_seguros + total_ipva + total_multas
+        despesa_total = total_desp_veiculo + total_desp_loja + total_seguros + total_licenciamento + total_multas
         lucro = receita_total - despesa_total
         margem = (lucro / receita_total * 100) if receita_total > 0 else Decimal('0')
 
@@ -243,7 +242,7 @@ class PDFFinanceiroService:
             'desp_veiculos': total_desp_veiculo,
             'desp_loja': total_desp_loja,
             'desp_seguros': total_seguros,
-            'desp_ipva': total_ipva,
+            'desp_licenciamento': total_licenciamento,
             'desp_multas': total_multas,
             'num_contratos': len(receita_total) if isinstance(receita_total, list) else 0,
         }
@@ -331,11 +330,14 @@ class PDFFinanceiroService:
 
     @staticmethod
     def _get_despesas_seguros(db, data_inicio: str, data_fim: str) -> List:
+        """Get insurance installments whose vencimento falls within the period."""
         data_inicio_dt, data_fim_dt = PDFFinanceiroService._get_date_range(data_inicio, data_fim)
-        parcelas = db.query(ParcelaSeguro).filter(
-            ParcelaSeguro.data_pagamento >= data_inicio_dt,
-            ParcelaSeguro.data_pagamento <= data_fim_dt,
-            ParcelaSeguro.status == 'pago'
+        from sqlalchemy.orm import joinedload
+        parcelas = db.query(ParcelaSeguro).options(
+            joinedload(ParcelaSeguro.seguro).joinedload(Seguro.veiculo)
+        ).filter(
+            ParcelaSeguro.vencimento >= data_inicio_dt,
+            ParcelaSeguro.vencimento <= data_fim_dt,
         ).all()
 
         dados = []
@@ -347,38 +349,57 @@ class PDFFinanceiroService:
                 apolice = parcela.seguro.numero_apolice or "-"
                 seguradora = parcela.seguro.seguradora or "-"
                 if parcela.seguro.veiculo:
-                    veiculo_info = f"{parcela.seguro.veiculo.placa}"
+                    placa = parcela.seguro.veiculo.placa or ""
+                    marca = parcela.seguro.veiculo.marca or ""
+                    modelo = parcela.seguro.veiculo.modelo or ""
+                    veiculo_info = f"{placa} - {marca} {modelo}".strip(" -")
+
+            status_label = "Pago" if parcela.status == "pago" else "Pendente"
 
             dados.append({
-                'apolice': apolice,
                 'seguradora': seguradora,
+                'apolice': apolice,
                 'veiculo': veiculo_info,
                 'parcela': f"{parcela.numero_parcela}",
                 'vencimento': PDFFinanceiroService._format_date(parcela.vencimento),
-                'pagamento': PDFFinanceiroService._format_date(parcela.data_pagamento),
+                'status': status_label,
                 'valor': parcela.valor or Decimal('0')
             })
         return dados
 
     @staticmethod
-    def _get_despesas_ipva(db, data_inicio: str, data_fim: str) -> List:
+    def _get_despesas_licenciamento(db, data_inicio: str, data_fim: str) -> List:
+        """Get licensing installments whose vencimento falls within the period."""
         data_inicio_dt, data_fim_dt = PDFFinanceiroService._get_date_range(data_inicio, data_fim)
-        ipvas = db.query(IpvaRegistro).filter(
-            IpvaRegistro.data_pagamento >= data_inicio_dt,
-            IpvaRegistro.data_pagamento <= data_fim_dt
+        from sqlalchemy.orm import joinedload
+        parcelas = db.query(IpvaParcela).options(
+            joinedload(IpvaParcela.ipva).joinedload(IpvaRegistro.veiculo)
+        ).filter(
+            IpvaParcela.vencimento >= data_inicio_dt,
+            IpvaParcela.vencimento <= data_fim_dt,
         ).all()
 
         dados = []
-        for ipva in ipvas:
+        for parcela in parcelas:
             veiculo_info = "-"
-            if ipva.veiculo:
-                veiculo_info = f"{ipva.veiculo.placa} - {ipva.veiculo.marca or ''} {ipva.veiculo.modelo or ''}".strip()
+            ano_ref = "-"
+            if parcela.ipva:
+                ano_ref = str(parcela.ipva.ano_referencia or "-")
+                if parcela.ipva.veiculo:
+                    placa = parcela.ipva.veiculo.placa or ""
+                    marca = parcela.ipva.veiculo.marca or ""
+                    modelo = parcela.ipva.veiculo.modelo or ""
+                    veiculo_info = f"{placa} - {marca} {modelo}".strip(" -")
+
+            status_label = "Pago" if parcela.status == "pago" else "Pendente"
 
             dados.append({
                 'veiculo': veiculo_info,
-                'ano_ref': str(ipva.ano_referencia or "-"),
-                'valor': ipva.valor_ipva or Decimal('0'),
-                'data_pagamento': PDFFinanceiroService._format_date(ipva.data_pagamento)
+                'ano_ref': ano_ref,
+                'parcela': f"{parcela.numero_parcela}",
+                'vencimento': PDFFinanceiroService._format_date(parcela.vencimento),
+                'status': status_label,
+                'valor': parcela.valor or Decimal('0')
             })
         return dados
 
@@ -594,8 +615,8 @@ class PDFFinanceiroService:
         categorias = [
             ("Despesas com Veículos", resumo['desp_veiculos']),
             ("Despesas da Loja", resumo['desp_loja']),
-            ("Seguros (parcelas pagas)", resumo['desp_seguros']),
-            ("IPVA", resumo['desp_ipva']),
+            ("Seguros (parcelas)", resumo['desp_seguros']),
+            ("Licenciamento (parcelas)", resumo['desp_licenciamento']),
             ("Multas", resumo['desp_multas']),
         ]
 
@@ -710,33 +731,34 @@ class PDFFinanceiroService:
             elements.append(Paragraph("<i>Nenhuma despesa da loja no período</i>", styles['normal']))
         elements.append(Spacer(1, 0.3 * cm))
 
-        # 3. Insurance
-        elements.append(Paragraph("Seguros (Parcelas Pagas)", styles['subsection']))
+        # 3. Insurance parcelas
+        elements.append(Paragraph("Seguros (Parcelas no Período)", styles['subsection']))
         despesas_seguros = PDFFinanceiroService._get_despesas_seguros(db, data_inicio, data_fim)
         if despesas_seguros:
-            rows = [[d['seguradora'], d['apolice'], d['veiculo'], d['parcela'], d['pagamento'], d['valor']]
+            rows = [[d['seguradora'], d['apolice'], d['veiculo'], d['parcela'], d['vencimento'], d['status'], d['valor']]
                     for d in despesas_seguros]
             table = PDFFinanceiroService._build_table(
-                ["Seguradora", "Apólice", "Veículo", "Parc.", "Pagamento", "Valor"], rows,
-                col_widths=[cw*0.18, cw*0.18, cw*0.15, cw*0.08, cw*0.18, cw*0.23]
+                ["Seguradora", "Apólice", "Veículo", "Parc.", "Vencimento", "Status", "Valor"], rows,
+                col_widths=[cw*0.16, cw*0.14, cw*0.16, cw*0.07, cw*0.14, cw*0.12, cw*0.21]
             )
             elements.append(table)
         else:
-            elements.append(Paragraph("<i>Nenhuma parcela de seguro paga no período</i>", styles['normal']))
+            elements.append(Paragraph("<i>Nenhuma parcela de seguro no período</i>", styles['normal']))
         elements.append(Spacer(1, 0.3 * cm))
 
-        # 4. IPVA
-        elements.append(Paragraph("IPVA", styles['subsection']))
-        despesas_ipva = PDFFinanceiroService._get_despesas_ipva(db, data_inicio, data_fim)
-        if despesas_ipva:
-            rows = [[d['veiculo'], d['ano_ref'], d['data_pagamento'], d['valor']] for d in despesas_ipva]
+        # 4. Licenciamento parcelas
+        elements.append(Paragraph("Licenciamento (Parcelas no Período)", styles['subsection']))
+        despesas_lic = PDFFinanceiroService._get_despesas_licenciamento(db, data_inicio, data_fim)
+        if despesas_lic:
+            rows = [[d['veiculo'], d['ano_ref'], d['parcela'], d['vencimento'], d['status'], d['valor']]
+                    for d in despesas_lic]
             table = PDFFinanceiroService._build_table(
-                ["Veículo", "Ano Ref.", "Data Pgto.", "Valor"], rows,
-                col_widths=[cw*0.35, cw*0.15, cw*0.25, cw*0.25]
+                ["Veículo", "Ano Ref.", "Parc.", "Vencimento", "Status", "Valor"], rows,
+                col_widths=[cw*0.25, cw*0.12, cw*0.08, cw*0.18, cw*0.14, cw*0.23]
             )
             elements.append(table)
         else:
-            elements.append(Paragraph("<i>Nenhum IPVA pago no período</i>", styles['normal']))
+            elements.append(Paragraph("<i>Nenhuma parcela de licenciamento no período</i>", styles['normal']))
         elements.append(Spacer(1, 0.3 * cm))
 
         # 5. Fines
@@ -768,7 +790,7 @@ class PDFFinanceiroService:
             ("Veículos", resumo['desp_veiculos']),
             ("Loja", resumo['desp_loja']),
             ("Seguros", resumo['desp_seguros']),
-            ("IPVA", resumo['desp_ipva']),
+            ("Licenciamento", resumo['desp_licenciamento']),
             ("Multas", resumo['desp_multas']),
         ]
 
