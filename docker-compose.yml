@@ -4,9 +4,9 @@ services:
     container_name: mpcars2-db
     restart: always
     environment:
-      POSTGRES_DB: mpcars2
-      POSTGRES_USER: mpcars2
-      POSTGRES_PASSWORD: mpcars2pass
+      POSTGRES_DB: ${POSTGRES_DB:-mpcars2}
+      POSTGRES_USER: ${POSTGRES_USER:-mpcars2}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -32,11 +32,11 @@ services:
     container_name: mpcars2-api
     restart: always
     ports:
-      - "8002:8000"
+      - "${MPCARS2_API_PORT:-8002}:8000"
     environment:
-      DATABASE_URL: postgresql://mpcars2:mpcars2pass@mpcars2-db:5432/mpcars2
-      REDIS_URL: redis://mpcars2-redis:6379/0
-      SECRET_KEY: mpcars2-secret-key-production-2024
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-redis://mpcars2-redis:6379/0}
+      SECRET_KEY: ${SECRET_KEY}
     depends_on:
       mpcars2-db:
         condition: service_healthy
@@ -54,8 +54,8 @@ services:
     restart: always
     command: celery -A app.celery_app worker -l info -B
     environment:
-      DATABASE_URL: postgresql://mpcars2:mpcars2pass@mpcars2-db:5432/mpcars2
-      REDIS_URL: redis://mpcars2-redis:6379/0
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-redis://mpcars2-redis:6379/0}
     depends_on:
       mpcars2-db:
         condition: service_healthy
@@ -69,14 +69,14 @@ services:
     container_name: mpcars2-web
     restart: always
     ports:
-      - "3002:80"
+      - "${MPCARS2_WEB_PORT:-3002}:80"
 
   mpcars2-proxy:
     image: nginx:alpine
     container_name: mpcars2-proxy
     restart: always
     ports:
-      - "8091:80"
+      - "${MPCARS2_PROXY_PORT:-8091}:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -88,10 +88,10 @@ services:
     container_name: mpcars2-pgadmin
     restart: always
     ports:
-      - "8086:80"
+      - "${MPCARS2_PGADMIN_PORT:-8086}:80"
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@mpcars.com
-      PGADMIN_DEFAULT_PASSWORD: 123456
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
 
 volumes:
   pgdata:
