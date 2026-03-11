@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_page_access
 from app.models.user import User
 from app.models import Contrato, RelatorioNF, UsoVeiculoEmpresa, Empresa, Veiculo
 from app.services.pdf_service import PDFService
@@ -33,7 +33,11 @@ from app.services.pdf_nf import PDFNFService
 from app.services.exportacao import ExportacaoService
 
 
-router = APIRouter(prefix="/relatorios", tags=["Relatorios"])
+router = APIRouter(
+    prefix="/relatorios",
+    tags=["Relatorios"],
+    dependencies=[Depends(require_page_access("relatorios"))],
+)
 
 
 # ============================================================

@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_page_access
 from app.core.pagination import paginate
 from app.models import (
     CheckinCheckout,
@@ -26,7 +26,11 @@ from app.models.user import User
 from app.services.activity_logger import log_activity
 
 
-router = APIRouter(prefix="/clientes", tags=["Clientes"])
+router = APIRouter(
+    prefix="/clientes",
+    tags=["Clientes"],
+    dependencies=[Depends(require_page_access("clientes"))],
+)
 
 
 class ClienteBase(BaseModel):

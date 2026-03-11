@@ -1,12 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from sqlalchemy.orm import Session
 from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict, EmailStr
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import verify_password, create_access_token, get_password_hash
 from app.core.deps import get_current_user
-from app.models.user import User, ALL_PAGES
+from app.core.security import (
+    create_access_token,
+    get_password_hash,
+    validate_password_strength,
+    verify_password,
+)
+from app.models.user import ALL_PAGES, User
 from app.services.activity_logger import log_activity
-from pydantic import BaseModel, EmailStr
 
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -47,6 +55,18 @@ class LoginResponse(BaseModel):
     user: UserResponse
 
 
+class ChangePasswordRequest(BaseModel):
+    senha_atual: str
+    senha_nova: str
+
+
+class ProfileUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    nome: Optional[str] = None
+    email: Optional[EmailStr] = None
+
+
 def _get_user_pages(user: User) -> list:
     """Get permitted pages for a user. Admin gets all pages."""
     if user.perfil == "admin":
@@ -54,56 +74,81 @@ def _get_user_pages(user: User) -> list:
     return user.permitted_pages or []
 
 
+def _serialize_user(user: User) -> dict:
+    return {
+        "id": user.id,
+        "email": user.email,
+        "nome": user.nome,
+        "perfil": user.perfil,
+        "ativo": user.ativo,
+        "permitted_pages": _get_user_pages(user),
+    }
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(request: LoginRequest, req: Request, db: Session = Depends(get_db)):
     """Login with email and password."""
-    user = db.query(User).filter(User.email == request.email).first()
+    normalized_email = request.email.lower()
+    user = db.query(User).filter(User.email == normalized_email).first()
     if not user or not verify_password(request.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email ou senha inválidos",
+            detail="Email ou senha invÃ¡lidos",
         )
     if not user.ativo:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Usuário inativo",
+            detail="UsuÃ¡rio inativo",
         )
 
-    access_token = create_access_token(data={"sub": user.email})
+    access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
 
-    # Log login activity
-    log_activity(db, user, "LOGIN", "auth", f"Login realizado: {user.nome}", request=req)
+    log_activity(
+        db,
+        user,
+        "LOGIN",
+        "auth",
+        f"Login realizado: {user.nome}",
+        request=req,
+    )
 
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "nome": user.nome,
-            "perfil": user.perfil,
-            "ativo": user.ativo,
-            "permitted_pages": _get_user_pages(user),
-        },
+        "user": _serialize_user(user),
     }
 
 
 @router.post("/register", response_model=TokenResponse)
 def register(request: RegisterRequest, db: Session = Depends(get_db)):
-    """Register a new user."""
-    existing_user = db.query(User).filter(User.email == request.email).first()
+    """Register a new user when public sign-up is enabled."""
+    if not settings.ALLOW_PUBLIC_REGISTRATION:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cadastro publico desabilitado. Solicite um administrador.",
+        )
+
+    normalized_email = request.email.lower()
+    existing_user = db.query(User).filter(User.email == normalized_email).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email já cadastrado",
+            detail="Email jÃ¡ cadastrado",
         )
 
-    hashed_password = get_password_hash(request.password)
+    try:
+        validate_password_strength(request.password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
     new_user = User(
-        email=request.email,
-        hashed_password=hashed_password,
+        email=normalized_email,
+        hashed_password=get_password_hash(request.password),
         nome=request.nome,
-        perfil=request.perfil,
+        perfil="user",
         ativo=True,
         permitted_pages=[],
     )
@@ -111,33 +156,25 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
 
-    access_token = create_access_token(data={"sub": new_user.email})
+    access_token = create_access_token(
+        data={"sub": str(new_user.id), "email": new_user.email}
+    )
     return {"access_token": access_token, "token_type": "bearer"}
 
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user_info(current_user: User = Depends(get_current_user)):
     """Get current user information."""
-    return {
-        "id": current_user.id,
-        "email": current_user.email,
-        "nome": current_user.nome,
-        "perfil": current_user.perfil,
-        "ativo": current_user.ativo,
-        "permitted_pages": _get_user_pages(current_user),
-    }
+    return _serialize_user(current_user)
 
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh_token(current_user: User = Depends(get_current_user)):
     """Refresh access token."""
-    access_token = create_access_token(data={"sub": current_user.email})
+    access_token = create_access_token(
+        data={"sub": str(current_user.id), "email": current_user.email}
+    )
     return {"access_token": access_token, "token_type": "bearer"}
-
-
-class ChangePasswordRequest(BaseModel):
-    senha_atual: str
-    senha_nova: str
 
 
 @router.put("/change-password")
@@ -153,6 +190,20 @@ def change_password(
             detail="Senha atual incorreta",
         )
 
+    if request.senha_atual == request.senha_nova:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A nova senha deve ser diferente da senha atual",
+        )
+
+    try:
+        validate_password_strength(request.senha_nova)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
     current_user.hashed_password = get_password_hash(request.senha_nova)
     db.commit()
     return {"status": "senha alterada com sucesso"}
@@ -160,29 +211,29 @@ def change_password(
 
 @router.put("/profile", response_model=UserResponse)
 def update_profile(
-    nome: str = None,
-    email: str = None,
+    profile_data: ProfileUpdateRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Update current user profile."""
-    if nome:
-        current_user.nome = nome
-    if email:
-        existing = db.query(User).filter(User.email == email, User.id != current_user.id).first()
+    update_data = profile_data.model_dump(exclude_unset=True)
+
+    if update_data.get("nome"):
+        current_user.nome = update_data["nome"]
+
+    if update_data.get("email"):
+        normalized_email = update_data["email"].lower()
+        existing = db.query(User).filter(
+            User.email == normalized_email,
+            User.id != current_user.id,
+        ).first()
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email já em uso por outro usuário",
+                detail="Email jÃ¡ em uso por outro usuÃ¡rio",
             )
-        current_user.email = email
+        current_user.email = normalized_email
+
     db.commit()
     db.refresh(current_user)
-    return {
-        "id": current_user.id,
-        "email": current_user.email,
-        "nome": current_user.nome,
-        "perfil": current_user.perfil,
-        "ativo": current_user.ativo,
-        "permitted_pages": _get_user_pages(current_user),
-    }
+    return _serialize_user(current_user)

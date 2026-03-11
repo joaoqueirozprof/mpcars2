@@ -8,7 +8,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_page_access
 from app.core.pagination import paginate
 from app.models import (
     Cliente,
@@ -24,7 +24,11 @@ from app.models import (
 from app.models.user import User
 
 
-router = APIRouter(prefix="/empresas", tags=["Empresas"])
+router = APIRouter(
+    prefix="/empresas",
+    tags=["Empresas"],
+    dependencies=[Depends(require_page_access("empresas"))],
+)
 
 
 class EmpresaBase(BaseModel):

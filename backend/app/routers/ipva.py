@@ -5,13 +5,17 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime, timedelta
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_page_access
 from app.core.pagination import paginate
 from app.models.user import User
 from app.models import IpvaAliquota, IpvaRegistro, IpvaParcela, Veiculo
 
 
-router = APIRouter(prefix="/ipva", tags=["Licenciamento"])
+router = APIRouter(
+    prefix="/ipva",
+    tags=["Licenciamento"],
+    dependencies=[Depends(require_page_access("ipva"))],
+)
 
 
 class ParcelaInput(BaseModel):

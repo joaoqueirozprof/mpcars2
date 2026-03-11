@@ -3,12 +3,16 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc, case, literal_column
 from datetime import datetime, timedelta
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_page_access
 from app.models.user import User
 from app.models import Contrato, Veiculo, Cliente, Multa, AlertaHistorico, DespesaContrato, DespesaVeiculo, DespesaLoja
 
 
-router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+router = APIRouter(
+    prefix="/dashboard",
+    tags=["Dashboard"],
+    dependencies=[Depends(require_page_access("dashboard"))],
+)
 
 
 @router.get("/consolidado")

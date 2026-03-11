@@ -5,13 +5,17 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_page_access
 from app.core.pagination import paginate
 from app.models.user import User
 from app.models import Multa, Veiculo, Contrato, Cliente
 
 
-router = APIRouter(prefix="/multas", tags=["Multas"])
+router = APIRouter(
+    prefix="/multas",
+    tags=["Multas"],
+    dependencies=[Depends(require_page_access("multas"))],
+)
 
 
 class MultaBase(BaseModel):

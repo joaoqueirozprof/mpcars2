@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_page_access
 from app.core.pagination import paginate
 from app.models import (
     CheckinCheckout,
@@ -25,7 +25,11 @@ from app.services.activity_logger import log_activity
 from app.services.pdf_service import PDFService
 
 
-router = APIRouter(prefix="/contratos", tags=["Contratos"])
+router = APIRouter(
+    prefix="/contratos",
+    tags=["Contratos"],
+    dependencies=[Depends(require_page_access("contratos"))],
+)
 
 
 class ContratoBase(BaseModel):

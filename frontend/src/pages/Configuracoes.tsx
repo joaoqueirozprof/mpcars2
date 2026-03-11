@@ -7,7 +7,7 @@ import toast from 'react-hot-toast'
 import { Settings, Building2, User, Sliders } from 'lucide-react'
 
 const Configuracoes: React.FC = () => {
-  const { user } = useAuth()
+  const { user, setUser } = useAuth()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<'empresa' | 'usuario' | 'sistema'>('empresa')
   const [isSaving, setIsSaving] = useState(false)
@@ -101,10 +101,14 @@ const Configuracoes: React.FC = () => {
     try {
       // Update profile (nome/email) if changed
       if (userForm.nome || userForm.email) {
-        const params = new URLSearchParams()
-        if (userForm.nome) params.append('nome', userForm.nome)
-        if (userForm.email) params.append('email', userForm.email)
-        await api.put(`/auth/profile?${params.toString()}`)
+        await api.put('/auth/profile', {
+          nome: userForm.nome || undefined,
+          email: userForm.email || undefined,
+        })
+
+        const { data: currentUser } = await api.get('/auth/me')
+        localStorage.setItem('user', JSON.stringify(currentUser))
+        setUser(currentUser)
       }
 
       // Change password if provided

@@ -22,13 +22,19 @@ def get_current_user(
     )
     try:
         payload = decode_token(token)
-        email: str = payload.get("sub")
-        if email is None:
+        subject = payload.get("sub")
+        if subject is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
 
-    user = db.query(User).filter(User.email == email).first()
+    user = None
+    if str(subject).isdigit():
+        user = db.query(User).filter(User.id == int(subject)).first()
+
+    if user is None:
+        user = db.query(User).filter(User.email == str(subject).lower()).first()
+
     if user is None:
         raise credentials_exception
 
@@ -51,3 +57,20 @@ def get_admin_user(
             detail="Acesso restrito a administradores",
         )
     return current_user
+
+
+def require_page_access(page_slug: str):
+    def dependency(current_user=Depends(get_current_user)):
+        if current_user.perfil == "admin":
+            return current_user
+
+        permitted_pages = current_user.permitted_pages or []
+        if page_slug not in permitted_pages:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Usuario sem permissao para acessar esta area",
+            )
+
+        return current_user
+
+    return dependency

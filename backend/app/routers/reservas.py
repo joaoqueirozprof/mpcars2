@@ -6,13 +6,17 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_page_access
 from app.core.pagination import paginate
 from app.models import Cliente, Contrato, Reserva, Veiculo
 from app.models.user import User
 
 
-router = APIRouter(prefix="/reservas", tags=["Reservas"])
+router = APIRouter(
+    prefix="/reservas",
+    tags=["Reservas"],
+    dependencies=[Depends(require_page_access("reservas"))],
+)
 
 
 class ReservaBase(BaseModel):

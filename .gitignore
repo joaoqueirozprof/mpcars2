@@ -8,3 +8,8 @@ node_modules/
 .vite/
 *.log
 .DS_Store
+.pytest_cache/
+.python-packages/
+.npm-cache/
+frontend/.npm-cache/
+backend/tests/.test.sqlite3

@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_page_access
 from app.models import (
     CheckinCheckout,
     Cliente,
@@ -28,7 +28,11 @@ from app.services.export_service import ExportService
 from app.services.pdf_service import PDFService
 
 
-router = APIRouter(prefix="/financeiro", tags=["Financeiro"])
+router = APIRouter(
+    prefix="/financeiro",
+    tags=["Financeiro"],
+    dependencies=[Depends(require_page_access("financeiro"))],
+)
 
 
 class DespesaContratoCreate(BaseModel):

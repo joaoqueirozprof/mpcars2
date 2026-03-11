@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_page_access
 from app.core.pagination import paginate
 from app.models.user import User
 from app.models import (
@@ -24,7 +24,11 @@ from app.services.activity_logger import log_activity
 UPLOAD_DIR = "/app/uploads/veiculos"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-router = APIRouter(prefix="/veiculos", tags=["Veiculos"])
+router = APIRouter(
+    prefix="/veiculos",
+    tags=["Veiculos"],
+    dependencies=[Depends(require_page_access("veiculos"))],
+)
 
 
 class VeiculoBase(BaseModel):
