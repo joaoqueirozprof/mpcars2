@@ -122,7 +122,7 @@ def search_clientes(
     if estado:
         query = query.filter(Cliente.estado_residencial == estado)
 
-    return query.all()
+    return query.limit(100).all()
 
 
 @router.get("/score/{cliente_id}")
@@ -228,27 +228,24 @@ def delete_cliente(
     current_user: User = Depends(get_current_user),
     request: Request = None,
 ):
-    """Delete a client and all related records."""
+    """Delete a client and all related records (CASCADE handles dependents)."""
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Cliente não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Cliente nao encontrado"
         )
-    # Delete contrato dependents first, then contratos
-    contratos = db.query(Contrato).filter(Contrato.cliente_id == cliente_id).all()
-    contrato_ids = [c.id for c in contratos]
-    if contrato_ids:
-        db.query(Quilometragem).filter(Quilometragem.contrato_id.in_(contrato_ids)).delete(synchronize_session=False)
-        db.query(DespesaContrato).filter(DespesaContrato.contrato_id.in_(contrato_ids)).delete(synchronize_session=False)
-        db.query(ProrrogacaoContrato).filter(ProrrogacaoContrato.contrato_id.in_(contrato_ids)).delete(synchronize_session=False)
-        db.query(CheckinCheckout).filter(CheckinCheckout.contrato_id.in_(contrato_ids)).delete(synchronize_session=False)
-        db.query(Multa).filter(Multa.contrato_id.in_(contrato_ids)).delete(synchronize_session=False)
-        db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.contrato_id.in_(contrato_ids)).delete(synchronize_session=False)
-        db.query(Contrato).filter(Contrato.cliente_id == cliente_id).delete(synchronize_session=False)
-    # Delete other direct dependents
-    db.query(Reserva).filter(Reserva.cliente_id == cliente_id).delete(synchronize_session=False)
-    db.query(Multa).filter(Multa.cliente_id == cliente_id).delete(synchronize_session=False)
-    db.query(MotoristaEmpresa).filter(MotoristaEmpresa.cliente_id == cliente_id).delete(synchronize_session=False)
+
+    # Block deletion if client has active contracts
+    contratos_ativos = db.query(Contrato).filter(
+        (Contrato.cliente_id == cliente_id) & (Contrato.status == "ativo")
+    ).count()
+    if contratos_ativos > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cliente possui {contratos_ativos} contrato(s) ativo(s). Finalize-os antes de excluir.",
+        )
+
+    # CASCADE in models handles: contratos (and their dependents), reservas, multas, motorista_empresa
     db.delete(cliente)
     db.commit()
-    log_activity(db, current_user, "EXCLUIR", "Cliente", f"Cliente {cliente.nome} excluído", cliente_id, request)
+    log_activity(db, current_user, "EXCLUIR", "Cliente", f"Cliente {cliente.nome} excluido", cliente_id, request)

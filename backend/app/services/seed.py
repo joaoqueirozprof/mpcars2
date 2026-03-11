@@ -531,15 +531,19 @@ def seed_database(db: Session):
     ]
     db.add_all(seguros)
     db.commit()
+    # Refresh to get actual IDs from database
+    for seguro in seguros:
+        db.refresh(seguro)
 
     # --- PARCELAS SEGURO ---
     parcelas = []
-    for seguro_idx, seguro in enumerate(seguros, 1):
+    for seguro in seguros:
+        # Use actual persisted ID instead of assuming sequential IDs
         for i in range(1, (seguro.qtd_parcelas or 12) + 1):
             venc = seguro.data_inicio + timedelta(days=30 * i)
             pago = venc < date.today()
             parcelas.append(ParcelaSeguro(
-                seguro_id=seguro_idx, veiculo_id=seguro.veiculo_id,
+                seguro_id=seguro.id, veiculo_id=seguro.veiculo_id,
                 numero_parcela=i, valor=Decimal(str(round(float(seguro.valor) / (seguro.qtd_parcelas or 12), 2))),
                 vencimento=venc,
                 data_pagamento=venc if pago else None,

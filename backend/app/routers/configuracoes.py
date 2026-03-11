@@ -40,18 +40,22 @@ def update_batch_configuracoes(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Update multiple configurations at once."""
+    """Update multiple configurations at once - loads all configs in 1 query."""
+    # Load all existing configs in a single query instead of N queries
+    all_configs = db.query(Configuracao).all()
+    config_map = {c.chave: c for c in all_configs}
+
     for item in batch.items:
-        config = db.query(Configuracao).filter(
-            Configuracao.chave == item.get("chave")
-        ).first()
-        if config:
-            config.valor = item.get("valor")
+        chave = item.get("chave")
+        valor = item.get("valor")
+        if not chave:
+            continue
+        if chave in config_map:
+            config_map[chave].valor = valor
         else:
-            new_config = Configuracao(
-                chave=item.get("chave"), valor=item.get("valor")
-            )
+            new_config = Configuracao(chave=chave, valor=valor)
             db.add(new_config)
+            config_map[chave] = new_config
 
     db.commit()
     return {"status": "atualizado"}

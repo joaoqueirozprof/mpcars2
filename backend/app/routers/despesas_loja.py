@@ -88,29 +88,37 @@ def resumo_despesas_loja(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get summary of shop expenses by category and month."""
-    query = db.query(DespesaLoja)
-    if ano:
-        query = query.filter(DespesaLoja.ano == ano)
+    """Get summary of shop expenses - SQL GROUP BY instead of Python loop."""
+    base_filter = DespesaLoja.ano == ano if ano else True
 
-    despesas = query.all()
+    # Total
+    totais = db.query(
+        func.count(DespesaLoja.id).label("qtd"),
+        func.coalesce(func.sum(DespesaLoja.valor), 0).label("total"),
+    ).filter(base_filter).first()
 
-    total = sum(float(d.valor or 0) for d in despesas)
-    por_categoria = {}
-    por_mes = {}
+    # By category - SQL GROUP BY
+    cat_rows = db.query(
+        func.coalesce(DespesaLoja.categoria, "Outros").label("cat"),
+        func.sum(DespesaLoja.valor).label("valor"),
+    ).filter(base_filter).group_by(DespesaLoja.categoria).all()
+    por_categoria = {row.cat: float(row.valor or 0) for row in cat_rows}
 
-    for d in despesas:
-        cat = d.categoria or "Outros"
-        por_categoria[cat] = por_categoria.get(cat, 0) + float(d.valor or 0)
-
-        mes_key = f"{d.mes:02d}/{d.ano}"
-        por_mes[mes_key] = por_mes.get(mes_key, 0) + float(d.valor or 0)
+    # By month - SQL GROUP BY
+    mes_rows = db.query(
+        DespesaLoja.mes,
+        DespesaLoja.ano,
+        func.sum(DespesaLoja.valor).label("valor"),
+    ).filter(base_filter).group_by(DespesaLoja.mes, DespesaLoja.ano).order_by(
+        DespesaLoja.ano, DespesaLoja.mes
+    ).all()
+    por_mes = {f"{row.mes:02d}/{row.ano}": float(row.valor or 0) for row in mes_rows}
 
     return {
-        "total": total,
+        "total": float(totais.total),
         "por_categoria": por_categoria,
         "por_mes": por_mes,
-        "quantidade": len(despesas),
+        "quantidade": totais.qtd,
     }
 
 

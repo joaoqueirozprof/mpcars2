@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sqlfunc
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime, timedelta
@@ -204,8 +205,8 @@ def create_registro(
             db.add(parcela)
     else:
         # Auto-calculate parcelas
-        qtd = registro.qtd_parcelas if registro.qtd_parcelas and registro.qtd_parcelas > 0 else 1
-        valor_parcela = registro.valor_ipva / qtd
+        qtd = max(1, registro.qtd_parcelas or 1)
+        valor_parcela = round(registro.valor_ipva / qtd, 2)
 
         for i in range(1, qtd + 1):
             vencimento = registro.data_vencimento + timedelta(days=30 * (i - 1))
@@ -344,17 +345,19 @@ def get_resumo_ipva(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get licensing summary."""
-    total_registros = db.query(IpvaRegistro).count()
-    registros_pendentes = db.query(IpvaRegistro).filter(
-        IpvaRegistro.status == "pendente"
-    ).count()
-    total_valor = sum(float(r.valor_ipva) for r in db.query(IpvaRegistro).all())
+    """Get licensing summary - SQL aggregation."""
+    result = db.query(
+        sqlfunc.count(IpvaRegistro.id).label("total"),
+        sqlfunc.count(sqlfunc.nullif(IpvaRegistro.status != "pendente", True)).label("pendentes"),
+        sqlfunc.coalesce(sqlfunc.sum(IpvaRegistro.valor_ipva), 0).label("total_valor"),
+        sqlfunc.coalesce(sqlfunc.sum(IpvaRegistro.valor_pago), 0).label("total_pago"),
+    ).first()
 
     return {
-        "total_registros": total_registros,
-        "registros_pendentes": registros_pendentes,
-        "total_valor": total_valor,
+        "total_registros": result.total,
+        "registros_pendentes": result.pendentes,
+        "total_valor": float(result.total_valor),
+        "total_pago": float(result.total_pago),
     }
 
 
@@ -407,6 +410,6 @@ def delete_registro(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Registro não encontrado"
         )
-    db.query(IpvaParcela).filter(IpvaParcela.ipva_id == registro_id).delete(synchronize_session=False)
+    # CASCADE handles parcelas deletion
     db.delete(registro)
     db.commit()

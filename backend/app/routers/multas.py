@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func as sqlfunc
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime
@@ -91,6 +92,9 @@ def create_multa(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
         )
 
+    if multa.valor <= 0:
+        raise HTTPException(status_code=400, detail="Valor da multa deve ser maior que zero")
+
     db_multa = Multa(**multa.model_dump())
     if not db_multa.responsavel:
         db_multa.responsavel = current_user.email
@@ -105,15 +109,21 @@ def get_multas_resumo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get fines summary."""
-    total_multas = db.query(Multa).count()
-    multas_pendentes = db.query(Multa).filter(Multa.status == "pendente").count()
-    total_valor = sum(float(m.valor) for m in db.query(Multa).all() if m.valor)
+    """Get fines summary - SQL aggregation instead of loading all records."""
+    result = db.query(
+        sqlfunc.count(Multa.id).label("total"),
+        sqlfunc.count(sqlfunc.nullif(Multa.status != "pendente", True)).label("pendentes"),
+        sqlfunc.coalesce(sqlfunc.sum(Multa.valor), 0).label("total_valor"),
+        sqlfunc.coalesce(
+            sqlfunc.sum(sqlfunc.case((Multa.status == "pendente", Multa.valor), else_=0)), 0
+        ).label("valor_pendente"),
+    ).first()
 
     return {
-        "total_multas": total_multas,
-        "multas_pendentes": multas_pendentes,
-        "total_valor": total_valor,
+        "total_multas": result.total,
+        "multas_pendentes": result.pendentes,
+        "total_valor": float(result.total_valor),
+        "valor_pendente": float(result.valor_pendente),
     }
 
 
@@ -183,6 +193,7 @@ def pagar_multa(
         )
 
     multa.status = "pago"
+    multa.data_pagamento = datetime.now().date()
     db.commit()
     db.refresh(multa)
     return multa

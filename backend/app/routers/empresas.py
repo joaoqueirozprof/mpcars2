@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func as sqlfunc
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -7,7 +8,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.pagination import paginate
 from app.models.user import User
-from app.models import Empresa, MotoristaEmpresa, Cliente, UsoVeiculoEmpresa, Veiculo, DespesaNF
+from app.models import Empresa, MotoristaEmpresa, Cliente, UsoVeiculoEmpresa, Veiculo, DespesaNF, Contrato
 
 
 router = APIRouter(prefix="/empresas", tags=["Empresas"])
@@ -91,7 +92,7 @@ def create_empresa(
     existing = db.query(Empresa).filter(Empresa.cnpj == empresa.cnpj).first()
     if existing:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="CNPJ já cadastrado"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="CNPJ ja cadastrado"
         )
 
     db_empresa = Empresa(**empresa.model_dump())
@@ -111,7 +112,7 @@ def get_empresa(
     empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not empresa:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa nao encontrada"
         )
     return empresa
 
@@ -127,7 +128,7 @@ def update_empresa(
     empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not empresa:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa nao encontrada"
         )
 
     update_data = empresa_data.model_dump(exclude_unset=True)
@@ -149,8 +150,21 @@ def delete_empresa(
     empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not empresa:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa nao encontrada"
         )
+
+    # Block deletion if company has active contracts via clients
+    clientes_ids = db.query(Cliente.id).filter(Cliente.empresa_id == empresa_id).subquery()
+    contratos_ativos = db.query(Contrato).filter(
+        (Contrato.cliente_id.in_(clientes_ids))
+        & (Contrato.status == "ativo")
+    ).count()
+    if contratos_ativos > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Empresa possui {contratos_ativos} contrato(s) ativo(s). Finalize-os antes de excluir.",
+        )
+
     db.delete(empresa)
     db.commit()
 
@@ -180,13 +194,25 @@ def add_empresa_motorista(
     empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not empresa:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa nao encontrada"
         )
 
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Cliente não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Cliente nao encontrado"
+        )
+
+    # Check if already linked
+    existing = db.query(MotoristaEmpresa).filter(
+        (MotoristaEmpresa.empresa_id == empresa_id)
+        & (MotoristaEmpresa.cliente_id == cliente_id)
+        & (MotoristaEmpresa.ativo == True)
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este cliente ja esta vinculado como motorista desta empresa",
         )
 
     motorista = MotoristaEmpresa(
@@ -204,22 +230,25 @@ def get_empresa_performance(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get performance metrics for a company."""
+    """Get performance metrics for a company - single SQL query."""
     empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not empresa:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa nao encontrada"
         )
+
+    # Single query with conditional count
+    result = db.query(
+        sqlfunc.count(MotoristaEmpresa.id).label("total"),
+        sqlfunc.count(
+            sqlfunc.nullif(MotoristaEmpresa.ativo, False)
+        ).label("ativos"),
+    ).filter(MotoristaEmpresa.empresa_id == empresa_id).first()
 
     return {
         "empresa_id": empresa_id,
-        "total_motoristas": db.query(MotoristaEmpresa).filter(
-            MotoristaEmpresa.empresa_id == empresa_id
-        ).count(),
-        "motoristas_ativos": db.query(MotoristaEmpresa).filter(
-            (MotoristaEmpresa.empresa_id == empresa_id)
-            & (MotoristaEmpresa.ativo == True)
-        ).count(),
+        "total_motoristas": result.total or 0,
+        "motoristas_ativos": result.ativos or 0,
     }
 
 
@@ -229,28 +258,28 @@ def get_empresa_faturamento(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get billing information for a company."""
-    from app.models import Contrato
+    """Get billing information for a company - SQL aggregation instead of Python loop."""
+    # Single SQL query with subquery join
+    clientes_subq = db.query(Cliente.id).filter(
+        Cliente.empresa_id == empresa_id
+    ).subquery()
 
-    contratos = db.query(Contrato).filter(
-        Contrato.cliente_id.in_(
-            db.query(Cliente.id).filter(Cliente.empresa_id == empresa_id)
-        )
-    ).all()
-
-    total_faturamento = sum(
-        float(c.valor_total) for c in contratos if c.valor_total
-    )
+    result = db.query(
+        sqlfunc.count(Contrato.id).label("total_contratos"),
+        sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0).label("total_faturamento"),
+    ).filter(
+        Contrato.cliente_id.in_(clientes_subq)
+    ).first()
 
     return {
         "empresa_id": empresa_id,
-        "total_contratos": len(contratos),
-        "total_faturamento": total_faturamento,
+        "total_contratos": result.total_contratos or 0,
+        "total_faturamento": float(result.total_faturamento),
     }
 
 
 # ============================================================
-# USO VEÍCULO EMPRESA (Veículos locados para empresas)
+# USO VEICULO EMPRESA (Veiculos locados para empresas)
 # ============================================================
 
 
@@ -283,8 +312,11 @@ def list_usos_empresa(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all vehicle usage records for a company."""
-    query = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.empresa_id == empresa_id)
+    """List all vehicle usage records for a company - uses JOIN instead of N+1."""
+    query = db.query(UsoVeiculoEmpresa).options(
+        joinedload(UsoVeiculoEmpresa.veiculo)
+    ).filter(UsoVeiculoEmpresa.empresa_id == empresa_id)
+
     if status_filter:
         query = query.filter(UsoVeiculoEmpresa.status == status_filter)
 
@@ -292,12 +324,12 @@ def list_usos_empresa(
 
     result = []
     for uso in usos:
-        veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+        veiculo = uso.veiculo
         km_percorrido = uso.km_percorrido or (
             (uso.km_final - uso.km_inicial) if uso.km_final and uso.km_inicial else None
         )
         km_excedente = 0
-        valor_excedente = 0
+        valor_excedente = 0.0
         if km_percorrido and uso.km_referencia and km_percorrido > uso.km_referencia:
             km_excedente = km_percorrido - uso.km_referencia
             valor_excedente = float(km_excedente * float(uso.valor_km_extra or 0))
@@ -337,6 +369,8 @@ def create_uso_veiculo(
     empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not empresa:
         raise HTTPException(status_code=404, detail="Empresa nao encontrada")
+    if not empresa.ativo:
+        raise HTTPException(status_code=400, detail="Empresa esta inativa")
 
     veiculo = db.query(Veiculo).filter(Veiculo.id == uso_data.veiculo_id).first()
     if not veiculo:
@@ -352,12 +386,20 @@ def create_uso_veiculo(
         valor_diaria_empresa=uso_data.valor_diaria_empresa,
         status="ativo",
     )
+
     if uso_data.data_inicio:
-        uso.data_inicio = datetime.fromisoformat(uso_data.data_inicio)
+        try:
+            uso.data_inicio = datetime.fromisoformat(uso_data.data_inicio)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Formato de data_inicio invalido. Use ISO 8601.")
     else:
         uso.data_inicio = datetime.now()
+
     if uso_data.data_fim:
-        uso.data_fim = datetime.fromisoformat(uso_data.data_fim)
+        try:
+            uso.data_fim = datetime.fromisoformat(uso_data.data_fim)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Formato de data_fim invalido. Use ISO 8601.")
 
     db.add(uso)
     db.commit()
@@ -379,7 +421,16 @@ def update_uso_veiculo(
 
     update_data = uso_data.model_dump(exclude_unset=True)
     if "data_fim" in update_data and update_data["data_fim"]:
-        update_data["data_fim"] = datetime.fromisoformat(update_data["data_fim"])
+        try:
+            update_data["data_fim"] = datetime.fromisoformat(update_data["data_fim"])
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Formato de data_fim invalido")
+
+    # Auto-calculate km_percorrido when km_final is set
+    if "km_final" in update_data and update_data["km_final"] and uso.km_inicial:
+        if update_data["km_final"] < uso.km_inicial:
+            raise HTTPException(status_code=400, detail="km_final nao pode ser menor que km_inicial")
+        update_data["km_percorrido"] = update_data["km_final"] - uso.km_inicial
 
     for key, value in update_data.items():
         setattr(uso, key, value)

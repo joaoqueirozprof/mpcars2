@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func as sqlfunc
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime, timedelta
@@ -113,24 +114,29 @@ def get_manutencoes_resumo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get maintenance summary."""
-    total_manutencoes = db.query(Manutencao).count()
-    manutencoes_pendentes = db.query(Manutencao).filter(
-        Manutencao.status == "pendente"
-    ).count()
-    total_custo = sum(float(m.custo) for m in db.query(Manutencao).all() if m.custo)
-
+    """Get maintenance summary - SQL aggregation."""
     agora = datetime.now().date()
-    vencendo_em_30_dias = db.query(Manutencao).filter(
-        (Manutencao.data_proxima.between(agora, agora + timedelta(days=30)))
-        & (Manutencao.status == "pendente")
-    ).count()
+
+    result = db.query(
+        sqlfunc.count(Manutencao.id).label("total"),
+        sqlfunc.count(sqlfunc.nullif(Manutencao.status != "pendente", True)).label("pendentes"),
+        sqlfunc.coalesce(sqlfunc.sum(Manutencao.custo), 0).label("total_custo"),
+        sqlfunc.count(sqlfunc.case(
+            (
+                (Manutencao.data_proxima.isnot(None))
+                & (Manutencao.data_proxima.between(agora, agora + timedelta(days=30)))
+                & (Manutencao.status == "pendente"),
+                Manutencao.id,
+            ),
+            else_=None,
+        )).label("vencendo_30d"),
+    ).first()
 
     return {
-        "total_manutencoes": total_manutencoes,
-        "manutencoes_pendentes": manutencoes_pendentes,
-        "total_custo": total_custo,
-        "vencendo_em_30_dias": vencendo_em_30_dias,
+        "total_manutencoes": result.total,
+        "manutencoes_pendentes": result.pendentes,
+        "total_custo": float(result.total_custo),
+        "vencendo_em_30_dias": result.vencendo_30d,
     }
 
 
@@ -147,22 +153,26 @@ def get_alerta_km(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
         )
 
+    km_atual = veiculo.km_atual or 0
+
+    # Filter in SQL instead of Python loop
     manutencoes = db.query(Manutencao).filter(
-        (Manutencao.veiculo_id == veiculo_id) & (Manutencao.status == "pendente")
+        (Manutencao.veiculo_id == veiculo_id)
+        & (Manutencao.status == "pendente")
+        & (Manutencao.km_proxima.isnot(None))
+        & (Manutencao.km_proxima <= km_atual)
     ).all()
 
-    alertas = []
-    for manu in manutencoes:
-        if manu.km_proxima and veiculo.km_atual >= manu.km_proxima:
-            alertas.append({
-                "manutencao_id": manu.id,
-                "tipo": manu.tipo,
-                "km_prevista": manu.km_proxima,
-                "km_atual": veiculo.km_atual,
-                "km_restante": manu.km_proxima - veiculo.km_atual,
-            })
-
-    return alertas
+    return [
+        {
+            "manutencao_id": manu.id,
+            "tipo": manu.tipo,
+            "km_prevista": manu.km_proxima,
+            "km_atual": km_atual,
+            "km_restante": manu.km_proxima - km_atual,
+        }
+        for manu in manutencoes
+    ]
 
 
 # === Parameterized routes AFTER ===
