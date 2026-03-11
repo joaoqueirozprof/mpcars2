@@ -40,6 +40,7 @@ export interface Veiculo {
   cor: string;
   status: 'disponivel' | 'alugado' | 'manutencao' | 'inativo';
   quilometragem: number;
+  km_atual?: number;
   empresa_id: string;
   data_compra: string;
   valor_aquisicao: number;
@@ -55,14 +56,33 @@ export interface Contrato {
   veiculo_id: string;
   data_inicio: string;
   data_fim: string;
+  data_finalizacao?: string;
   data_devolucao_real?: string;
   quilometragem_inicial: number;
   quilometragem_final?: number;
+  km_atual_veiculo?: number;
   valor_diaria: number;
   valor_total: number;
   status: 'ativo' | 'finalizado' | 'cancelado' | 'atraso';
   empresa_id: string;
   observacoes: string;
+  hora_saida?: string;
+  combustivel_saida?: string;
+  combustivel_retorno?: string;
+  km_livres?: number;
+  qtd_diarias?: number;
+  valor_hora_extra?: number;
+  valor_km_excedente?: number;
+  valor_avarias?: number;
+  desconto?: number;
+  tipo?: 'cliente' | 'empresa';
+  cliente?: { nome: string };
+  veiculo?: {
+    marca: string;
+    modelo: string;
+    placa: string;
+    km_atual?: number;
+  };
 }
 
 export interface Empresa {
@@ -169,11 +189,16 @@ export interface Reserva {
 export interface DashboardStats {
   total_veiculos: number;
   veiculos_alugados: number;
+  veiculos_disponiveis: number;
+  total_clientes: number;
   contratos_ativos: number;
   receita_mensal: number;
+  taxa_ocupacao: number;
+  ticket_medio: number;
+  variacao_receita_mensal: number;
   receita_vs_despesas: Array<{ mes: string; receita: number; despesa: number }>;
   top_clientes: Array<{ nome: string; valor_total: number; contratos: number }>;
-  top_veiculos: Array<{ placa: string; modelo: string; alugadas: number }>;
+  top_veiculos: Array<{ placa: string; modelo: string; alugadas: number; receita?: number }>;
   alertas: Array<{ id: string; tipo: string; titulo: string; descricao: string; urgencia: 'critica' | 'atencao' | 'info'; }>;
   contratos_atrasados: Contrato[];
   proximos_vencimentos: Array<{ id: string; titulo: string; data_vencimento: string; tipo: string }>;

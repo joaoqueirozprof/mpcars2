@@ -1,9 +1,11 @@
-from datetime import datetime
+import math
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
@@ -42,12 +44,23 @@ class ContratoBase(BaseModel):
     data_fim: datetime
     km_inicial: Optional[float] = None
     quilometragem_inicial: Optional[float] = None
+    km_atual_veiculo: Optional[float] = None
     km_final: Optional[float] = None
     quilometragem_final: Optional[float] = None
     valor_diaria: float
     valor_total: Optional[float] = None
     status: str = "ativo"
     observacoes: Optional[str] = None
+    hora_saida: Optional[str] = None
+    combustivel_saida: Optional[str] = None
+    combustivel_retorno: Optional[str] = None
+    km_livres: Optional[float] = None
+    qtd_diarias: Optional[int] = None
+    valor_hora_extra: Optional[float] = None
+    valor_km_excedente: Optional[float] = None
+    valor_avarias: Optional[float] = None
+    desconto: Optional[float] = None
+    tipo: Optional[str] = "cliente"
 
 
 class ContratoCreate(ContratoBase):
@@ -64,12 +77,36 @@ class ContratoUpdate(BaseModel):
     data_fim: Optional[datetime] = None
     km_inicial: Optional[float] = None
     quilometragem_inicial: Optional[float] = None
+    km_atual_veiculo: Optional[float] = None
     km_final: Optional[float] = None
     quilometragem_final: Optional[float] = None
     valor_diaria: Optional[float] = None
     valor_total: Optional[float] = None
     status: Optional[str] = None
     observacoes: Optional[str] = None
+    hora_saida: Optional[str] = None
+    combustivel_saida: Optional[str] = None
+    combustivel_retorno: Optional[str] = None
+    km_livres: Optional[float] = None
+    qtd_diarias: Optional[int] = None
+    valor_hora_extra: Optional[float] = None
+    valor_km_excedente: Optional[float] = None
+    valor_avarias: Optional[float] = None
+    desconto: Optional[float] = None
+    tipo: Optional[str] = None
+
+
+class ContratoFinalizeRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    km_final: Optional[float] = None
+    quilometragem_final: Optional[float] = None
+    km_atual_veiculo: Optional[float] = None
+    combustivel_retorno: Optional[str] = None
+    valor_avarias: Optional[float] = None
+    desconto: Optional[float] = None
+    observacoes: Optional[str] = None
+    data_finalizacao: Optional[datetime] = None
 
 
 class ContratoResponse(ContratoBase):
@@ -100,13 +137,46 @@ def _validar_datas(data_inicio: datetime, data_fim: datetime):
     if data_inicio >= data_fim:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Data de início deve ser anterior à data de fim",
+            detail="Data de inicio deve ser anterior a data de fim",
         )
 
 
-def _calcular_valor_total(data_inicio: datetime, data_fim: datetime, valor_diaria: float) -> float:
-    dias = max(1, (data_fim - data_inicio).days)
-    return round(dias * valor_diaria, 2)
+def _calcular_qtd_diarias(data_inicio: datetime, data_fim: datetime) -> int:
+    total_seconds = max((data_fim - data_inicio).total_seconds(), 0)
+    return max(1, math.ceil(total_seconds / 86400))
+
+
+def _calcular_km_excedente(
+    km_inicial: Optional[float],
+    km_final: Optional[float],
+    km_livres: Optional[float],
+) -> float:
+    if km_inicial is None or km_final is None:
+        return 0.0
+
+    km_rodado = max(float(km_final) - float(km_inicial), 0.0)
+    franquia = float(km_livres or 0)
+    return max(km_rodado - franquia, 0.0)
+
+
+def _calcular_valor_total(
+    data_inicio: datetime,
+    data_fim: datetime,
+    valor_diaria: float,
+    *,
+    km_inicial: Optional[float] = None,
+    km_final: Optional[float] = None,
+    km_livres: Optional[float] = None,
+    valor_km_excedente: Optional[float] = None,
+    valor_avarias: Optional[float] = None,
+    desconto: Optional[float] = None,
+) -> float:
+    qtd_diarias = _calcular_qtd_diarias(data_inicio, data_fim)
+    total_base = qtd_diarias * float(valor_diaria or 0)
+    km_excedente = _calcular_km_excedente(km_inicial, km_final, km_livres)
+    total_km = km_excedente * float(valor_km_excedente or 0)
+    total = total_base + total_km + float(valor_avarias or 0) - float(desconto or 0)
+    return round(max(total, 0.0), 2)
 
 
 def _normalize_contrato_payload(payload: dict, is_create: bool = False) -> dict:
@@ -116,6 +186,11 @@ def _normalize_contrato_payload(payload: dict, is_create: bool = False) -> dict:
         data["km_inicial"] = data.pop("quilometragem_inicial")
     else:
         data.pop("quilometragem_inicial", None)
+
+    if data.get("km_inicial") is None and data.get("km_atual_veiculo") is not None:
+        data["km_inicial"] = data.pop("km_atual_veiculo")
+    else:
+        data.pop("km_atual_veiculo", None)
 
     if data.get("km_final") is None and data.get("quilometragem_final") is not None:
         data["km_final"] = data.pop("quilometragem_final")
@@ -127,24 +202,69 @@ def _normalize_contrato_payload(payload: dict, is_create: bool = False) -> dict:
 
     normalized = {}
     for key, value in data.items():
+        if value == "":
+            normalized[key] = None
+        elif key in {"status", "tipo"} and isinstance(value, str):
+            normalized[key] = value.lower()
+        else:
+            normalized[key] = value
+
+    return normalized
+
+
+def _normalize_finalizacao_payload(payload: dict) -> dict:
+    data = dict(payload)
+
+    if data.get("km_final") is None and data.get("quilometragem_final") is not None:
+        data["km_final"] = data.pop("quilometragem_final")
+    else:
+        data.pop("quilometragem_final", None)
+
+    if data.get("km_final") is None and data.get("km_atual_veiculo") is not None:
+        data["km_final"] = data.pop("km_atual_veiculo")
+    else:
+        data.pop("km_atual_veiculo", None)
+
+    normalized = {}
+    for key, value in data.items():
         normalized[key] = None if value == "" else value
 
     return normalized
+
+
+def _append_observacao(existing_value: Optional[str], extra_value: Optional[str], titulo: str) -> Optional[str]:
+    if not extra_value:
+        return existing_value
+
+    extra_value = extra_value.strip()
+    if not extra_value:
+        return existing_value
+
+    bloco = "[{}] {}".format(titulo, extra_value)
+    if not existing_value:
+        return bloco
+    return "{}\n{}".format(existing_value.strip(), bloco)
 
 
 def _ensure_cliente_exists(db: Session, cliente_id: int):
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Cliente não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cliente nao encontrado",
         )
 
 
-def _ensure_veiculo_available(db: Session, veiculo_id: int, contrato_id: Optional[int] = None) -> Veiculo:
+def _ensure_veiculo_available(
+    db: Session,
+    veiculo_id: int,
+    contrato_id: Optional[int] = None,
+) -> Veiculo:
     veiculo = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
     if not veiculo:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Veiculo nao encontrado",
         )
 
     contrato_ativo = db.query(Contrato).filter(
@@ -155,13 +275,13 @@ def _ensure_veiculo_available(db: Session, veiculo_id: int, contrato_id: Optiona
     if contrato_ativo:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Veículo já possui contrato ativo (#{})".format(contrato_ativo.numero),
+            detail="Veiculo ja possui contrato ativo (#{})".format(contrato_ativo.numero),
         )
 
     if contrato_id is None and veiculo.status not in {"disponivel", "reservado"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Veículo não está disponível (status atual: {})".format(veiculo.status),
+            detail="Veiculo nao esta disponivel (status atual: {})".format(veiculo.status),
         )
 
     return veiculo
@@ -189,16 +309,38 @@ def list_contratos(
     current_user: User = Depends(get_current_user),
 ):
     """List all contracts with pagination."""
-    query = db.query(Contrato).options(joinedload(Contrato.cliente), joinedload(Contrato.veiculo))
-    return paginate(
-        query=query,
-        page=page,
-        limit=limit,
-        search=search,
-        search_fields=["numero"],
-        model=Contrato,
-        status_filter=status_filter,
+    del current_user
+
+    query = (
+        db.query(Contrato)
+        .options(joinedload(Contrato.cliente), joinedload(Contrato.veiculo))
+        .join(Cliente, Cliente.id == Contrato.cliente_id)
+        .join(Veiculo, Veiculo.id == Contrato.veiculo_id)
+        .order_by(Contrato.data_criacao.desc())
     )
+
+    if search:
+        search_term = "%{}%".format(search.strip())
+        query = query.filter(
+            or_(
+                Contrato.numero.ilike(search_term),
+                Cliente.nome.ilike(search_term),
+                Veiculo.placa.ilike(search_term),
+                Veiculo.marca.ilike(search_term),
+                Veiculo.modelo.ilike(search_term),
+            )
+        )
+
+    if status_filter:
+        if status_filter == "atraso":
+            query = query.filter(
+                Contrato.status == "ativo",
+                Contrato.data_fim < datetime.now(),
+            )
+        else:
+            query = query.filter(Contrato.status == status_filter)
+
+    return paginate(query=query, page=page, limit=limit)
 
 
 @router.get("/atrasados", response_model=List[ContratoResponse])
@@ -207,9 +349,11 @@ def get_atrasados(
     current_user: User = Depends(get_current_user),
 ):
     """Get overdue contracts."""
+    del current_user
     agora = datetime.now()
     contratos = db.query(Contrato).filter(
-        (Contrato.data_fim < agora) & (Contrato.status == "ativo")
+        Contrato.data_fim < agora,
+        Contrato.status == "ativo",
     ).all()
     return contratos
 
@@ -221,12 +365,12 @@ def get_vencimentos(
     current_user: User = Depends(get_current_user),
 ):
     """Get contracts expiring within specified days."""
-    from datetime import timedelta
-
+    del current_user
     agora = datetime.now()
     fim = agora + timedelta(days=dias)
     contratos = db.query(Contrato).filter(
-        (Contrato.data_fim.between(agora, fim)) & (Contrato.status == "ativo")
+        Contrato.data_fim.between(agora, fim),
+        Contrato.status == "ativo",
     ).all()
     return contratos
 
@@ -249,21 +393,47 @@ def create_contrato(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Número de contrato já existe",
+            detail="Numero de contrato ja existe",
         )
 
     _ensure_cliente_exists(db, contrato_data["cliente_id"])
     veiculo = _ensure_veiculo_available(db, contrato_data["veiculo_id"])
+
+    if contrato_data.get("km_inicial") is None:
+        contrato_data["km_inicial"] = float(veiculo.km_atual or 0)
+
+    if not contrato_data.get("qtd_diarias"):
+        contrato_data["qtd_diarias"] = _calcular_qtd_diarias(
+            contrato_data["data_inicio"],
+            contrato_data["data_fim"],
+        )
 
     if not contrato_data.get("valor_total"):
         contrato_data["valor_total"] = _calcular_valor_total(
             contrato_data["data_inicio"],
             contrato_data["data_fim"],
             float(contrato_data["valor_diaria"]),
+            km_inicial=contrato_data.get("km_inicial"),
+            km_final=contrato_data.get("km_final"),
+            km_livres=contrato_data.get("km_livres"),
+            valor_km_excedente=contrato_data.get("valor_km_excedente"),
+            valor_avarias=contrato_data.get("valor_avarias"),
+            desconto=contrato_data.get("desconto"),
         )
 
     db_contrato = Contrato(**contrato_data)
     db.add(db_contrato)
+    db.flush()
+
+    db.add(
+        CheckinCheckout(
+            contrato_id=db_contrato.id,
+            tipo="retirada",
+            km=db_contrato.km_inicial,
+            nivel_combustivel=db_contrato.combustivel_saida,
+            itens_checklist=veiculo.checklist or {},
+        )
+    )
     veiculo.status = "alugado"
 
     db.commit()
@@ -287,10 +457,12 @@ def get_contrato(
     current_user: User = Depends(get_current_user),
 ):
     """Get a specific contract."""
+    del current_user
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Contrato não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Contrato nao encontrado",
         )
     return contrato
 
@@ -308,7 +480,8 @@ def update_contrato(
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Contrato não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Contrato nao encontrado",
         )
 
     update_data = _normalize_contrato_payload(contrato_data.model_dump(exclude_unset=True))
@@ -321,7 +494,7 @@ def update_contrato(
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Número de contrato já existe",
+                detail="Numero de contrato ja existe",
             )
 
     novo_cliente_id = update_data.get("cliente_id", contrato.cliente_id)
@@ -334,26 +507,39 @@ def update_contrato(
     _validar_datas(nova_data_inicio, nova_data_fim)
     _ensure_cliente_exists(db, novo_cliente_id)
 
+    veiculo_destino = None
     if novo_status == "ativo":
-        _ensure_veiculo_available(db, novo_veiculo_id, contrato_id=contrato_id)
+        veiculo_destino = _ensure_veiculo_available(
+            db,
+            novo_veiculo_id,
+            contrato_id=contrato_id,
+        )
+
+    if "veiculo_id" in update_data and "km_inicial" not in update_data and veiculo_destino:
+        update_data["km_inicial"] = float(veiculo_destino.km_atual or 0)
 
     veiculo_antigo_id = contrato.veiculo_id
 
     for key, value in update_data.items():
         setattr(contrato, key, value)
 
-    if (
-        "valor_total" not in update_data
-        and (
-            "data_inicio" in update_data
-            or "data_fim" in update_data
-            or "valor_diaria" in update_data
-        )
+    if not contrato.qtd_diarias or {"data_inicio", "data_fim"} & set(update_data.keys()):
+        contrato.qtd_diarias = _calcular_qtd_diarias(nova_data_inicio, nova_data_fim)
+
+    if "valor_total" not in update_data and (
+        {"data_inicio", "data_fim", "valor_diaria", "km_inicial", "km_final", "km_livres", "valor_km_excedente", "valor_avarias", "desconto"}
+        & set(update_data.keys())
     ):
         contrato.valor_total = _calcular_valor_total(
             nova_data_inicio,
             nova_data_fim,
-            float(novo_valor_diaria),
+            float(novo_valor_diaria or 0),
+            km_inicial=contrato.km_inicial,
+            km_final=contrato.km_final,
+            km_livres=contrato.km_livres,
+            valor_km_excedente=contrato.valor_km_excedente,
+            valor_avarias=contrato.valor_avarias,
+            desconto=contrato.desconto,
         )
 
     db.flush()
@@ -374,23 +560,92 @@ def update_contrato(
     return contrato
 
 
-@router.post("/{contrato_id}/finalizar")
+@router.post("/{contrato_id}/encerrar", response_model=ContratoResponse)
+@router.post("/{contrato_id}/finalizar", response_model=ContratoResponse)
 def finalizar_contrato(
     contrato_id: int,
+    payload: Optional[ContratoFinalizeRequest] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     request: Request = None,
 ):
-    """Finalize a contract."""
+    """Finalize a contract and register the vehicle return."""
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Contrato não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Contrato nao encontrado",
         )
 
+    if contrato.status != "ativo":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Somente contratos ativos podem ser encerrados",
+        )
+
+    veiculo = db.query(Veiculo).filter(Veiculo.id == contrato.veiculo_id).first()
+    if not veiculo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Veiculo nao encontrado",
+        )
+
+    finalize_data = _normalize_finalizacao_payload(
+        (payload or ContratoFinalizeRequest()).model_dump(exclude_unset=True)
+    )
+    data_finalizacao = finalize_data.get("data_finalizacao") or datetime.now()
+    km_final = finalize_data.get("km_final")
+
+    if km_final is not None and contrato.km_inicial is not None and float(km_final) < float(contrato.km_inicial):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="KM atual nao pode ser menor que o KM de retirada",
+        )
+
+    if km_final is not None:
+        contrato.km_final = float(km_final)
+        veiculo.km_atual = float(km_final)
+
+    if "combustivel_retorno" in finalize_data:
+        contrato.combustivel_retorno = finalize_data.get("combustivel_retorno")
+    if "valor_avarias" in finalize_data:
+        contrato.valor_avarias = finalize_data.get("valor_avarias")
+    if "desconto" in finalize_data:
+        contrato.desconto = finalize_data.get("desconto")
+    if finalize_data.get("observacoes"):
+        contrato.observacoes = _append_observacao(
+            contrato.observacoes,
+            finalize_data.get("observacoes"),
+            "Encerramento",
+        )
+
+    data_base_cobranca = max(contrato.data_fim, data_finalizacao)
+    contrato.qtd_diarias = _calcular_qtd_diarias(contrato.data_inicio, data_base_cobranca)
+    contrato.valor_total = _calcular_valor_total(
+        contrato.data_inicio,
+        data_base_cobranca,
+        float(contrato.valor_diaria or 0),
+        km_inicial=contrato.km_inicial,
+        km_final=contrato.km_final,
+        km_livres=contrato.km_livres,
+        valor_km_excedente=contrato.valor_km_excedente,
+        valor_avarias=contrato.valor_avarias,
+        desconto=contrato.desconto,
+    )
     contrato.status = "finalizado"
-    contrato.data_finalizacao = datetime.now()
+    contrato.data_finalizacao = data_finalizacao
+
     db.flush()
+    db.add(
+        CheckinCheckout(
+            contrato_id=contrato.id,
+            tipo="devolucao",
+            data_hora=data_finalizacao,
+            km=contrato.km_final if contrato.km_final is not None else veiculo.km_atual,
+            nivel_combustivel=contrato.combustivel_retorno,
+            avarias=finalize_data.get("observacoes"),
+        )
+    )
     _recalcular_status_veiculo(db, contrato.veiculo_id)
 
     db.commit()
@@ -407,7 +662,7 @@ def finalizar_contrato(
     return contrato
 
 
-@router.post("/{contrato_id}/prorrogar")
+@router.post("/{contrato_id}/prorrogar", response_model=ContratoResponse)
 def prorrogar_contrato(
     contrato_id: int,
     data_nova: datetime,
@@ -420,13 +675,14 @@ def prorrogar_contrato(
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Contrato não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Contrato nao encontrado",
         )
 
     if data_nova <= contrato.data_fim:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nova data deve ser posterior à data de fim atual",
+            detail="Nova data deve ser posterior a data de fim atual",
         )
 
     prorrogacao = ProrrogacaoContrato(
@@ -438,11 +694,18 @@ def prorrogar_contrato(
     db.add(prorrogacao)
 
     contrato.data_fim = data_nova
+    contrato.qtd_diarias = _calcular_qtd_diarias(contrato.data_inicio, data_nova)
     if contrato.valor_diaria:
         contrato.valor_total = _calcular_valor_total(
             contrato.data_inicio,
             data_nova,
             float(contrato.valor_diaria),
+            km_inicial=contrato.km_inicial,
+            km_final=contrato.km_final,
+            km_livres=contrato.km_livres,
+            valor_km_excedente=contrato.valor_km_excedente,
+            valor_avarias=contrato.valor_avarias,
+            desconto=contrato.desconto,
         )
 
     db.commit()
@@ -466,10 +729,12 @@ def get_contrato_pdf(
     current_user: User = Depends(get_current_user),
 ):
     """Generate and download contract PDF."""
+    del current_user
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Contrato não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Contrato nao encontrado",
         )
 
     pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
@@ -477,7 +742,11 @@ def get_contrato_pdf(
     return StreamingResponse(
         pdf_buffer,
         media_type="application/pdf",
-        headers={"Content-Disposition": 'attachment; filename="contrato_{}.pdf"'.format(contrato.numero)},
+        headers={
+            "Content-Disposition": 'attachment; filename="contrato_{}.pdf"'.format(
+                contrato.numero
+            )
+        },
     )
 
 
@@ -488,6 +757,7 @@ def get_contrato_despesas(
     current_user: User = Depends(get_current_user),
 ):
     """Get expenses for a contract."""
+    del current_user
     despesas = db.query(DespesaContrato).filter(
         DespesaContrato.contrato_id == contrato_id
     ).all()
@@ -508,7 +778,8 @@ def add_contrato_despesa(
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Contrato não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Contrato nao encontrado",
         )
 
     despesa = DespesaContrato(
@@ -544,7 +815,8 @@ def delete_contrato(
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Contrato não encontrado"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Contrato nao encontrado",
         )
 
     numero = contrato.numero
@@ -579,7 +851,7 @@ def delete_contrato(
         current_user,
         "EXCLUIR",
         "Contrato",
-        "Contrato {} excluído".format(numero),
+        "Contrato {} excluido".format(numero),
         contrato_id,
         request,
     )

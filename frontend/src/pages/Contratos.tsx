@@ -1,108 +1,117 @@
-import React, { useState, useMemo } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import React, { useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Plus,
-  Edit,
-  Trash2,
-  DollarSign,
-  FileText,
-  Calendar,
-  Users,
   AlertCircle,
-  ChevronRight,
-  Search,
-  X,
   CheckCircle,
-  Clock,
   Download,
-  Printer,
+  Edit,
+  FileText,
   Loader2,
+  Plus,
+  Printer,
+  Search,
+  Trash2,
+  X,
 } from 'lucide-react'
-import api from '@/services/api'
-import AppLayout from '@/components/layout/AppLayout'
-import { Contrato, Cliente, Veiculo, PaginatedResponse, PaginationParams } from '@/types'
-import { formatCurrency, formatDate, calculateDays } from '@/lib/utils'
 import toast from 'react-hot-toast'
-import { useConfig } from '@/contexts/ConfigContext'
 
-interface FormData {
-  cliente_id: string
-  veiculo_id: string
-  data_inicio: string
-  data_fim: string
-  quilometragem_inicial: number
-  valor_diaria: number
-  observacoes: string
-}
+import AppLayout from '@/components/layout/AppLayout'
+import { useConfig } from '@/contexts/ConfigContext'
+import { calculateDays, formatCurrency, formatDate } from '@/lib/utils'
+import api from '@/services/api'
+import { Contrato, PaginatedResponse, PaginationParams, Veiculo } from '@/types'
 
 type StatusFilter = 'todos' | 'ativo' | 'finalizado' | 'cancelado' | 'atraso'
 
+type ContractForm = {
+  cliente_id: string
+  veiculo_id: string
+  tipo: 'cliente' | 'empresa'
+  data_inicio: string
+  data_fim: string
+  km_atual_veiculo: number
+  hora_saida: string
+  combustivel_saida: string
+  km_livres: number
+  valor_diaria: number
+  valor_km_excedente: number
+  desconto: number
+  observacoes: string
+}
+
+type CloseoutForm = {
+  km_atual_veiculo: number
+  combustivel_retorno: string
+  valor_avarias: number
+  desconto: number
+  observacoes: string
+}
+
+const fuelOptions = ['1/4', '1/2', '3/4', 'Cheio']
+
+const getErrorMessage = (error: any, fallback: string) =>
+  error?.response?.data?.detail || error?.response?.data?.message || fallback
+
+const displayStatus = (contrato: Contrato) => {
+  if (contrato.status === 'ativo' && new Date(contrato.data_fim) < new Date()) {
+    return 'atraso'
+  }
+  return contrato.status
+}
+
+const statusLabel = (status: string) =>
+  ({
+    ativo: 'Ativo',
+    finalizado: 'Finalizado',
+    cancelado: 'Cancelado',
+    atraso: 'Atraso',
+  }[status] || status)
+
+const statusClass = (status: string) =>
+  ({
+    ativo: 'badge-success',
+    finalizado: 'badge-info',
+    cancelado: 'badge-danger',
+    atraso: 'badge-warning',
+  }[status] || 'badge-info')
+
+const toDateInput = (value?: string) => (value ? value.slice(0, 10) : '')
+
 const Contratos: React.FC = () => {
   const queryClient = useQueryClient()
-  const [pagination, setPagination] = useState<PaginationParams>({ page: 1, limit: 10 })
-  const [searchTerm, setSearchTerm] = useState('')
-  const [step, setStep] = useState<1 | 2 | 3>(1)
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [editingContract, setEditingContract] = useState<Contrato | null>(null)
-  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos')
-  const [dateError, setDateError] = useState<string>('')
-  const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null)
+  const config = useConfig()
 
-  const handleDownloadPdf = async (contratoId: string, numero: string) => {
-    setDownloadingPdf(contratoId)
-    try {
-      const response = await api.get(`/relatorios/contrato/${contratoId}/pdf`, {
-        responseType: 'blob',
-      })
-      const blob = new Blob([response.data], { type: 'application/pdf' })
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `contrato_${numero}.pdf`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
-      toast.success('PDF do contrato gerado com sucesso!')
-    } catch (error) {
-      toast.error('Erro ao gerar PDF do contrato')
-    } finally {
-      setDownloadingPdf(null)
-    }
-  }
-
-  const handlePrintPdf = async (contratoId: string) => {
-    setDownloadingPdf(contratoId)
-    try {
-      const response = await api.get(`/relatorios/contrato/${contratoId}/pdf`, {
-        responseType: 'blob',
-      })
-      const blob = new Blob([response.data], { type: 'application/pdf' })
-      const url = window.URL.createObjectURL(blob)
-      const printWindow = window.open(url, '_blank')
-      if (printWindow) {
-        printWindow.onload = () => printWindow.print()
-      }
-    } catch (error) {
-      toast.error('Erro ao imprimir contrato')
-    } finally {
-      setDownloadingPdf(null)
-    }
-  }
-
-  const [formData, setFormData] = useState<FormData>({
+  const buildForm = (): ContractForm => ({
     cliente_id: '',
     veiculo_id: '',
+    tipo: 'cliente',
     data_inicio: '',
     data_fim: '',
-    quilometragem_inicial: 0,
-    valor_diaria: 0,
+    km_atual_veiculo: 0,
+    hora_saida: '',
+    combustivel_saida: '',
+    km_livres: 0,
+    valor_diaria: config.valor_diaria_padrao || 0,
+    valor_km_excedente: 0,
+    desconto: 0,
     observacoes: '',
   })
 
-  // Use system config for valor_diaria_padrao
-  const config = useConfig()
+  const [pagination, setPagination] = useState<PaginationParams>({ page: 1, limit: 10 })
+  const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos')
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editingContract, setEditingContract] = useState<Contrato | null>(null)
+  const [closingContract, setClosingContract] = useState<Contrato | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
+  const [formData, setFormData] = useState<ContractForm>(buildForm())
+  const [closeoutData, setCloseoutData] = useState<CloseoutForm>({
+    km_atual_veiculo: 0,
+    combustivel_retorno: '',
+    valor_avarias: 0,
+    desconto: 0,
+    observacoes: '',
+  })
 
   const { data: contratos, isLoading } = useQuery({
     queryKey: ['contratos', pagination, statusFilter, searchTerm],
@@ -130,779 +139,456 @@ const Contratos: React.FC = () => {
   const { data: veiculos } = useQuery({
     queryKey: ['veiculos-select'],
     queryFn: async () => {
-      const { data } = await api.get<PaginatedResponse<any>>('/veiculos', { params: { limit: 1000 } })
-      return (data.data || []).map((v: any) => ({
-        ...v,
-        quilometragem: v.km_atual || 0,
-        cor: v.cor || '',
-      })).filter((v) => v.status === 'disponivel')
+      const { data } = await api.get<PaginatedResponse<Veiculo>>('/veiculos', { params: { limit: 1000 } })
+      return (data.data || []).map((veiculo: any) => ({
+        ...veiculo,
+        km_atual: veiculo.km_atual ?? veiculo.quilometragem ?? 0,
+        quilometragem: veiculo.quilometragem ?? veiculo.km_atual ?? 0,
+      }))
     },
   })
 
+  const availableVehicles = useMemo(
+    () =>
+      (veiculos || []).filter(
+        (veiculo: any) =>
+          veiculo.status === 'disponivel' ||
+          String(veiculo.id) === String(formData.veiculo_id) ||
+          String(veiculo.id) === String(editingContract?.veiculo_id)
+      ),
+    [veiculos, formData.veiculo_id, editingContract]
+  )
+
+  const selectedCliente = clientes?.find((cliente: any) => String(cliente.id) === String(formData.cliente_id))
+  const selectedVeiculo = (veiculos || []).find((veiculo: any) => String(veiculo.id) === String(formData.veiculo_id))
+
+  const invalidateCoreQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ['contratos'] })
+    queryClient.invalidateQueries({ queryKey: ['veiculos-select'] })
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+  }
+
   const createMutation = useMutation({
-    mutationFn: (data: any) => api.post('/contratos', data),
+    mutationFn: (payload: any) => api.post('/contratos', payload),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['contratos'] })
+      invalidateCoreQueries()
       setIsModalOpen(false)
-      resetForm()
-      toast.success('Contrato criado com sucesso!')
+      setEditingContract(null)
+      setFormData(buildForm())
+      toast.success('Contrato salvo com sucesso!')
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao criar contrato')
-    },
+    onError: (error: any) => toast.error(getErrorMessage(error, 'Erro ao salvar contrato')),
   })
 
   const updateMutation = useMutation({
-    mutationFn: (data: any) => api.patch(`/contratos/${editingContract?.id}`, data),
+    mutationFn: (payload: any) => api.patch(`/contratos/${editingContract?.id}`, payload),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['contratos'] })
+      invalidateCoreQueries()
       setIsModalOpen(false)
-      resetForm()
+      setEditingContract(null)
+      setFormData(buildForm())
       toast.success('Contrato atualizado com sucesso!')
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao atualizar contrato')
+    onError: (error: any) => toast.error(getErrorMessage(error, 'Erro ao atualizar contrato')),
+  })
+
+  const closeMutation = useMutation({
+    mutationFn: (payload: any) => api.post(`/contratos/${closingContract?.id}/encerrar`, payload),
+    onSuccess: () => {
+      invalidateCoreQueries()
+      setClosingContract(null)
+      toast.success('Contrato encerrado com sucesso!')
     },
+    onError: (error: any) => toast.error(getErrorMessage(error, 'Erro ao encerrar contrato')),
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/contratos/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['contratos'] })
+      invalidateCoreQueries()
       setDeleteConfirm({ isOpen: false })
       toast.success('Contrato deletado com sucesso!')
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao deletar contrato')
-    },
+    onError: (error: any) => toast.error(getErrorMessage(error, 'Erro ao deletar contrato')),
   })
 
-  const resetForm = () => {
-    setFormData({
-      cliente_id: '',
-      veiculo_id: '',
-      data_inicio: '',
-      data_fim: '',
-      quilometragem_inicial: 0,
-      valor_diaria: config.valor_diaria_padrao || 0,
-      observacoes: '',
-    })
-    setEditingContract(null)
-    setStep(1)
-    setDateError('')
+  const handlePdf = async (contratoId: string, numero: string, print = false) => {
+    setDownloadingPdf(contratoId)
+    try {
+      const response = await api.get(`/relatorios/contrato/${contratoId}/pdf`, { responseType: 'blob' })
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+      if (print) {
+        const printWindow = window.open(url, '_blank')
+        if (printWindow) printWindow.onload = () => printWindow.print()
+      } else {
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `contrato_${numero}.pdf`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+      }
+      window.URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Erro ao gerar PDF do contrato')
+    } finally {
+      setDownloadingPdf(null)
+    }
   }
 
-  const handleOpenModal = (contract?: Contrato) => {
-    if (contract) {
-      setEditingContract(contract)
-      setFormData({
-        cliente_id: contract.cliente_id,
-        veiculo_id: contract.veiculo_id,
-        data_inicio: contract.data_inicio,
-        data_fim: contract.data_fim,
-        quilometragem_inicial: contract.quilometragem_inicial,
-        valor_diaria: contract.valor_diaria,
-        observacoes: contract.observacoes,
-      })
-      setStep(3)
-    } else {
-      resetForm()
-      setStep(1)
-    }
+  const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null)
+
+  const openCreate = () => {
+    setEditingContract(null)
+    setFormData(buildForm())
     setIsModalOpen(true)
   }
 
-  const validateDates = (inicio: string, fim: string): boolean => {
-    if (!inicio || !fim) {
-      setDateError('')
-      return false
-    }
-    const inicioDate = new Date(inicio)
-    const fimDate = new Date(fim)
-    if (fimDate <= inicioDate) {
-      setDateError('Data de fim deve ser posterior à data de início')
-      return false
-    }
-    setDateError('')
-    return true
+  const openEdit = (contrato: Contrato) => {
+    setEditingContract(contrato)
+    setFormData({
+      cliente_id: contrato.cliente_id,
+      veiculo_id: contrato.veiculo_id,
+      tipo: contrato.tipo || 'cliente',
+      data_inicio: toDateInput(contrato.data_inicio),
+      data_fim: toDateInput(contrato.data_fim),
+      km_atual_veiculo: contrato.veiculo?.km_atual ?? contrato.quilometragem_inicial ?? 0,
+      hora_saida: contrato.hora_saida || '',
+      combustivel_saida: contrato.combustivel_saida || '',
+      km_livres: contrato.km_livres || 0,
+      valor_diaria: contrato.valor_diaria || 0,
+      valor_km_excedente: contrato.valor_km_excedente || 0,
+      desconto: contrato.desconto || 0,
+      observacoes: contrato.observacoes || '',
+    })
+    setIsModalOpen(true)
   }
 
-  const handleDateChange = (field: 'data_inicio' | 'data_fim', value: string) => {
-    const newFormData = { ...formData, [field]: value }
-    setFormData(newFormData)
-    if (newFormData.data_inicio && newFormData.data_fim) {
-      validateDates(newFormData.data_inicio, newFormData.data_fim)
-    }
+  const openCloseout = (contrato: Contrato) => {
+    setClosingContract(contrato)
+    setCloseoutData({
+      km_atual_veiculo: contrato.veiculo?.km_atual ?? contrato.quilometragem_inicial ?? 0,
+      combustivel_retorno: contrato.combustivel_retorno || '',
+      valor_avarias: contrato.valor_avarias || 0,
+      desconto: contrato.desconto || 0,
+      observacoes: '',
+    })
   }
 
-  const handleNextStep = () => {
-    if (step === 1) {
-      if (formData.cliente_id && formData.veiculo_id) {
-        setStep(2)
-      } else {
-        toast.error('Selecione um cliente e um veículo')
-      }
-    } else if (step === 2) {
-      if (!formData.data_inicio || !formData.data_fim) {
-        toast.error('Preencha as datas')
-        return
-      }
-      if (!validateDates(formData.data_inicio, formData.data_fim)) {
-        return
-      }
-      if (formData.valor_diaria <= 0) {
-        toast.error('Valor da diária deve ser maior que zero')
-        return
-      }
-      setStep(3)
-    }
-  }
-
-  const handlePrevStep = () => {
-    if (step > 1) setStep((step - 1) as 1 | 2 | 3)
-  }
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (
-      !formData.cliente_id ||
-      !formData.veiculo_id ||
-      !formData.data_inicio ||
-      !formData.data_fim ||
-      formData.valor_diaria <= 0
-    ) {
-      toast.error('Preencha todos os campos obrigatórios')
-      return
-    }
-
-    if (!validateDates(formData.data_inicio, formData.data_fim)) {
-      return
-    }
-
-    const dias = calculateDays(formData.data_inicio, formData.data_fim)
-    const payload = {
-      ...formData,
-      valor_total: dias * formData.valor_diaria,
-    }
-
-    if (editingContract) {
-      updateMutation.mutate(payload)
-    } else {
-      createMutation.mutate(payload)
-    }
+  const handleVehicleChange = (veiculoId: string) => {
+    const veiculo: any = (veiculos || []).find((item: any) => String(item.id) === String(veiculoId))
+    setFormData((current) => ({
+      ...current,
+      veiculo_id: veiculoId,
+      km_atual_veiculo: veiculo?.km_atual || 0,
+      valor_diaria: current.valor_diaria || veiculo?.valor_diaria || config.valor_diaria_padrao || 0,
+    }))
   }
 
   const dias = formData.data_inicio && formData.data_fim ? calculateDays(formData.data_inicio, formData.data_fim) : 0
-  const valor_total = dias * formData.valor_diaria
+  const valorPreview = Math.max(dias * formData.valor_diaria - formData.desconto, 0)
 
-  const clienteInfo = clientes?.find((c: any) => String(c.id) === String(formData.cliente_id))
-  const veiculoInfo = veiculos?.find((v: any) => String(v.id) === String(formData.veiculo_id))
+  const closeoutKmRodado = closingContract
+    ? Math.max(closeoutData.km_atual_veiculo - (closingContract.quilometragem_inicial || 0), 0)
+    : 0
+  const closeoutKmExcedente = closingContract
+    ? Math.max(closeoutKmRodado - (closingContract.km_livres || 0), 0)
+    : 0
+  const closeoutValorExtra = closingContract
+    ? closeoutKmExcedente * (closingContract.valor_km_excedente || 0)
+    : 0
+  const closeoutEstimativa = closingContract
+    ? Math.max((closingContract.valor_total || 0) + closeoutValorExtra + closeoutData.valor_avarias - closeoutData.desconto, 0)
+    : 0
 
-  // Calculate KPIs
-  const kpis = useMemo(() => {
-    const contractsList = contratos?.data || []
-    const totalContratos = contratos?.total || 0
-    const ativos = contractsList.filter((c) => c.status === 'ativo').length
-    const atrasados = contractsList.filter((c) => c.status === 'atraso').length
-    const valorTotal = contractsList.reduce((sum, c) => sum + c.valor_total, 0)
-
-    return { totalContratos, ativos, atrasados, valorTotal }
+  const summary = useMemo(() => {
+    const list = contratos?.data || []
+    return {
+      total: contratos?.total || 0,
+      ativos: list.filter((contrato) => displayStatus(contrato) === 'ativo').length,
+      atrasados: list.filter((contrato) => displayStatus(contrato) === 'atraso').length,
+      valor: list.reduce((total, contrato) => total + (contrato.valor_total || 0), 0),
+    }
   }, [contratos])
 
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      ativo: 'badge-success',
-      finalizado: 'badge-info',
-      cancelado: 'badge-danger',
-      atraso: 'badge-warning',
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!formData.cliente_id || !formData.veiculo_id || !formData.data_inicio || !formData.data_fim) {
+      toast.error('Preencha cliente, veiculo e datas.')
+      return
     }
-    return colors[status] || 'badge-info'
+    if (new Date(formData.data_fim) <= new Date(formData.data_inicio)) {
+      toast.error('A data final precisa ser maior que a inicial.')
+      return
+    }
+
+    const payload = {
+      ...formData,
+      qtd_diarias: dias,
+      valor_total: valorPreview,
+    }
+    if (editingContract) updateMutation.mutate(payload)
+    else createMutation.mutate(payload)
   }
 
-  const getStatusLabel = (status: string) => {
-    const labels: Record<string, string> = {
-      ativo: 'Ativo',
-      finalizado: 'Finalizado',
-      cancelado: 'Cancelado',
-      atraso: 'Atraso',
+  const handleCloseout = () => {
+    if (!closingContract) return
+    if (closeoutData.km_atual_veiculo <= 0) {
+      toast.error('Informe o KM atual do veiculo.')
+      return
     }
-    return labels[status] || status
+    closeMutation.mutate(closeoutData)
   }
 
   return (
     <AppLayout>
       <div className="space-y-6">
-        {/* Page Header */}
         <div className="page-header">
           <div>
             <h1 className="page-title">Contratos</h1>
-            <p className="page-subtitle">Gerenciamento completo de contratos de aluguel</p>
+            <p className="page-subtitle">Locacao com retirada, acompanhamento e encerramento.</p>
           </div>
-          <button onClick={() => handleOpenModal()} className="btn-primary flex items-center gap-2">
-            <Plus size={20} />
+          <button onClick={openCreate} className="btn-primary flex items-center gap-2">
+            <Plus size={18} />
             Novo Contrato
           </button>
         </div>
 
-        {/* KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="kpi-card">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="kpi-label">Total de Contratos</p>
-                <p className="kpi-value">{kpis.totalContratos}</p>
-              </div>
-              <div className="kpi-icon bg-blue-100 text-blue-600">
-                <FileText size={24} />
-              </div>
-            </div>
-          </div>
-
-          <div className="kpi-card">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="kpi-label">Contratos Ativos</p>
-                <p className="kpi-value text-green-600">{kpis.ativos}</p>
-              </div>
-              <div className="kpi-icon bg-green-100 text-green-600">
-                <CheckCircle size={24} />
-              </div>
-            </div>
-          </div>
-
-          <div className="kpi-card">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="kpi-label">Atrasados</p>
-                <p className="kpi-value text-red-600">{kpis.atrasados}</p>
-              </div>
-              <div className="kpi-icon bg-red-100 text-red-600">
-                <AlertCircle size={24} />
-              </div>
-            </div>
-          </div>
-
-          <div className="kpi-card">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="kpi-label">Valor Total</p>
-                <p className="kpi-value text-purple-600">{formatCurrency(kpis.valorTotal)}</p>
-              </div>
-              <div className="kpi-icon bg-purple-100 text-purple-600">
-                <DollarSign size={24} />
-              </div>
-            </div>
-          </div>
+          <div className="kpi-card"><p className="kpi-label">Total</p><p className="kpi-value">{summary.total}</p></div>
+          <div className="kpi-card"><p className="kpi-label">Ativos</p><p className="kpi-value text-green-600">{summary.ativos}</p></div>
+          <div className="kpi-card"><p className="kpi-label">Atrasados</p><p className="kpi-value text-red-600">{summary.atrasados}</p></div>
+          <div className="kpi-card"><p className="kpi-label">Valor em Tela</p><p className="kpi-value text-purple-600">{formatCurrency(summary.valor)}</p></div>
         </div>
 
-        {/* Filters and Search */}
         <div className="space-y-4">
-          <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center">
-            <div className="flex-1 flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
-              <Search size={18} className="text-slate-400 flex-shrink-0" />
-              <input
-                type="text"
-                placeholder="Buscar por número, cliente ou veículo..."
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value)
-                  setPagination({ ...pagination, page: 1 })
-                }}
-                className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
-              />
-            </div>
+          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5">
+            <Search size={18} className="text-slate-400" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(event) => {
+                setSearchTerm(event.target.value)
+                setPagination({ ...pagination, page: 1 })
+              }}
+              className="flex-1 bg-transparent text-sm outline-none"
+              placeholder="Buscar por numero, cliente, placa ou modelo..."
+            />
           </div>
-
-          {/* Status Filter Tabs */}
           <div className="flex flex-wrap gap-2">
-            {['todos', 'ativo', 'finalizado', 'cancelado', 'atraso'].map((status) => (
+            {(['todos', 'ativo', 'finalizado', 'cancelado', 'atraso'] as StatusFilter[]).map((status) => (
               <button
                 key={status}
                 onClick={() => {
-                  setStatusFilter(status as StatusFilter)
+                  setStatusFilter(status)
                   setPagination({ ...pagination, page: 1 })
                 }}
                 className={`filter-tab ${statusFilter === status ? 'filter-tab-active' : 'filter-tab-inactive'}`}
               >
-                {status === 'todos' ? 'Todos' : getStatusLabel(status)}
+                {status === 'todos' ? 'Todos' : statusLabel(status)}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Contracts Table */}
         <div className="card">
           {isLoading ? (
-            <div className="space-y-4">
-              {[...Array(5)].map((_, i) => (
-                <div key={i} className="h-12 bg-slate-100 rounded animate-pulse" />
-              ))}
-            </div>
-          ) : contratos?.data && contratos.data.length > 0 ? (
+            <div className="space-y-3">{[...Array(5)].map((_, index) => <div key={index} className="h-12 bg-slate-100 rounded animate-pulse" />)}</div>
+          ) : contratos?.data?.length ? (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="table-header border-b border-slate-200">
-                    <th className="table-cell text-left">Número</th>
+                    <th className="table-cell text-left">Numero</th>
                     <th className="table-cell text-left">Cliente</th>
-                    <th className="table-cell text-left">Veículo</th>
-                    <th className="table-cell text-left">Período</th>
+                    <th className="table-cell text-left">Veiculo</th>
+                    <th className="table-cell text-left">Periodo</th>
                     <th className="table-cell text-right">Valor</th>
                     <th className="table-cell text-center">Status</th>
-                    <th className="table-cell text-center">Ações</th>
+                    <th className="table-cell text-center">Acoes</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {contratos.data.map((contrato) => (
-                    <tr key={contrato.id} className="table-row hover:bg-slate-50">
-                      <td className="table-cell font-semibold text-slate-900">{contrato.numero}</td>
-                      <td className="table-cell text-slate-700">{contrato.cliente?.nome || '-'}</td>
-                      <td className="table-cell text-slate-700">
-                        {contrato.veiculo ? `${contrato.veiculo.marca} ${contrato.veiculo.modelo}` : '-'}
-                      </td>
-                      <td className="table-cell text-slate-600 text-sm">
-                        {formatDate(contrato.data_inicio)} a {formatDate(contrato.data_fim)}
-                      </td>
-                      <td className="table-cell text-right font-semibold text-slate-900">
-                        {formatCurrency(contrato.valor_total)}
-                      </td>
-                      <td className="table-cell text-center">
-                        <span className={`badge-success inline-block ${getStatusColor(contrato.status)}`}>
-                          {getStatusLabel(contrato.status)}
-                        </span>
-                      </td>
-                      <td className="table-cell text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => handleDownloadPdf(contrato.id, contrato.numero)}
-                            disabled={downloadingPdf === contrato.id}
-                            className="p-1.5 text-slate-600 hover:text-green-600 hover:bg-green-50 rounded transition-colors disabled:opacity-50"
-                            title="Baixar PDF"
-                          >
-                            {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                          </button>
-                          <button
-                            onClick={() => handlePrintPdf(contrato.id)}
-                            className="p-1.5 text-slate-600 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                            title="Imprimir"
-                          >
-                            <Printer size={16} />
-                          </button>
-                          <button
-                            onClick={() => handleOpenModal(contrato)}
-                            className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                            title="Editar"
-                          >
-                            <Edit size={16} />
-                          </button>
-                          <button
-                            onClick={() => setDeleteConfirm({ isOpen: true, id: contrato.id })}
-                            className="p-1.5 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                            title="Deletar"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {contratos.data.map((contrato) => {
+                    const status = displayStatus(contrato)
+                    return (
+                      <tr key={contrato.id} className="table-row hover:bg-slate-50">
+                        <td className="table-cell font-semibold text-slate-900">{contrato.numero}</td>
+                        <td className="table-cell text-slate-700">{contrato.cliente?.nome || '-'}</td>
+                        <td className="table-cell text-slate-700">
+                          {contrato.veiculo ? `${contrato.veiculo.marca} ${contrato.veiculo.modelo}` : '-'}
+                          <div className="text-xs text-slate-500">{contrato.veiculo?.placa || '-'}</div>
+                        </td>
+                        <td className="table-cell text-slate-600 text-sm">
+                          {formatDate(contrato.data_inicio)} a {formatDate(contrato.data_fim)}
+                        </td>
+                        <td className="table-cell text-right font-semibold text-slate-900">{formatCurrency(contrato.valor_total)}</td>
+                        <td className="table-cell text-center">
+                          <span className={`inline-block ${statusClass(status)}`}>{statusLabel(status)}</span>
+                        </td>
+                        <td className="table-cell text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-1.5 hover:text-green-600" disabled={downloadingPdf === contrato.id}>
+                              {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                            </button>
+                            <button onClick={() => handlePdf(contrato.id, contrato.numero, true)} className="p-1.5 hover:text-purple-600"><Printer size={16} /></button>
+                            {contrato.status === 'ativo' && <button onClick={() => openCloseout(contrato)} className="p-1.5 hover:text-emerald-600"><CheckCircle size={16} /></button>}
+                            <button onClick={() => openEdit(contrato)} className="p-1.5 hover:text-blue-600"><Edit size={16} /></button>
+                            <button onClick={() => setDeleteConfirm({ isOpen: true, id: contrato.id })} className="p-1.5 hover:text-red-600"><Trash2 size={16} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
-
-              {/* Pagination */}
               <div className="flex items-center justify-between pt-4 border-t border-slate-200">
-                <p className="text-sm text-slate-600">
-                  Mostrando {contratos.data.length} de {contratos.total} contratos
-                </p>
+                <p className="text-sm text-slate-600">Mostrando {contratos.data.length} de {contratos.total} contratos</p>
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => setPagination({ ...pagination, page: Math.max(1, pagination.page - 1) })}
-                    disabled={pagination.page === 1}
-                    className="btn-secondary btn-sm disabled:opacity-50"
-                  >
-                    Anterior
-                  </button>
-                  <span className="px-4 py-2 text-sm font-medium text-slate-700">
-                    Página {pagination.page} de {Math.ceil((contratos.total || 0) / pagination.limit)}
-                  </span>
-                  <button
-                    onClick={() =>
-                      setPagination({
-                        ...pagination,
-                        page: Math.min(
-                          Math.ceil((contratos.total || 0) / pagination.limit),
-                          pagination.page + 1
-                        ),
-                      })
-                    }
-                    disabled={pagination.page * pagination.limit >= (contratos.total || 0)}
-                    className="btn-secondary btn-sm disabled:opacity-50"
-                  >
-                    Próximo
-                  </button>
+                  <button onClick={() => setPagination({ ...pagination, page: Math.max(1, pagination.page - 1) })} disabled={pagination.page === 1} className="btn-secondary btn-sm">Anterior</button>
+                  <button onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })} disabled={pagination.page * pagination.limit >= (contratos.total || 0)} className="btn-secondary btn-sm">Proximo</button>
                 </div>
               </div>
             </div>
           ) : (
             <div className="empty-state">
-              <div className="empty-state-icon bg-slate-100">
-                <FileText className="text-slate-400" size={48} />
-              </div>
+              <div className="empty-state-icon bg-slate-100"><FileText className="text-slate-400" size={48} /></div>
               <h3 className="mt-4 font-semibold text-slate-900">Nenhum contrato encontrado</h3>
-              <p className="text-slate-600 mt-1">Crie seu primeiro contrato para começar</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Modal */}
       {isModalOpen && (
-        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setIsModalOpen(false)}>
-          <div className="modal-content max-w-2xl w-full flex flex-col" onClick={(e) => e.stopPropagation()}>
-            {/* Modal Header */}
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setIsModalOpen(false)}>
+          <div className="modal-content max-w-2xl w-full" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-              <h3 className="text-lg font-display font-bold text-slate-900">
-                {editingContract ? 'Editar Contrato' : 'Novo Contrato'}
-              </h3>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="btn-icon"
-              >
-                <X size={20} />
-              </button>
+              <h3 className="text-lg font-display font-bold text-slate-900">{editingContract ? 'Editar Contrato' : 'Novo Contrato'}</h3>
+              <button onClick={() => setIsModalOpen(false)} className="btn-icon"><X size={20} /></button>
             </div>
-
-            {/* Modal Body */}
-            <div className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)]">
-            {/* Step Indicator */}
-            <div className="mb-8">
-              <div className="flex items-center justify-between">
-                {[1, 2, 3].map((s, index) => (
-                  <div key={s} className="flex items-center flex-1">
-                    <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-colors ${
-                        s <= step
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-slate-200 text-slate-600'
-                      }`}
-                    >
-                      {s}
-                    </div>
-                    {index < 2 && (
-                      <div
-                        className={`flex-1 h-1 mx-2 transition-colors ${
-                          s < step ? 'bg-blue-600' : 'bg-slate-200'
-                        }`}
-                      />
-                    )}
-                  </div>
-                ))}
+            <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="input-label">Cliente *</label>
+                  <select value={formData.cliente_id} onChange={(event) => setFormData({ ...formData, cliente_id: event.target.value })} className="input-field">
+                    <option value="">Selecione</option>
+                    {clientes?.map((cliente: any) => <option key={cliente.id} value={cliente.id}>{cliente.nome}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="input-label">Tipo</label>
+                  <select value={formData.tipo} onChange={(event) => setFormData({ ...formData, tipo: event.target.value as 'cliente' | 'empresa' })} className="input-field">
+                    <option value="cliente">Cliente</option>
+                    <option value="empresa">Empresa</option>
+                  </select>
+                </div>
               </div>
-              <div className="flex justify-between mt-2 text-xs text-slate-600">
-                <span>Cliente & Veículo</span>
-                <span>Datas & Valores</span>
-                <span>Revisão</span>
+              <div>
+                <label className="input-label">Veiculo *</label>
+                <select value={formData.veiculo_id} onChange={(event) => handleVehicleChange(event.target.value)} className="input-field">
+                  <option value="">Selecione</option>
+                  {availableVehicles.map((veiculo: any) => <option key={veiculo.id} value={veiculo.id}>{veiculo.placa} - {veiculo.marca} {veiculo.modelo}</option>)}
+                </select>
               </div>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Step 1: Cliente e Veículo */}
-              {step === 1 && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="input-label">Cliente *</label>
-                    <select
-                      value={formData.cliente_id}
-                      onChange={(e) => setFormData({ ...formData, cliente_id: e.target.value })}
-                      className="input-field"
-                    >
-                      <option value="">Selecione um cliente</option>
-                      {clientes?.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.nome}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="input-label">Veículo *</label>
-                    <select
-                      value={formData.veiculo_id}
-                      onChange={(e) => setFormData({ ...formData, veiculo_id: e.target.value })}
-                      className="input-field"
-                    >
-                      <option value="">Selecione um veículo</option>
-                      {veiculos?.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.placa} - {v.marca} {v.modelo}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {clienteInfo && veiculoInfo && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
-                      <p className="text-sm text-blue-900">
-                        <strong>Resumo:</strong> {clienteInfo.nome} alugando {veiculoInfo.marca} {veiculoInfo.modelo}
-                      </p>
-                    </div>
-                  )}
+              {selectedCliente && selectedVeiculo && (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-700">
+                  {selectedCliente.nome} | {selectedVeiculo.marca} {selectedVeiculo.modelo} | KM atual {selectedVeiculo.km_atual || 0}
                 </div>
               )}
-
-              {/* Step 2: Datas e Valor */}
-              {step === 2 && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="input-label">Data Início *</label>
-                      <input
-                        type="date"
-                        value={formData.data_inicio}
-                        onChange={(e) => handleDateChange('data_inicio', e.target.value)}
-                        className="input-field"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="input-label">Data Fim *</label>
-                      <input
-                        type="date"
-                        value={formData.data_fim}
-                        onChange={(e) => handleDateChange('data_fim', e.target.value)}
-                        className="input-field"
-                      />
-                    </div>
-                  </div>
-
-                  {dateError && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex gap-2">
-                      <AlertCircle size={18} className="text-red-600 flex-shrink-0 mt-0.5" />
-                      <p className="text-sm text-red-800">{dateError}</p>
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="input-label">Quilometragem Inicial</label>
-                    <input
-                      type="number"
-                      value={formData.quilometragem_inicial}
-                      onChange={(e) =>
-                        setFormData({ ...formData, quilometragem_inicial: parseInt(e.target.value) || 0 })
-                      }
-                      min="0"
-                      className="input-field"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="input-label">Valor da Diária *</label>
-                    <input
-                      type="number"
-                      value={formData.valor_diaria}
-                      onChange={(e) => setFormData({ ...formData, valor_diaria: parseFloat(e.target.value) || 0 })}
-                      step="0.01"
-                      min="0"
-                      className="input-field"
-                    />
-                  </div>
-
-                  {formData.data_inicio && formData.data_fim && !dateError && (
-                    <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-600">Período:</span>
-                        <span className="font-semibold text-slate-900">{dias} dias</span>
-                      </div>
-                      <div className="flex justify-between items-center mt-2">
-                        <span className="text-slate-600">Valor/Dia:</span>
-                        <span className="font-semibold text-slate-900">{formatCurrency(formData.valor_diaria)}</span>
-                      </div>
-                      <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-200">
-                        <span className="font-medium text-slate-900">Total:</span>
-                        <span className="font-bold text-blue-600 text-lg">{formatCurrency(valor_total)}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Step 3: Review */}
-              {step === 3 && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="card bg-slate-50">
-                      <div className="flex items-start gap-3">
-                        <Users className="text-blue-600 flex-shrink-0 mt-1" size={20} />
-                        <div>
-                          <p className="text-xs uppercase tracking-wide text-slate-600">Cliente</p>
-                          <p className="font-semibold text-slate-900 mt-1">{clienteInfo?.nome}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="card bg-slate-50">
-                      <div className="flex items-start gap-3">
-                        <FileText className="text-green-600 flex-shrink-0 mt-1" size={20} />
-                        <div>
-                          <p className="text-xs uppercase tracking-wide text-slate-600">Veículo</p>
-                          <p className="font-semibold text-slate-900 mt-1">
-                            {veiculoInfo?.marca} {veiculoInfo?.modelo}
-                          </p>
-                          <p className="text-sm text-slate-600">{veiculoInfo?.placa}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="card bg-slate-50">
-                      <div className="flex items-start gap-3">
-                        <Calendar className="text-purple-600 flex-shrink-0 mt-1" size={20} />
-                        <div>
-                          <p className="text-xs uppercase tracking-wide text-slate-600">Início</p>
-                          <p className="font-semibold text-slate-900 mt-1">{formatDate(formData.data_inicio)}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="card bg-slate-50">
-                      <div className="flex items-start gap-3">
-                        <Clock className="text-orange-600 flex-shrink-0 mt-1" size={20} />
-                        <div>
-                          <p className="text-xs uppercase tracking-wide text-slate-600">Fim</p>
-                          <p className="font-semibold text-slate-900 mt-1">{formatDate(formData.data_fim)}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="card bg-blue-50 border border-blue-200">
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-700">Período</span>
-                        <span className="font-semibold text-slate-900">{dias} dias</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-700">Valor/Dia</span>
-                        <span className="font-semibold text-slate-900">{formatCurrency(formData.valor_diaria)}</span>
-                      </div>
-                      <div className="border-t border-blue-200 pt-3 flex justify-between items-center">
-                        <span className="font-bold text-blue-900">Valor Total</span>
-                        <span className="font-bold text-blue-600 text-xl">{formatCurrency(valor_total)}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="input-label">Observações</label>
-                    <textarea
-                      value={formData.observacoes}
-                      onChange={(e) => setFormData({ ...formData, observacoes: e.target.value })}
-                      className="input-field"
-                      rows={3}
-                      placeholder="Adicione observações sobre o contrato (opcional)"
-                    />
-                  </div>
-                </div>
-              )}
-
-            {/* Modal Footer */}
-            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/50">
-              <div className="flex gap-2">
-                {step > 1 && (
-                  <button
-                    type="button"
-                    onClick={handlePrevStep}
-                    className="btn-secondary btn-sm flex items-center gap-2"
-                    disabled={createMutation.isPending || updateMutation.isPending}
-                  >
-                    Voltar
-                  </button>
-                )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><label className="input-label">Data Inicio *</label><input type="date" value={formData.data_inicio} onChange={(event) => setFormData({ ...formData, data_inicio: event.target.value })} className="input-field" /></div>
+                <div><label className="input-label">Data Fim *</label><input type="date" value={formData.data_fim} onChange={(event) => setFormData({ ...formData, data_fim: event.target.value })} className="input-field" /></div>
               </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="btn-secondary"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                >
-                  Cancelar
-                </button>
-
-                {step < 3 ? (
-                  <button
-                    type="button"
-                    onClick={handleNextStep}
-                    className="btn-primary flex items-center gap-2"
-                  >
-                    Próximo
-                    <ChevronRight size={18} />
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={createMutation.isPending || updateMutation.isPending}
-                  >
-                    {createMutation.isPending || updateMutation.isPending ? 'Processando...' : 'Confirmar'}
-                  </button>
-                )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-xs uppercase tracking-wide text-blue-700">KM Atual do Veiculo</p>
+                  <p className="text-2xl font-bold text-blue-950 mt-2">{formData.km_atual_veiculo.toLocaleString('pt-BR')}</p>
+                </div>
+                <div><label className="input-label">Hora de Saida</label><input type="time" value={formData.hora_saida} onChange={(event) => setFormData({ ...formData, hora_saida: event.target.value })} className="input-field" /></div>
               </div>
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="input-label">Combustivel na Saida</label>
+                  <select value={formData.combustivel_saida} onChange={(event) => setFormData({ ...formData, combustivel_saida: event.target.value })} className="input-field">
+                    <option value="">Selecione</option>
+                    {fuelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                  </select>
+                </div>
+                <div><label className="input-label">KM Livres</label><input type="number" value={formData.km_livres} onChange={(event) => setFormData({ ...formData, km_livres: Number(event.target.value) || 0 })} className="input-field" /></div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div><label className="input-label">Valor Diaria *</label><input type="number" step="0.01" value={formData.valor_diaria} onChange={(event) => setFormData({ ...formData, valor_diaria: Number(event.target.value) || 0 })} className="input-field" /></div>
+                <div><label className="input-label">Valor KM Excedente</label><input type="number" step="0.01" value={formData.valor_km_excedente} onChange={(event) => setFormData({ ...formData, valor_km_excedente: Number(event.target.value) || 0 })} className="input-field" /></div>
+                <div><label className="input-label">Desconto</label><input type="number" step="0.01" value={formData.desconto} onChange={(event) => setFormData({ ...formData, desconto: Number(event.target.value) || 0 })} className="input-field" /></div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm space-y-2">
+                <div className="flex justify-between"><span>Periodo</span><strong>{dias} dia(s)</strong></div>
+                <div className="flex justify-between"><span>Valor previsto</span><strong>{formatCurrency(valorPreview)}</strong></div>
+              </div>
+              <div><label className="input-label">Observacoes</label><textarea value={formData.observacoes} onChange={(event) => setFormData({ ...formData, observacoes: event.target.value })} rows={3} className="input-field" /></div>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="btn-secondary">Cancelar</button>
+                <button type="submit" className="btn-primary" disabled={createMutation.isPending || updateMutation.isPending}>{createMutation.isPending || updateMutation.isPending ? 'Salvando...' : 'Salvar Contrato'}</button>
+              </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {closingContract && (
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !closeMutation.isPending && setClosingContract(null)}>
+          <div className="modal-content max-w-lg w-full" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">Encerrar Contrato</h3>
+              <button onClick={() => setClosingContract(null)} className="btn-icon" disabled={closeMutation.isPending}><X size={20} /></button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4"><p className="text-xs uppercase tracking-wide text-slate-500">KM de Retirada</p><p className="text-2xl font-bold text-slate-900 mt-2">{(closingContract.quilometragem_inicial || 0).toLocaleString('pt-BR')}</p></div>
+                <div><label className="input-label">KM Atual do Veiculo *</label><input type="number" min={closingContract.quilometragem_inicial || 0} value={closeoutData.km_atual_veiculo} onChange={(event) => setCloseoutData({ ...closeoutData, km_atual_veiculo: Number(event.target.value) || 0 })} className="input-field" /></div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="input-label">Combustivel Retorno</label>
+                  <select value={closeoutData.combustivel_retorno} onChange={(event) => setCloseoutData({ ...closeoutData, combustivel_retorno: event.target.value })} className="input-field">
+                    <option value="">Selecione</option>
+                    {fuelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                  </select>
+                </div>
+                <div><label className="input-label">Valor Avarias</label><input type="number" step="0.01" value={closeoutData.valor_avarias} onChange={(event) => setCloseoutData({ ...closeoutData, valor_avarias: Number(event.target.value) || 0 })} className="input-field" /></div>
+              </div>
+              <div><label className="input-label">Desconto Final</label><input type="number" step="0.01" value={closeoutData.desconto} onChange={(event) => setCloseoutData({ ...closeoutData, desconto: Number(event.target.value) || 0 })} className="input-field" /></div>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm space-y-2">
+                <div className="flex justify-between"><span>KM rodado</span><strong>{closeoutKmRodado.toLocaleString('pt-BR')}</strong></div>
+                <div className="flex justify-between"><span>KM excedente</span><strong>{closeoutKmExcedente.toLocaleString('pt-BR')}</strong></div>
+                <div className="flex justify-between"><span>Cobranca extra</span><strong>{formatCurrency(closeoutValorExtra)}</strong></div>
+                <div className="flex justify-between pt-2 border-t border-blue-200"><span>Total estimado</span><strong>{formatCurrency(closeoutEstimativa)}</strong></div>
+              </div>
+              <div><label className="input-label">Observacoes</label><textarea rows={3} value={closeoutData.observacoes} onChange={(event) => setCloseoutData({ ...closeoutData, observacoes: event.target.value })} className="input-field" /></div>
+              <div className="flex items-center justify-end gap-3">
+                <button onClick={() => setClosingContract(null)} className="btn-secondary" disabled={closeMutation.isPending}>Cancelar</button>
+                <button onClick={handleCloseout} className="btn-primary" disabled={closeMutation.isPending}>{closeMutation.isPending ? 'Encerrando...' : 'Encerrar Contrato'}</button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
       {deleteConfirm.isOpen && (
-        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !deleteMutation.isPending && setDeleteConfirm({ isOpen: false })}>
-          <div className="modal-content max-w-sm w-full flex flex-col" onClick={(e) => e.stopPropagation()}>
-            {/* Modal Header */}
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !deleteMutation.isPending && setDeleteConfirm({ isOpen: false })}>
+          <div className="modal-content max-w-sm w-full" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
               <h3 className="text-lg font-display font-bold text-slate-900">Deletar Contrato</h3>
-              <button
-                onClick={() => setDeleteConfirm({ isOpen: false })}
-                className="btn-icon"
-                disabled={deleteMutation.isPending}
-              >
-                <X size={20} />
-              </button>
+              <button onClick={() => setDeleteConfirm({ isOpen: false })} className="btn-icon" disabled={deleteMutation.isPending}><X size={20} /></button>
             </div>
-
-            {/* Modal Body */}
-            <div className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)]">
-              <div className="flex items-start gap-4">
-                <div className="bg-red-100 rounded-lg p-3">
-                  <AlertCircle className="text-red-600" size={24} />
-                </div>
-                <div className="flex-1">
-                  <p className="text-slate-600 text-sm">Esta ação não pode ser desfeita. O contrato será removido do sistema.</p>
-                </div>
-              </div>
+            <div className="px-6 py-5 flex items-start gap-4">
+              <div className="bg-red-100 rounded-lg p-3"><AlertCircle className="text-red-600" size={24} /></div>
+              <p className="text-sm text-slate-600">Esta acao nao pode ser desfeita.</p>
             </div>
-
-            {/* Modal Footer */}
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
-              <button
-                onClick={() => setDeleteConfirm({ isOpen: false })}
-                className="btn-secondary"
-                disabled={deleteMutation.isPending}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => deleteConfirm.id && deleteMutation.mutate(deleteConfirm.id)}
-                className="btn-danger"
-                disabled={deleteMutation.isPending}
-              >
-                {deleteMutation.isPending ? 'Deletando...' : 'Deletar'}
-              </button>
+              <button onClick={() => setDeleteConfirm({ isOpen: false })} className="btn-secondary" disabled={deleteMutation.isPending}>Cancelar</button>
+              <button onClick={() => deleteConfirm.id && deleteMutation.mutate(deleteConfirm.id)} className="btn-danger" disabled={deleteMutation.isPending}>{deleteMutation.isPending ? 'Deletando...' : 'Deletar'}</button>
             </div>
           </div>
         </div>

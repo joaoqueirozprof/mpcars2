@@ -26,7 +26,6 @@ import {
 } from 'lucide-react'
 import api from '@/services/api'
 import AppLayout from '@/components/layout/AppLayout'
-import SkeletonLoader from '@/components/shared/SkeletonLoader'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { DashboardStats } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
@@ -176,8 +175,27 @@ const Dashboard: React.FC = () => {
             label="Receita Mês"
             value={isLoading ? '-' : formatCurrency(stats?.receita_mensal || 0)}
             color="emerald"
-            trend={12}
+            trend={stats?.variacao_receita_mensal}
           />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 animate-fade-in-up" style={{ animationDelay: '60ms' }}>
+          <div className="card bg-slate-50 border border-slate-200">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Veiculos Disponiveis</p>
+            <p className="text-2xl font-bold text-slate-900 mt-2">{isLoading ? '-' : stats?.veiculos_disponiveis || 0}</p>
+          </div>
+          <div className="card bg-slate-50 border border-slate-200">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Taxa de Ocupacao</p>
+            <p className="text-2xl font-bold text-slate-900 mt-2">{isLoading ? '-' : `${stats?.taxa_ocupacao || 0}%`}</p>
+          </div>
+          <div className="card bg-slate-50 border border-slate-200">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Ticket Medio</p>
+            <p className="text-2xl font-bold text-slate-900 mt-2">{isLoading ? '-' : formatCurrency(stats?.ticket_medio || 0)}</p>
+          </div>
+          <div className="card bg-slate-50 border border-slate-200">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Clientes Ativos</p>
+            <p className="text-2xl font-bold text-slate-900 mt-2">{isLoading ? '-' : stats?.total_clientes || 0}</p>
+          </div>
         </div>
 
         {/* Revenue Chart and Alerts Section */}
