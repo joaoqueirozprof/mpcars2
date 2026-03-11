@@ -38,6 +38,16 @@ def run_migration():
         ("uso_veiculo_empresa", "valor_diaria_empresa", "NUMERIC(10,2)"),
         # DespesaNF fields
         ("despesa_nf", "tipo", "VARCHAR"),
+        # updated_at columns for all major tables
+        ("empresas", "updated_at", "TIMESTAMP DEFAULT NOW()"),
+        ("clientes", "updated_at", "TIMESTAMP DEFAULT NOW()"),
+        ("veiculos", "updated_at", "TIMESTAMP DEFAULT NOW()"),
+        ("contratos", "updated_at", "TIMESTAMP DEFAULT NOW()"),
+        ("seguros", "updated_at", "TIMESTAMP DEFAULT NOW()"),
+        ("ipva_registro", "updated_at", "TIMESTAMP DEFAULT NOW()"),
+        ("reservas", "updated_at", "TIMESTAMP DEFAULT NOW()"),
+        ("multas", "updated_at", "TIMESTAMP DEFAULT NOW()"),
+        ("manutencao", "updated_at", "TIMESTAMP DEFAULT NOW()"),
     ]
     
     with engine.connect() as conn:
