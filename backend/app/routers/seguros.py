@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func as sqlfunc
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime, timedelta
@@ -62,6 +63,35 @@ class ParcelaResponse(BaseModel):
         from_attributes = True
 
 
+def _sync_seguro_status(db: Session, seguro_id: int):
+    """Sincroniza o status do seguro baseado nas parcelas.
+
+    CORRIGIDO: Quando todas as parcelas estão pagas, o seguro
+    deve refletir isso. Também verifica vencimento.
+    """
+    seguro = db.query(Seguro).filter(Seguro.id == seguro_id).first()
+    if not seguro:
+        return
+
+    total_parcelas = db.query(sqlfunc.count(ParcelaSeguro.id)).filter(
+        ParcelaSeguro.seguro_id == seguro_id
+    ).scalar() or 0
+
+    parcelas_pagas = db.query(sqlfunc.count(ParcelaSeguro.id)).filter(
+        ParcelaSeguro.seguro_id == seguro_id,
+        ParcelaSeguro.status == "pago",
+    ).scalar() or 0
+
+    if total_parcelas > 0 and parcelas_pagas == total_parcelas:
+        # Todas as parcelas pagas
+        if seguro.data_fim and seguro.data_fim < date.today():
+            seguro.status = "vencido"
+        else:
+            seguro.status = "ativo"  # Parcelas pagas, ainda vigente
+    elif seguro.data_fim and seguro.data_fim < date.today():
+        seguro.status = "vencido"
+
+
 # === Fixed path routes FIRST (before /{seguro_id}) ===
 
 
@@ -100,6 +130,13 @@ def create_seguro(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
         )
 
+    # Validar datas
+    if seguro.data_inicio >= seguro.data_fim:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Data de início deve ser anterior à data de fim",
+        )
+
     existing = db.query(Seguro).filter(
         Seguro.numero_apolice == seguro.numero_apolice
     ).first()
@@ -130,7 +167,7 @@ def create_seguro(
         qtd = seguro.qtd_parcelas if seguro.qtd_parcelas and seguro.qtd_parcelas > 0 else 1
         dias_entre = (seguro.data_fim - seguro.data_inicio).days
         dias_por_parcela = max(1, dias_entre // qtd)
-        valor_parcela = seguro.valor / qtd
+        valor_parcela = round(seguro.valor / qtd, 2)
 
         for i in range(1, qtd + 1):
             vencimento = seguro.data_inicio + timedelta(days=dias_por_parcela * i)
@@ -168,15 +205,27 @@ def get_seguros_resumo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get insurance summary."""
-    total_seguros = db.query(Seguro).count()
-    seguros_ativos = db.query(Seguro).filter(Seguro.status == "ativo").count()
-    total_valor = sum(float(s.valor) for s in db.query(Seguro).all() if s.valor)
+    """Get insurance summary - using SQL SUM instead of Python loops."""
+    total_seguros = db.query(sqlfunc.count(Seguro.id)).scalar() or 0
+    seguros_ativos = db.query(sqlfunc.count(Seguro.id)).filter(Seguro.status == "ativo").scalar() or 0
+    total_valor = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(Seguro.valor), 0)
+    ).scalar())
+
+    # Adicionar info de parcelas pendentes
+    parcelas_pendentes = db.query(sqlfunc.count(ParcelaSeguro.id)).filter(
+        ParcelaSeguro.status == "pendente"
+    ).scalar() or 0
+    valor_parcelas_pendentes = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(ParcelaSeguro.valor), 0)
+    ).filter(ParcelaSeguro.status == "pendente").scalar())
 
     return {
         "total_seguros": total_seguros,
         "seguros_ativos": seguros_ativos,
         "total_valor": total_valor,
+        "parcelas_pendentes": parcelas_pendentes,
+        "valor_parcelas_pendentes": valor_parcelas_pendentes,
     }
 
 
@@ -236,7 +285,7 @@ def get_seguro_parcelas(
 
     parcelas = db.query(ParcelaSeguro).filter(
         ParcelaSeguro.seguro_id == seguro_id
-    ).all()
+    ).order_by(ParcelaSeguro.numero_parcela).all()
     return parcelas
 
 
@@ -246,7 +295,11 @@ def pagar_parcela(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Mark an installment as paid."""
+    """Mark an installment as paid.
+
+    CORRIGIDO: Agora sincroniza o status do seguro pai quando
+    todas as parcelas estão pagas.
+    """
     parcela = db.query(ParcelaSeguro).filter(ParcelaSeguro.id == parcela_id).first()
     if not parcela:
         raise HTTPException(
@@ -255,6 +308,10 @@ def pagar_parcela(
 
     parcela.status = "pago"
     parcela.data_pagamento = datetime.now().date()
+
+    # Sync status do seguro pai
+    _sync_seguro_status(db, parcela.seguro_id)
+
     db.commit()
     db.refresh(parcela)
     return parcela
@@ -266,13 +323,15 @@ def delete_seguro(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete an insurance policy."""
+    """Delete an insurance policy.
+
+    CORRIGIDO: Com CASCADE configurado, as parcelas são deletadas automaticamente.
+    """
     seguro = db.query(Seguro).filter(Seguro.id == seguro_id).first()
     if not seguro:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Seguro não encontrado"
         )
-    # Delete parcelas first (FK constraint)
-    db.query(ParcelaSeguro).filter(ParcelaSeguro.seguro_id == seguro_id).delete(synchronize_session=False)
+    # CASCADE handles parcelas deletion automatically
     db.delete(seguro)
     db.commit()

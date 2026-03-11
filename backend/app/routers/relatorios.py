@@ -1,3 +1,22 @@
+"""Routers de relatórios - versão limpa.
+
+CORRIGIDO: Removidas rotas legacy duplicadas que faziam a mesma coisa
+que as rotas spec (/exportar/*). As rotas spec unificadas já suportam
+CSV e XLSX com filtros, tornando as rotas legacy redundantes.
+
+Rotas legacy removidas:
+- /contratos/pdf -> usar /financeiro/pdf (mais completo)
+- /receitas/pdf -> coberto por /financeiro/pdf
+- /despesas/pdf -> coberto por /financeiro/pdf
+- /frota/pdf -> coberto por /exportar/veiculos
+- /clientes/pdf -> coberto por /exportar/clientes
+- /ipva/pdf -> funcionalidade única, MANTIDA como /ipva/pdf
+- /contratos/xlsx -> usar /exportar/contratos?formato=xlsx
+- /contratos/csv -> usar /exportar/contratos?formato=csv
+- /veiculos/xlsx -> usar /exportar/veiculos?formato=xlsx
+- /clientes/xlsx -> usar /exportar/clientes?formato=xlsx
+- /despesas/xlsx -> usar /exportar/financeiro?formato=xlsx
+"""
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -8,7 +27,6 @@ from app.core.deps import get_current_user
 from app.models.user import User
 from app.models import Contrato, RelatorioNF, UsoVeiculoEmpresa, Empresa, Veiculo
 from app.services.pdf_service import PDFService
-from app.services.export_service import ExportService
 from app.services.pdf_contrato import PDFContratoService
 from app.services.pdf_financeiro import PDFFinanceiroService
 from app.services.pdf_nf import PDFNFService
@@ -19,7 +37,7 @@ router = APIRouter(prefix="/relatorios", tags=["Relatorios"])
 
 
 # ============================================================
-# PDF 1 - CONTRATO DE LOCAÇÃO (spec route)
+# PDF 1 - CONTRATO DE LOCAÇÃO
 # ============================================================
 @router.get("/contrato/{contrato_id}/pdf")
 def get_contrato_pdf(
@@ -53,7 +71,7 @@ def get_contrato_pdf(
 
 
 # ============================================================
-# PDF 2 - RELATÓRIO FINANCEIRO (spec route)
+# PDF 2 - RELATÓRIO FINANCEIRO
 # ============================================================
 @router.get("/financeiro/pdf")
 def get_financeiro_pdf(
@@ -96,11 +114,7 @@ def get_nf_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate NF PDF for a single vehicle usage.
-    km_percorrido: KM digitado pelo usuario.
-    km_referencia: KM permitido (override, se omitido usa do cadastro).
-    valor_km_extra: Taxa por KM extra (override, se omitido usa do cadastro).
-    """
+    """Generate NF PDF for a single vehicle usage."""
     uso = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id == uso_id).first()
     if not uso:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Uso de veiculo nao encontrado")
@@ -109,7 +123,6 @@ def get_nf_pdf(
     if not empresa:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Empresa nao encontrada para este uso")
 
-    # Save km_percorrido if provided
     if km_percorrido is not None:
         uso.km_percorrido = km_percorrido
         db.commit()
@@ -161,9 +174,7 @@ def get_nf_empresa_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate consolidated NF PDF for multiple vehicles of a company.
-    Send empresa_id + list of {uso_id, km_percorrido} for each vehicle.
-    """
+    """Generate consolidated NF PDF for multiple vehicles of a company."""
     empresa = db.query(Empresa).filter(Empresa.id == request.empresa_id).first()
     if not empresa:
         raise HTTPException(status_code=404, detail="Empresa nao encontrada")
@@ -171,7 +182,6 @@ def get_nf_empresa_pdf(
     if not request.veiculos:
         raise HTTPException(status_code=400, detail="Nenhum veiculo informado")
 
-    # Save km_percorrido for each vehicle
     for item in request.veiculos:
         uso = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id == item.uso_id).first()
         if uso:
@@ -205,7 +215,7 @@ def get_nf_empresa_pdf(
 
 
 # ============================================================
-# EXPORTAÇÕES UNIFICADAS (spec routes: /exportar/)
+# EXPORTAÇÕES UNIFICADAS (/exportar/)
 # ============================================================
 @router.get("/exportar/clientes")
 def exportar_clientes(
@@ -226,11 +236,7 @@ def exportar_clientes(
 
     data_str = datetime.now().strftime("%Y%m%d")
     filename = "clientes_{}.{}".format(data_str, formato)
-
-    if formato == "csv":
-        media = "text/csv; charset=utf-8"
-    else:
-        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    media = "text/csv; charset=utf-8" if formato == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     return StreamingResponse(
         iter([buffer.getvalue()]),
@@ -257,11 +263,7 @@ def exportar_veiculos(
 
     data_str = datetime.now().strftime("%Y%m%d")
     filename = "veiculos_{}.{}".format(data_str, formato)
-
-    if formato == "csv":
-        media = "text/csv; charset=utf-8"
-    else:
-        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    media = "text/csv; charset=utf-8" if formato == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     return StreamingResponse(
         iter([buffer.getvalue()]),
@@ -291,11 +293,7 @@ def exportar_contratos(
     di = data_inicio or "geral"
     df = data_fim or datetime.now().strftime("%Y-%m-%d")
     filename = "contratos_{}_{}.{}".format(di, df, formato)
-
-    if formato == "csv":
-        media = "text/csv; charset=utf-8"
-    else:
-        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    media = "text/csv; charset=utf-8" if formato == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     return StreamingResponse(
         iter([buffer.getvalue()]),
@@ -324,11 +322,7 @@ def exportar_financeiro(
     di = data_inicio or "geral"
     df = data_fim or datetime.now().strftime("%Y-%m-%d")
     filename = "financeiro_{}_{}.{}".format(di, df, formato)
-
-    if formato == "csv":
-        media = "text/csv; charset=utf-8"
-    else:
-        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    media = "text/csv; charset=utf-8" if formato == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     return StreamingResponse(
         iter([buffer.getvalue()]),
@@ -338,186 +332,17 @@ def exportar_financeiro(
 
 
 # ============================================================
-# LEGACY ROUTES (kept for backward compatibility)
+# RELATÓRIO IPVA (mantido - funcionalidade única)
 # ============================================================
-@router.get("/contratos/pdf")
-def get_relatorio_contratos_pdf(
-    data_inicio: str,
-    data_fim: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Generate contracts report PDF (legacy)."""
-    try:
-        datetime.strptime(data_inicio, "%Y-%m-%d")
-        datetime.strptime(data_fim, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato de data invalido")
-
-    pdf_buffer = PDFService.generate_relatorio_contratos_pdf(db, data_inicio, data_fim)
-    return StreamingResponse(
-        iter([pdf_buffer.getvalue()]),
-        media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=relatorio_contratos_{}_{}.pdf".format(data_inicio, data_fim)},
-    )
-
-
-@router.get("/receitas/pdf")
-def get_relatorio_receitas_pdf(
-    data_inicio: str,
-    data_fim: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Generate revenue report PDF (legacy)."""
-    try:
-        datetime.strptime(data_inicio, "%Y-%m-%d")
-        datetime.strptime(data_fim, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato de data invalido")
-
-    pdf_buffer = PDFService.generate_relatorio_receitas_pdf(db, data_inicio, data_fim)
-    return StreamingResponse(
-        iter([pdf_buffer.getvalue()]),
-        media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=relatorio_receitas_{}_{}.pdf".format(data_inicio, data_fim)},
-    )
-
-
-@router.get("/despesas/pdf")
-def get_relatorio_despesas_pdf(
-    data_inicio: str,
-    data_fim: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Generate expenses report PDF (legacy)."""
-    try:
-        datetime.strptime(data_inicio, "%Y-%m-%d")
-        datetime.strptime(data_fim, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Formato de data invalido")
-
-    pdf_buffer = PDFService.generate_relatorio_despesas_pdf(db, data_inicio, data_fim)
-    return StreamingResponse(
-        iter([pdf_buffer.getvalue()]),
-        media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=relatorio_despesas_{}_{}.pdf".format(data_inicio, data_fim)},
-    )
-
-
-@router.get("/frota/pdf")
-def get_relatorio_frota_pdf(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Generate fleet report PDF (legacy)."""
-    pdf_buffer = PDFService.generate_relatorio_frota_pdf(db)
-    return StreamingResponse(
-        iter([pdf_buffer.getvalue()]),
-        media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=relatorio_frota.pdf"},
-    )
-
-
-@router.get("/clientes/pdf")
-def get_relatorio_clientes_pdf(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Generate clients report PDF (legacy)."""
-    pdf_buffer = PDFService.generate_relatorio_clientes_pdf(db)
-    return StreamingResponse(
-        iter([pdf_buffer.getvalue()]),
-        media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=relatorio_clientes.pdf"},
-    )
-
-
 @router.get("/ipva/pdf")
 def get_relatorio_ipva_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate IPVA report PDF (legacy)."""
+    """Generate IPVA report PDF."""
     pdf_buffer = PDFService.generate_relatorio_ipva_pdf(db)
     return StreamingResponse(
         iter([pdf_buffer.getvalue()]),
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=relatorio_ipva.pdf"},
-    )
-
-
-# Legacy export routes (kept for backward compatibility)
-@router.get("/contratos/xlsx")
-def export_contratos_xlsx(
-    status_filter: str = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Export contracts to XLSX (legacy)."""
-    filters = {}
-    if status_filter:
-        filters["status"] = status_filter
-    buffer = ExportService.export_contratos_xlsx(db, filters)
-    return StreamingResponse(
-        iter([buffer.getvalue()]),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=contratos.xlsx"},
-    )
-
-
-@router.get("/contratos/csv")
-def export_contratos_csv(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Export contracts to CSV (legacy)."""
-    buffer = ExportService.export_contratos_csv(db)
-    return StreamingResponse(
-        iter([buffer.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=contratos.csv"},
-    )
-
-
-@router.get("/veiculos/xlsx")
-def export_veiculos_xlsx(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Export vehicles to XLSX (legacy)."""
-    buffer = ExportService.export_veiculos_xlsx(db)
-    return StreamingResponse(
-        iter([buffer.getvalue()]),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=veiculos.xlsx"},
-    )
-
-
-@router.get("/clientes/xlsx")
-def export_clientes_xlsx(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Export clients to XLSX (legacy)."""
-    buffer = ExportService.export_clientes_xlsx(db)
-    return StreamingResponse(
-        iter([buffer.getvalue()]),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=clientes.xlsx"},
-    )
-
-
-@router.get("/despesas/xlsx")
-def export_despesas_xlsx(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Export expenses to XLSX (legacy)."""
-    buffer = ExportService.export_despesas_xlsx(db)
-    return StreamingResponse(
-        iter([buffer.getvalue()]),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=despesas.xlsx"},
     )

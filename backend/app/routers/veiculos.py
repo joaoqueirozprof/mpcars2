@@ -4,6 +4,7 @@ import shutil
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sqlfunc
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date
@@ -87,7 +88,7 @@ class VeiculoResponse(BaseModel):
 @router.get("/")
 def list_veiculos(
     page: int = 1,
-    limit: int = 1000,
+    limit: int = 50,  # CORRIGIDO: era 1000, agora usa paginacao real
     search: Optional[str] = None,
     status_filter: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -118,15 +119,15 @@ def search_veiculos(
 
     if q:
         query = query.filter(
-            (Veiculo.placa.ilike(f"%{q}%"))
-            | (Veiculo.marca.ilike(f"%{q}%"))
-            | (Veiculo.modelo.ilike(f"%{q}%"))
+            (Veiculo.placa.ilike("%{}%".format(q)))
+            | (Veiculo.marca.ilike("%{}%".format(q)))
+            | (Veiculo.modelo.ilike("%{}%".format(q)))
         )
 
     if status:
         query = query.filter(Veiculo.status == status)
 
-    return query.all()
+    return query.limit(100).all()
 
 
 @router.get("/km/{veiculo_id}")
@@ -165,23 +166,88 @@ def get_veiculo_financial_analysis(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get financial analysis for a vehicle."""
+    """Get complete financial analysis for a vehicle.
+
+    CORRIGIDO: Agora inclui receita de contratos, ROI, e breakdown de despesas.
+    Antes so calculava despesas.
+    """
     veiculo = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
     if not veiculo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veiculo nao encontrado"
         )
 
-    despesas = db.query(DespesaVeiculo).filter(
-        DespesaVeiculo.veiculo_id == veiculo_id
-    ).all()
-    total_despesas = sum(float(d.valor) for d in despesas if d.valor)
+    # Receita total de contratos - SQL SUM
+    total_receita = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0)
+    ).filter(Contrato.veiculo_id == veiculo_id).scalar())
+
+    # Total de contratos
+    total_contratos = db.query(sqlfunc.count(Contrato.id)).filter(
+        Contrato.veiculo_id == veiculo_id
+    ).scalar() or 0
+
+    # Despesas do veiculo - SQL SUM
+    total_despesas_veiculo = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(DespesaVeiculo.valor), 0)
+    ).filter(DespesaVeiculo.veiculo_id == veiculo_id).scalar())
+
+    # Despesas de contratos do veiculo
+    total_despesas_contrato = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(DespesaContrato.valor), 0)
+    ).join(Contrato, Contrato.id == DespesaContrato.contrato_id).filter(
+        Contrato.veiculo_id == veiculo_id
+    ).scalar())
+
+    # Custos com multas
+    total_multas = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(Multa.valor), 0)
+    ).filter(Multa.veiculo_id == veiculo_id).scalar())
+
+    # Custos com manutencao
+    total_manutencao = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(Manutencao.custo), 0)
+    ).filter(Manutencao.veiculo_id == veiculo_id).scalar())
+
+    # Custos com seguros
+    total_seguros = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(Seguro.valor), 0)
+    ).filter(Seguro.veiculo_id == veiculo_id).scalar())
+
+    # Custos com IPVA
+    total_ipva = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(IpvaRegistro.valor), 0)
+    ).filter(IpvaRegistro.veiculo_id == veiculo_id).scalar())
+
+    # Totais
+    total_despesas = (
+        total_despesas_veiculo + total_despesas_contrato + total_multas +
+        total_manutencao + total_seguros + total_ipva
+    )
+    lucro_liquido = total_receita - total_despesas
+    valor_aquisicao = float(veiculo.valor_aquisicao) if veiculo.valor_aquisicao else 0
+
+    # ROI = (lucro_liquido / investimento) * 100
+    roi = round((lucro_liquido / valor_aquisicao * 100), 1) if valor_aquisicao > 0 else 0
 
     return {
         "veiculo_id": veiculo_id,
-        "valor_aquisicao": float(veiculo.valor_aquisicao) if veiculo.valor_aquisicao else 0,
+        "placa": veiculo.placa,
+        "marca_modelo": "{} {}".format(veiculo.marca, veiculo.modelo),
+        "valor_aquisicao": valor_aquisicao,
+        "total_receita": total_receita,
+        "total_contratos": total_contratos,
+        "despesas": {
+            "veiculo": total_despesas_veiculo,
+            "contrato": total_despesas_contrato,
+            "multas": total_multas,
+            "manutencao": total_manutencao,
+            "seguros": total_seguros,
+            "ipva": total_ipva,
+        },
         "total_despesas": total_despesas,
-        "valor_liquido": (float(veiculo.valor_aquisicao) - total_despesas) if veiculo.valor_aquisicao else -total_despesas,
+        "lucro_liquido": lucro_liquido,
+        "roi_percentual": roi,
     }
 
 
@@ -217,7 +283,6 @@ async def upload_veiculo_foto(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veiculo nao encontrado"
         )
 
-    # Validate file type
     allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif"]
     if foto.content_type not in allowed_types:
         raise HTTPException(
@@ -225,7 +290,6 @@ async def upload_veiculo_foto(
             detail="Tipo de arquivo nao permitido. Use JPEG, PNG, WebP ou GIF.",
         )
 
-    # Validate file size (max 10MB)
     contents = await foto.read()
     if len(contents) > 10 * 1024 * 1024:
         raise HTTPException(
@@ -233,25 +297,22 @@ async def upload_veiculo_foto(
             detail="Arquivo muito grande. Maximo 10MB.",
         )
 
-    # Delete old photo if exists
     if veiculo.foto_url:
         old_path = os.path.join(UPLOAD_DIR, veiculo.foto_url)
         if os.path.exists(old_path):
             os.remove(old_path)
 
-    # Save new photo
     ext = os.path.splitext(foto.filename or "photo.jpg")[1] or ".jpg"
-    filename = f"veiculo_{veiculo_id}_{uuid.uuid4().hex[:8]}{ext}"
+    filename = "veiculo_{}_{}{}".format(veiculo_id, uuid.uuid4().hex[:8], ext)
     file_path = os.path.join(UPLOAD_DIR, filename)
 
     with open(file_path, "wb") as f:
         f.write(contents)
 
-    # Update database
     veiculo.foto_url = filename
     db.commit()
     db.refresh(veiculo)
-    log_activity(db, current_user, "EDITAR", "Veiculo", f"Foto do veículo {veiculo.placa} atualizada", veiculo_id, request)
+    log_activity(db, current_user, "EDITAR", "Veiculo", "Foto do veiculo {} atualizada".format(veiculo.placa), veiculo_id, request)
 
     return {
         "message": "Foto enviada com sucesso",
@@ -280,7 +341,7 @@ def delete_veiculo_foto(
             os.remove(file_path)
         veiculo.foto_url = None
         db.commit()
-        log_activity(db, current_user, "EXCLUIR", "Veiculo", f"Foto do veículo {veiculo.placa} removida", veiculo_id, request)
+        log_activity(db, current_user, "EXCLUIR", "Veiculo", "Foto do veiculo {} removida".format(veiculo.placa), veiculo_id, request)
 
     return {"message": "Foto removida com sucesso"}
 
@@ -303,7 +364,7 @@ def create_veiculo(
     db.add(db_veiculo)
     db.commit()
     db.refresh(db_veiculo)
-    log_activity(db, current_user, "CRIAR", "Veiculo", f"Veículo {db_veiculo.placa} criado", db_veiculo.id, request)
+    log_activity(db, current_user, "CRIAR", "Veiculo", "Veiculo {} criado".format(db_veiculo.placa), db_veiculo.id, request)
     return db_veiculo
 
 
@@ -343,7 +404,7 @@ def update_veiculo(
 
     db.commit()
     db.refresh(veiculo)
-    log_activity(db, current_user, "EDITAR", "Veiculo", f"Veículo {veiculo.placa} editado", veiculo_id, request)
+    log_activity(db, current_user, "EDITAR", "Veiculo", "Veiculo {} editado".format(veiculo.placa), veiculo_id, request)
     return veiculo
 
 
@@ -368,7 +429,7 @@ def patch_veiculo(
 
     db.commit()
     db.refresh(veiculo)
-    log_activity(db, current_user, "EDITAR", "Veiculo", f"Veículo {veiculo.placa} editado", veiculo_id, request)
+    log_activity(db, current_user, "EDITAR", "Veiculo", "Veiculo {} editado".format(veiculo.placa), veiculo_id, request)
     return veiculo
 
 
@@ -379,11 +440,26 @@ def delete_veiculo(
     current_user: User = Depends(get_current_user),
     request: Request = None,
 ):
-    """Delete a vehicle and all related records."""
+    """Delete a vehicle and all related records.
+
+    CORRIGIDO: Agora verifica contratos ativos antes de deletar.
+    Com CASCADE nos models, dependentes sao deletados automaticamente.
+    """
     veiculo = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
     if not veiculo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veiculo nao encontrado"
+        )
+
+    # Verificar se tem contratos ativos
+    contratos_ativos = db.query(Contrato).filter(
+        Contrato.veiculo_id == veiculo_id,
+        Contrato.status == "ativo",
+    ).count()
+    if contratos_ativos > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nao e possivel excluir veiculo com {} contrato(s) ativo(s). Finalize-os primeiro.".format(contratos_ativos),
         )
 
     # Delete photo file if exists
@@ -392,48 +468,19 @@ def delete_veiculo(
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    # Delete all dependent records (order matters due to FK chains)
-    # First: get all contratos for this vehicle (they have their own dependents)
+    # Deletar contratos finalizados (RESTRICT impede cascade automatico)
     contratos = db.query(Contrato).filter(Contrato.veiculo_id == veiculo_id).all()
-    contrato_ids = [c.id for c in contratos]
+    for contrato in contratos:
+        db.delete(contrato)  # CASCADE deleta dependentes do contrato
 
-    if contrato_ids:
-        # Delete contrato dependents (including multas that reference contrato)
-        db.query(Quilometragem).filter(Quilometragem.contrato_id.in_(contrato_ids)).delete(synchronize_session=False)
-        db.query(DespesaContrato).filter(DespesaContrato.contrato_id.in_(contrato_ids)).delete(synchronize_session=False)
-        db.query(ProrrogacaoContrato).filter(ProrrogacaoContrato.contrato_id.in_(contrato_ids)).delete(synchronize_session=False)
-        db.query(CheckinCheckout).filter(CheckinCheckout.contrato_id.in_(contrato_ids)).delete(synchronize_session=False)
-        db.query(Multa).filter(Multa.contrato_id.in_(contrato_ids)).delete(synchronize_session=False)
-        db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.contrato_id.in_(contrato_ids)).delete(synchronize_session=False)
-        # Delete contratos
-        db.query(Contrato).filter(Contrato.veiculo_id == veiculo_id).delete(synchronize_session=False)
-
-    # Delete seguro dependents first, then seguros
-    seguros = db.query(Seguro).filter(Seguro.veiculo_id == veiculo_id).all()
-    seguro_ids = [s.id for s in seguros]
-    if seguro_ids:
-        db.query(ParcelaSeguro).filter(ParcelaSeguro.seguro_id.in_(seguro_ids)).delete(synchronize_session=False)
-
-    # Delete uso_veiculo_empresa dependents
-    usos = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.veiculo_id == veiculo_id).all()
-    uso_ids = [u.id for u in usos]
-    if uso_ids:
-        db.query(RelatorioNF).filter(RelatorioNF.uso_id.in_(uso_ids)).delete(synchronize_session=False)
-
-    # Delete all direct vehicle dependents
-    db.query(DespesaVeiculo).filter(DespesaVeiculo.veiculo_id == veiculo_id).delete(synchronize_session=False)
+    # Deletar registros que podem nao ter CASCADE configurado
     db.query(DespesaOperacional).filter(DespesaOperacional.veiculo_id == veiculo_id).delete(synchronize_session=False)
-    db.query(Seguro).filter(Seguro.veiculo_id == veiculo_id).delete(synchronize_session=False)
-    db.query(ParcelaSeguro).filter(ParcelaSeguro.veiculo_id == veiculo_id).delete(synchronize_session=False)
-    db.query(IpvaRegistro).filter(IpvaRegistro.veiculo_id == veiculo_id).delete(synchronize_session=False)
     db.query(Reserva).filter(Reserva.veiculo_id == veiculo_id).delete(synchronize_session=False)
-    db.query(Multa).filter(Multa.veiculo_id == veiculo_id).delete(synchronize_session=False)
-    db.query(Manutencao).filter(Manutencao.veiculo_id == veiculo_id).delete(synchronize_session=False)
     db.query(DespesaNF).filter(DespesaNF.veiculo_id == veiculo_id).delete(synchronize_session=False)
     db.query(RelatorioNF).filter(RelatorioNF.veiculo_id == veiculo_id).delete(synchronize_session=False)
     db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.veiculo_id == veiculo_id).delete(synchronize_session=False)
 
-    # Finally delete the vehicle
+    placa = veiculo.placa
     db.delete(veiculo)
     db.commit()
-    log_activity(db, current_user, "EXCLUIR", "Veiculo", f"Veículo {veiculo.placa} excluído", veiculo_id, request)
+    log_activity(db, current_user, "EXCLUIR", "Veiculo", "Veiculo {} excluido".format(placa), veiculo_id, request)

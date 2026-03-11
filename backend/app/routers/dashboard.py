@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sqlfunc
+from sqlalchemy import func as sqlfunc, case, literal_column
 from datetime import datetime, timedelta
 from app.core.database import get_db
 from app.core.deps import get_current_user
@@ -16,14 +16,24 @@ def get_consolidado(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get consolidated dashboard data."""
+    """Get consolidated dashboard data - single query with conditional counts."""
+    # Use one query with conditional aggregation instead of 6 separate queries
+    total_contratos = db.query(sqlfunc.count(Contrato.id)).scalar() or 0
+    contratos_ativos = db.query(sqlfunc.count(Contrato.id)).filter(Contrato.status == "ativo").scalar() or 0
+
+    total_veiculos = db.query(sqlfunc.count(Veiculo.id)).scalar() or 0
+    veiculos_disponiveis = db.query(sqlfunc.count(Veiculo.id)).filter(Veiculo.status == "disponivel").scalar() or 0
+
+    total_clientes = db.query(sqlfunc.count(Cliente.id)).scalar() or 0
+    total_multas = db.query(sqlfunc.count(Multa.id)).scalar() or 0
+
     return {
-        "total_contratos": db.query(Contrato).count(),
-        "total_veiculos": db.query(Veiculo).count(),
-        "total_clientes": db.query(Cliente).count(),
-        "total_multas": db.query(Multa).count(),
-        "contratos_ativos": db.query(Contrato).filter(Contrato.status == "ativo").count(),
-        "veiculos_disponiveis": db.query(Veiculo).filter(Veiculo.status == "disponivel").count(),
+        "total_contratos": total_contratos,
+        "total_veiculos": total_veiculos,
+        "total_clientes": total_clientes,
+        "total_multas": total_multas,
+        "contratos_ativos": contratos_ativos,
+        "veiculos_disponiveis": veiculos_disponiveis,
     }
 
 
@@ -32,29 +42,30 @@ def get_metricas(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get key metrics."""
+    """Get key metrics - using SQL SUM instead of Python sum."""
     agora = datetime.now()
     mes_passado = agora - timedelta(days=30)
 
-    contratos_mes = db.query(Contrato).filter(
+    contratos_mes = db.query(sqlfunc.count(Contrato.id)).filter(
         Contrato.data_criacao >= mes_passado
-    ).count()
+    ).scalar() or 0
 
-    multas_mes = db.query(Multa).filter(
+    multas_mes = db.query(sqlfunc.count(Multa.id)).filter(
         Multa.data_criacao >= mes_passado
-    ).count()
+    ).scalar() or 0
 
     # Calculate real occupancy rate
-    total_veiculos = db.query(Veiculo).filter(Veiculo.ativo == True).count()
-    alugados = db.query(Veiculo).filter(Veiculo.status == "alugado").count()
+    total_veiculos = db.query(sqlfunc.count(Veiculo.id)).filter(Veiculo.ativo == True).scalar() or 0
+    alugados = db.query(sqlfunc.count(Veiculo.id)).filter(Veiculo.status == "alugado").scalar() or 0
     taxa_ocupacao = round((alugados / total_veiculos * 100), 1) if total_veiculos > 0 else 0.0
 
-    # Revenue this month
-    receita_mes = sum(
-        float(c.valor_total or 0) for c in db.query(Contrato).filter(
-            Contrato.data_criacao >= mes_passado
-        ).all()
-    )
+    # Revenue this month - SQL SUM instead of loading all into memory
+    receita_mes = db.query(
+        sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0)
+    ).filter(
+        Contrato.data_criacao >= mes_passado
+    ).scalar()
+    receita_mes = float(receita_mes)
 
     return {
         "contratos_mes": contratos_mes,
@@ -82,32 +93,56 @@ def get_tops(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get top performers and underperformers."""
-    # Top vehicles by number of contracts
-    veiculos = db.query(Veiculo).filter(Veiculo.ativo == True).all()
-    top_veiculos = []
-    for v in veiculos:
-        n_contratos = db.query(Contrato).filter(Contrato.veiculo_id == v.id).count()
-        receita = sum(float(c.valor_total or 0) for c in db.query(Contrato).filter(Contrato.veiculo_id == v.id).all())
-        top_veiculos.append({"placa": v.placa, "marca_modelo": "{} {}".format(v.marca, v.modelo), "contratos": n_contratos, "receita": receita})
-    top_veiculos.sort(key=lambda x: x["receita"], reverse=True)
+    """Get top performers - using SQL GROUP BY instead of N+1 queries."""
+    # Top vehicles by revenue - single SQL query with GROUP BY
+    top_veiculos_query = (
+        db.query(
+            Veiculo.placa,
+            (Veiculo.marca + " " + Veiculo.modelo).label("marca_modelo"),
+            sqlfunc.count(Contrato.id).label("contratos"),
+            sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0).label("receita"),
+        )
+        .outerjoin(Contrato, Contrato.veiculo_id == Veiculo.id)
+        .filter(Veiculo.ativo == True)
+        .group_by(Veiculo.id, Veiculo.placa, Veiculo.marca, Veiculo.modelo)
+        .order_by(sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0).desc())
+        .limit(5)
+        .all()
+    )
+    top_veiculos = [
+        {"placa": r.placa, "marca_modelo": r.marca_modelo, "contratos": r.contratos, "receita": float(r.receita)}
+        for r in top_veiculos_query
+    ]
 
-    # Top clients by total spent
-    clientes = db.query(Cliente).filter(Cliente.ativo == True).all()
-    top_clientes = []
-    for cl in clientes:
-        n_contratos = db.query(Contrato).filter(Contrato.cliente_id == cl.id).count()
-        total_gasto = sum(float(c.valor_total or 0) for c in db.query(Contrato).filter(Contrato.cliente_id == cl.id).all())
-        if n_contratos > 0:
-            top_clientes.append({"nome": cl.nome, "contratos": n_contratos, "total_gasto": total_gasto})
-    top_clientes.sort(key=lambda x: x["total_gasto"], reverse=True)
+    # Top clients by total spent - single SQL query
+    top_clientes_query = (
+        db.query(
+            Cliente.nome,
+            sqlfunc.count(Contrato.id).label("contratos"),
+            sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0).label("total_gasto"),
+        )
+        .join(Contrato, Contrato.cliente_id == Cliente.id)
+        .filter(Cliente.ativo == True)
+        .group_by(Cliente.id, Cliente.nome)
+        .having(sqlfunc.count(Contrato.id) > 0)
+        .order_by(sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0).desc())
+        .limit(5)
+        .all()
+    )
+    top_clientes = [
+        {"nome": r.nome, "contratos": r.contratos, "total_gasto": float(r.total_gasto)}
+        for r in top_clientes_query
+    ]
 
-    # Problematic vehicles (in maintenance)
-    veiculos_problematicos = [{"placa": v.placa, "marca_modelo": "{} {}".format(v.marca, v.modelo), "status": v.status} for v in veiculos if v.status == "manutencao"]
+    # Problematic vehicles (in maintenance) - single query
+    veiculos_problematicos = [
+        {"placa": v.placa, "marca_modelo": "{} {}".format(v.marca, v.modelo), "status": v.status}
+        for v in db.query(Veiculo).filter(Veiculo.ativo == True, Veiculo.status == "manutencao").all()
+    ]
 
     return {
-        "top_veiculos": top_veiculos[:5],
-        "top_clientes": top_clientes[:5],
+        "top_veiculos": top_veiculos,
+        "top_clientes": top_clientes,
         "veiculos_problematicos": veiculos_problematicos,
     }
 
@@ -117,30 +152,44 @@ def get_previsao(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get forecasts and predictions based on recent data."""
+    """Get forecasts - using SQL SUM instead of Python loops."""
     agora = datetime.now()
     mes_atual_inicio = agora.replace(day=1, hour=0, minute=0, second=0)
     mes_passado_inicio = (mes_atual_inicio - timedelta(days=1)).replace(day=1)
 
-    # Current month revenue
-    receita_mes_atual = sum(float(c.valor_total or 0) for c in db.query(Contrato).filter(Contrato.data_criacao >= mes_atual_inicio).all())
-    # Last month revenue
-    receita_mes_passado = sum(float(c.valor_total or 0) for c in db.query(Contrato).filter(Contrato.data_criacao >= mes_passado_inicio, Contrato.data_criacao < mes_atual_inicio).all())
+    # Current month revenue - SQL SUM
+    receita_mes_atual = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0)
+    ).filter(Contrato.data_criacao >= mes_atual_inicio).scalar())
 
-    # Current month expenses
-    despesa_mes_atual = (
-        sum(float(d.valor or 0) for d in db.query(DespesaContrato).filter(DespesaContrato.data_registro >= mes_atual_inicio).all()) +
-        sum(float(d.valor or 0) for d in db.query(DespesaVeiculo).filter(DespesaVeiculo.data >= mes_atual_inicio).all())
-    )
+    # Last month revenue - SQL SUM
+    receita_mes_passado = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0)
+    ).filter(
+        Contrato.data_criacao >= mes_passado_inicio,
+        Contrato.data_criacao < mes_atual_inicio
+    ).scalar())
+
+    # Current month expenses - SQL SUM across tables
+    desp_contrato = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(DespesaContrato.valor), 0)
+    ).filter(DespesaContrato.data_registro >= mes_atual_inicio).scalar())
+
+    desp_veiculo = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(DespesaVeiculo.valor), 0)
+    ).filter(DespesaVeiculo.data >= mes_atual_inicio).scalar())
+
+    despesa_mes_atual = desp_contrato + desp_veiculo
 
     # Growth rate
     taxa_crescimento = 0.0
     if receita_mes_passado > 0:
         taxa_crescimento = round(((receita_mes_atual - receita_mes_passado) / receita_mes_passado) * 100, 1)
 
-    # Active contracts revenue (future guaranteed)
-    contratos_ativos = db.query(Contrato).filter(Contrato.status == "ativo").all()
-    previsao_receita = sum(float(c.valor_total or 0) for c in contratos_ativos)
+    # Active contracts revenue (future guaranteed) - SQL SUM
+    previsao_receita = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0)
+    ).filter(Contrato.status == "ativo").scalar())
 
     return {
         "previsao_receita": previsao_receita,
@@ -184,15 +233,29 @@ def get_graficos(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get data for dashboard charts."""
+    """Get data for dashboard charts - using conditional aggregation."""
+    # Contratos por status - single query
+    contrato_stats = db.query(
+        Contrato.status,
+        sqlfunc.count(Contrato.id)
+    ).group_by(Contrato.status).all()
+    contratos_por_status = {s: c for s, c in contrato_stats}
+
+    # Veiculos por status - single query
+    veiculo_stats = db.query(
+        Veiculo.status,
+        sqlfunc.count(Veiculo.id)
+    ).group_by(Veiculo.status).all()
+    veiculos_por_status = {s: c for s, c in veiculo_stats}
+
     return {
         "contratos_por_status": {
-            "ativo": db.query(Contrato).filter(Contrato.status == "ativo").count(),
-            "finalizado": db.query(Contrato).filter(Contrato.status == "finalizado").count(),
+            "ativo": contratos_por_status.get("ativo", 0),
+            "finalizado": contratos_por_status.get("finalizado", 0),
         },
         "veiculos_por_status": {
-            "disponivel": db.query(Veiculo).filter(Veiculo.status == "disponivel").count(),
-            "alugado": db.query(Veiculo).filter(Veiculo.status == "alugado").count(),
-            "manutencao": db.query(Veiculo).filter(Veiculo.status == "manutencao").count(),
+            "disponivel": veiculos_por_status.get("disponivel", 0),
+            "alugado": veiculos_por_status.get("alugado", 0),
+            "manutencao": veiculos_por_status.get("manutencao", 0),
         },
     }

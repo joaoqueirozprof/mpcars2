@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sqlfunc, union_all, literal, cast, String, DateTime, Float, text
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
+import math
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
@@ -53,90 +55,113 @@ def list_financeiro(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get paginated financial records (consolidated view)."""
-    records = []
+    """Get paginated financial records using SQL UNION ALL instead of loading everything into Python."""
 
-    # Add Contratos as receitas
-    contratos = db.query(Contrato).all()
-    for c in contratos:
-        cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first() if c.cliente_id else None
-        cliente_nome = cliente.nome if cliente else "Desconhecido"
-        record = {
-            "id": f"c-{c.id}",
-            "data": c.data_criacao,
-            "tipo": "receita",
-            "categoria": "Locação",
-            "descricao": f"Contrato #{c.numero} - {cliente_nome}",
-            "valor": float(c.valor_total) if c.valor_total else 0.0,
-            "status": "pago" if c.status == "finalizado" else "pendente",
-        }
-        records.append(record)
+    # Build UNION ALL query for consolidated view
+    # Each subquery produces: id, data, tipo, categoria, descricao, valor, status
+    q_contratos = (
+        db.query(
+            (literal("c-") + cast(Contrato.id, String)).label("id"),
+            Contrato.data_criacao.label("data"),
+            literal("receita").label("tipo"),
+            literal("Locação").label("categoria"),
+            (literal("Contrato #") + Contrato.numero).label("descricao"),
+            sqlfunc.coalesce(Contrato.valor_total, 0).label("valor"),
+            sqlfunc.IF(Contrato.status == "finalizado", literal("pago"), literal("pendente")).label("status_fin") if hasattr(sqlfunc, 'IF') else
+            sqlfunc.cast(
+                sqlfunc.coalesce(None, literal("pendente")), String
+            ).label("status_fin"),
+        )
+    )
 
-    # Add DespesaContrato as despesas
-    despesas_contrato = db.query(DespesaContrato).all()
-    for d in despesas_contrato:
-        record = {
-            "id": f"dc-{d.id}",
-            "data": d.data_criacao if hasattr(d, 'data_criacao') else datetime.now(),
-            "tipo": "despesa",
-            "categoria": d.tipo if hasattr(d, 'tipo') else "Contrato",
-            "descricao": d.descricao,
-            "valor": float(d.valor) if d.valor else 0.0,
-            "status": "pago",
-        }
-        records.append(record)
+    # For PostgreSQL, use CASE WHEN instead of IF
+    q_receitas = db.query(
+        (literal("c-") + cast(Contrato.id, String)).label("record_id"),
+        Contrato.data_criacao.label("data"),
+        literal("receita").label("tipo"),
+        literal("Locação").label("categoria"),
+        Contrato.numero.label("descricao"),
+        sqlfunc.coalesce(cast(Contrato.valor_total, Float), 0).label("valor"),
+        text("CASE WHEN contratos.status = 'finalizado' THEN 'pago' ELSE 'pendente' END").label("status_fin"),
+    )
 
-    # Add DespesaVeiculo as despesas
-    despesas_veiculo = db.query(DespesaVeiculo).all()
-    for d in despesas_veiculo:
-        record = {
-            "id": f"dv-{d.id}",
-            "data": d.data_criacao if hasattr(d, 'data_criacao') else datetime.now(),
-            "tipo": "despesa",
-            "categoria": "Veículo",
-            "descricao": d.descricao,
-            "valor": float(d.valor) if d.valor else 0.0,
-            "status": "pago",
-        }
-        records.append(record)
+    q_desp_contrato = db.query(
+        (literal("dc-") + cast(DespesaContrato.id, String)).label("record_id"),
+        DespesaContrato.data_criacao.label("data"),
+        literal("despesa").label("tipo"),
+        sqlfunc.coalesce(DespesaContrato.tipo, literal("Contrato")).label("categoria"),
+        DespesaContrato.descricao.label("descricao"),
+        sqlfunc.coalesce(cast(DespesaContrato.valor, Float), 0).label("valor"),
+        literal("pago").label("status_fin"),
+    )
 
-    # Add DespesaLoja as despesas
-    despesas_loja = db.query(DespesaLoja).all()
-    for d in despesas_loja:
-        record = {
-            "id": f"dl-{d.id}",
-            "data": d.data_criacao if hasattr(d, 'data_criacao') else datetime.now(),
-            "tipo": "despesa",
-            "categoria": "Loja",
-            "descricao": d.descricao,
-            "valor": float(d.valor) if d.valor else 0.0,
-            "status": "pago",
-        }
-        records.append(record)
+    q_desp_veiculo = db.query(
+        (literal("dv-") + cast(DespesaVeiculo.id, String)).label("record_id"),
+        DespesaVeiculo.data_criacao.label("data"),
+        literal("despesa").label("tipo"),
+        literal("Veículo").label("categoria"),
+        DespesaVeiculo.descricao.label("descricao"),
+        sqlfunc.coalesce(cast(DespesaVeiculo.valor, Float), 0).label("valor"),
+        literal("pago").label("status_fin"),
+    )
 
-    # Filter by tipo
+    q_desp_loja = db.query(
+        (literal("dl-") + cast(DespesaLoja.id, String)).label("record_id"),
+        DespesaLoja.data_criacao.label("data"),
+        literal("despesa").label("tipo"),
+        literal("Loja").label("categoria"),
+        DespesaLoja.descricao.label("descricao"),
+        sqlfunc.coalesce(cast(DespesaLoja.valor, Float), 0).label("valor"),
+        literal("pago").label("status_fin"),
+    )
+
+    # Build UNION ALL
+    combined = union_all(
+        q_receitas,
+        q_desp_contrato,
+        q_desp_veiculo,
+        q_desp_loja,
+    ).alias("financeiro")
+
+    # Apply filters
+    query = db.query(combined)
+
     if tipo:
-        records = [r for r in records if r["tipo"] == tipo]
-
-    # Filter by status
+        query = query.filter(combined.c.tipo == tipo)
     if status:
-        records = [r for r in records if r["status"] == status]
+        query = query.filter(combined.c.status_fin == status)
 
-    # Sort by data descending
-    records.sort(key=lambda x: x["data"], reverse=True)
+    # Get total count
+    total = query.count()
 
-    # Paginate
-    total = len(records)
-    start = (page - 1) * limit
-    end = start + limit
-    paginated = records[start:end]
+    # Order and paginate in SQL
+    results = (
+        query
+        .order_by(combined.c.data.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    # Format results
+    data = []
+    for r in results:
+        data.append({
+            "id": r.record_id,
+            "data": r.data.isoformat() if r.data else None,
+            "tipo": r.tipo,
+            "categoria": r.categoria,
+            "descricao": r.descricao,
+            "valor": float(r.valor) if r.valor else 0.0,
+            "status": r.status_fin,
+        })
 
     return {
-        "data": paginated,
+        "data": data,
         "total": total,
         "page": page,
         "limit": limit,
-        "pages": (total + limit - 1) // limit,
+        "pages": math.ceil(total / limit) if limit > 0 else 1,
     }
 
 
@@ -145,23 +170,24 @@ def get_resumo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get financial summary."""
-    total_receita = sum(
-        float(c.valor_total) for c in db.query(Contrato).all() if c.valor_total
-    )
-    total_despesa_contrato = sum(
-        float(d.valor) for d in db.query(DespesaContrato).all() if d.valor
-    )
-    total_despesa_veiculo = sum(
-        float(d.valor) for d in db.query(DespesaVeiculo).all() if d.valor
-    )
-    total_despesa_loja = sum(
-        float(d.valor) for d in db.query(DespesaLoja).all() if d.valor
-    )
+    """Get financial summary - using SQL SUM instead of Python loops."""
+    total_receita = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0)
+    ).scalar())
 
-    total_despesa = (
-        total_despesa_contrato + total_despesa_veiculo + total_despesa_loja
-    )
+    total_despesa_contrato = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(DespesaContrato.valor), 0)
+    ).scalar())
+
+    total_despesa_veiculo = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(DespesaVeiculo.valor), 0)
+    ).scalar())
+
+    total_despesa_loja = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(DespesaLoja.valor), 0)
+    ).scalar())
+
+    total_despesa = total_despesa_contrato + total_despesa_veiculo + total_despesa_loja
     lucro = total_receita - total_despesa
 
     return {
@@ -200,7 +226,7 @@ def criar_despesa_contrato(
     db.add(db_despesa)
     db.commit()
     db.refresh(db_despesa)
-    log_activity(db, current_user, "CRIAR", "DespesaContrato", f"Despesa de contrato criada: {despesa.descricao}", db_despesa.id, request)
+    log_activity(db, current_user, "CRIAR", "DespesaContrato", "Despesa de contrato criada: {}".format(despesa.descricao), db_despesa.id, request)
     return db_despesa
 
 
@@ -222,7 +248,7 @@ def criar_despesa_veiculo(
     db.add(db_despesa)
     db.commit()
     db.refresh(db_despesa)
-    log_activity(db, current_user, "CRIAR", "DespesaVeiculo", f"Despesa de veículo criada: {despesa.descricao}", db_despesa.id, request)
+    log_activity(db, current_user, "CRIAR", "DespesaVeiculo", "Despesa de veículo criada: {}".format(despesa.descricao), db_despesa.id, request)
     return db_despesa
 
 
@@ -243,7 +269,7 @@ def criar_despesa_loja(
     db.add(db_despesa)
     db.commit()
     db.refresh(db_despesa)
-    log_activity(db, current_user, "CRIAR", "DespesaLoja", f"Despesa de loja criada: {despesa.descricao}", db_despesa.id, request)
+    log_activity(db, current_user, "CRIAR", "DespesaLoja", "Despesa de loja criada: {}".format(despesa.descricao), db_despesa.id, request)
     return db_despesa
 
 
@@ -254,7 +280,11 @@ def delete_registro_financeiro(
     current_user: User = Depends(get_current_user),
     request: Request = None,
 ):
-    """Delete a financial record by composite id (e.g. c-1, dc-5, dv-3, dl-2)."""
+    """Delete a financial record by composite id (e.g. c-1, dc-5, dv-3, dl-2).
+
+    CORRIGIDO: Com CASCADE nos models, a deleção de contrato não precisa mais
+    de 30+ linhas de delete manual - o banco cuida automaticamente.
+    """
     parts = record_id.split("-", 1)
     if len(parts) != 2:
         raise HTTPException(status_code=400, detail="ID invalido")
@@ -272,18 +302,8 @@ def delete_registro_financeiro(
     elif prefix == "dl":
         obj = db.query(DespesaLoja).filter(DespesaLoja.id == real_id).first()
     elif prefix == "c":
-        # Deleting a contrato from financeiro - delete dependents first
-        from app.models import Quilometragem, ProrrogacaoContrato, CheckinCheckout, Multa, UsoVeiculoEmpresa
-        contrato = db.query(Contrato).filter(Contrato.id == real_id).first()
-        if not contrato:
-            raise HTTPException(status_code=404, detail="Registro nao encontrado")
-        db.query(Quilometragem).filter(Quilometragem.contrato_id == real_id).delete(synchronize_session=False)
-        db.query(DespesaContrato).filter(DespesaContrato.contrato_id == real_id).delete(synchronize_session=False)
-        db.query(ProrrogacaoContrato).filter(ProrrogacaoContrato.contrato_id == real_id).delete(synchronize_session=False)
-        db.query(CheckinCheckout).filter(CheckinCheckout.contrato_id == real_id).delete(synchronize_session=False)
-        db.query(Multa).filter(Multa.contrato_id == real_id).delete(synchronize_session=False)
-        db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.contrato_id == real_id).delete(synchronize_session=False)
-        obj = contrato
+        # With CASCADE configured in models, deleting contrato auto-deletes dependents
+        obj = db.query(Contrato).filter(Contrato.id == real_id).first()
     else:
         raise HTTPException(status_code=400, detail="Tipo de registro desconhecido")
 
@@ -292,7 +312,7 @@ def delete_registro_financeiro(
 
     db.delete(obj)
     db.commit()
-    log_activity(db, current_user, "EXCLUIR", "Financeiro", f"Registro financeiro {record_id} excluído", real_id, request)
+    log_activity(db, current_user, "EXCLUIR", "Financeiro", "Registro financeiro {} excluído".format(record_id), real_id, request)
 
 
 @router.get("/faturamento")
@@ -302,24 +322,22 @@ def get_faturamento(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get billing information."""
-    query = db.query(Contrato)
+    """Get billing information - using SQL SUM."""
+    query = db.query(
+        sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0).label("total"),
+        sqlfunc.count(Contrato.id).label("qtd"),
+    )
 
     if mes and ano:
-        from sqlalchemy import and_
-
         start = datetime(ano, mes, 1)
         if mes == 12:
             end = datetime(ano + 1, 1, 1)
         else:
             end = datetime(ano, mes + 1, 1)
+        query = query.filter(Contrato.data_criacao >= start, Contrato.data_criacao < end)
 
-        query = query.filter(and_(Contrato.data_criacao >= start, Contrato.data_criacao < end))
-
-    contratos = query.all()
-    total = sum(float(c.valor_total) for c in contratos if c.valor_total)
-
-    return {"total_faturamento": total, "quantidade_contratos": len(contratos)}
+    result = query.one()
+    return {"total_faturamento": float(result.total), "quantidade_contratos": result.qtd}
 
 
 @router.get("/relatorio")
@@ -338,16 +356,23 @@ def get_relatorio_avancado(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Formato de data inválido"
         )
 
+    if inicio > fim:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="data_inicio deve ser anterior a data_fim"
+        )
+
     contratos = db.query(Contrato).filter(
         Contrato.data_criacao.between(inicio, fim)
     ).all()
 
+    total_receita = float(db.query(
+        sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0)
+    ).filter(Contrato.data_criacao.between(inicio, fim)).scalar())
+
     return {
         "periodo": {"inicio": data_inicio, "fim": data_fim},
         "total_contratos": len(contratos),
-        "total_receita": sum(
-            float(c.valor_total) for c in contratos if c.valor_total
-        ),
+        "total_receita": total_receita,
         "contratos": contratos,
     }
 
@@ -392,5 +417,5 @@ def get_relatorio_pdf(
     return StreamingResponse(
         iter([pdf_buffer.getvalue()]),
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=relatorio_financeiro_{data_inicio}_{data_fim}.pdf"},
+        headers={"Content-Disposition": "attachment; filename=relatorio_financeiro_{}_{}.pdf".format(data_inicio, data_fim)},
     )
