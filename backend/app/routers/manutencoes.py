@@ -1,20 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func as sqlfunc
-from pydantic import BaseModel
-from typing import Optional, List
 from datetime import date, datetime, timedelta
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import case, func as sqlfunc
+from sqlalchemy.orm import Session, joinedload
+
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.pagination import paginate
-from app.models.user import User
 from app.models import Manutencao, Veiculo
+from app.models.user import User
 
 
 router = APIRouter(prefix="/manutencoes", tags=["Manutenções"])
 
 
 class ManutencaoBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     veiculo_id: int
     tipo: str
     descricao: str
@@ -24,6 +28,10 @@ class ManutencaoBase(BaseModel):
     data_proxima: Optional[date] = None
     custo: Optional[float] = None
     oficina: Optional[str] = None
+    data_manutencao: Optional[date] = None
+    valor: Optional[float] = None
+    quilometragem: Optional[float] = None
+    status: Optional[str] = None
 
 
 class ManutencaoCreate(ManutencaoBase):
@@ -31,12 +39,20 @@ class ManutencaoCreate(ManutencaoBase):
 
 
 class ManutencaoUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     tipo: Optional[str] = None
     descricao: Optional[str] = None
     data_realizada: Optional[date] = None
     data_proxima: Optional[date] = None
     custo: Optional[float] = None
+    km_realizada: Optional[float] = None
+    km_proxima: Optional[float] = None
+    oficina: Optional[str] = None
     status: Optional[str] = None
+    data_manutencao: Optional[date] = None
+    valor: Optional[float] = None
+    quilometragem: Optional[float] = None
 
 
 class ManutencaoResponse(ManutencaoBase):
@@ -47,7 +63,44 @@ class ManutencaoResponse(ManutencaoBase):
         from_attributes = True
 
 
-# === Fixed path routes FIRST ===
+def _normalize_manutencao_status(status_value: Optional[str]) -> Optional[str]:
+    status_map = {
+        "em_progresso": "em_andamento",
+        "pendente": "pendente",
+        "concluida": "concluida",
+        "cancelada": "cancelada",
+        "agendada": "agendada",
+    }
+    return status_map.get(status_value, status_value)
+
+
+def _normalize_manutencao_payload(payload: dict) -> dict:
+    data = dict(payload)
+
+    data_manutencao = data.pop("data_manutencao", None)
+    if data.get("data_realizada") in (None, "") and data_manutencao is not None:
+        data["data_realizada"] = data_manutencao
+    if data.get("data_proxima") in (None, "") and data_manutencao is not None:
+        data["data_proxima"] = data_manutencao
+
+    valor = data.pop("valor", None)
+    if data.get("custo") in (None, "") and valor is not None:
+        data["custo"] = valor
+
+    quilometragem = data.pop("quilometragem", None)
+    if data.get("km_realizada") in (None, "") and quilometragem is not None:
+        data["km_realizada"] = quilometragem
+    if data.get("km_proxima") in (None, "") and quilometragem is not None:
+        data["km_proxima"] = quilometragem
+
+    if "status" in data:
+        data["status"] = _normalize_manutencao_status(data["status"])
+
+    normalized = {}
+    for key, value in data.items():
+        normalized[key] = None if value == "" else value
+
+    return normalized
 
 
 @router.get("/")
@@ -65,6 +118,9 @@ def list_manutencoes(
     extra = {}
     if tipo:
         extra["tipo"] = tipo
+
+    status_normalizado = _normalize_manutencao_status(status_filter)
+
     return paginate(
         query=query,
         page=page,
@@ -72,7 +128,7 @@ def list_manutencoes(
         search=search,
         search_fields=["descricao", "oficina"],
         model=Manutencao,
-        status_filter=status_filter,
+        status_filter=status_normalizado,
         extra_filters=extra if extra else None,
     )
 
@@ -84,13 +140,15 @@ def create_manutencao(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new maintenance record."""
-    veiculo = db.query(Veiculo).filter(Veiculo.id == manutencao.veiculo_id).first()
+    manutencao_data = _normalize_manutencao_payload(manutencao.model_dump(exclude_unset=True))
+
+    veiculo = db.query(Veiculo).filter(Veiculo.id == manutencao_data["veiculo_id"]).first()
     if not veiculo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
         )
 
-    db_manutencao = Manutencao(**manutencao.model_dump())
+    db_manutencao = Manutencao(**manutencao_data)
     db.add(db_manutencao)
     db.commit()
     db.refresh(db_manutencao)
@@ -103,10 +161,7 @@ def get_manutencoes_pendentes(
     current_user: User = Depends(get_current_user),
 ):
     """Get pending maintenance records."""
-    manutencoes = db.query(Manutencao).filter(
-        Manutencao.status == "pendente"
-    ).all()
-    return manutencoes
+    return db.query(Manutencao).filter(Manutencao.status == "pendente").all()
 
 
 @router.get("/resumo")
@@ -114,29 +169,32 @@ def get_manutencoes_resumo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get maintenance summary - SQL aggregation."""
+    """Get maintenance summary."""
     agora = datetime.now().date()
 
     result = db.query(
         sqlfunc.count(Manutencao.id).label("total"),
-        sqlfunc.count(sqlfunc.nullif(Manutencao.status != "pendente", True)).label("pendentes"),
+        sqlfunc.count(
+            case((Manutencao.status == "pendente", 1))
+        ).label("pendentes"),
         sqlfunc.coalesce(sqlfunc.sum(Manutencao.custo), 0).label("total_custo"),
-        sqlfunc.count(sqlfunc.case(
-            (
-                (Manutencao.data_proxima.isnot(None))
-                & (Manutencao.data_proxima.between(agora, agora + timedelta(days=30)))
-                & (Manutencao.status == "pendente"),
-                Manutencao.id,
-            ),
-            else_=None,
-        )).label("vencendo_30d"),
+        sqlfunc.count(
+            case(
+                (
+                    (Manutencao.data_proxima.isnot(None))
+                    & (Manutencao.data_proxima.between(agora, agora + timedelta(days=30)))
+                    & (Manutencao.status == "pendente"),
+                    1,
+                )
+            )
+        ).label("vencendo_30d"),
     ).first()
 
     return {
-        "total_manutencoes": result.total,
-        "manutencoes_pendentes": result.pendentes,
-        "total_custo": float(result.total_custo),
-        "vencendo_em_30_dias": result.vencendo_30d,
+        "total_manutencoes": result.total or 0,
+        "manutencoes_pendentes": result.pendentes or 0,
+        "total_custo": float(result.total_custo or 0),
+        "vencendo_em_30_dias": result.vencendo_30d or 0,
     }
 
 
@@ -154,8 +212,6 @@ def get_alerta_km(
         )
 
     km_atual = veiculo.km_atual or 0
-
-    # Filter in SQL instead of Python loop
     manutencoes = db.query(Manutencao).filter(
         (Manutencao.veiculo_id == veiculo_id)
         & (Manutencao.status == "pendente")
@@ -165,17 +221,14 @@ def get_alerta_km(
 
     return [
         {
-            "manutencao_id": manu.id,
-            "tipo": manu.tipo,
-            "km_prevista": manu.km_proxima,
+            "manutencao_id": manutencao.id,
+            "tipo": manutencao.tipo,
+            "km_prevista": manutencao.km_proxima,
             "km_atual": km_atual,
-            "km_restante": manu.km_proxima - km_atual,
+            "km_restante": manutencao.km_proxima - km_atual,
         }
-        for manu in manutencoes
+        for manutencao in manutencoes
     ]
-
-
-# === Parameterized routes AFTER ===
 
 
 @router.get("/{manutencao_id}", response_model=ManutencaoResponse)
@@ -194,6 +247,7 @@ def get_manutencao(
 
 
 @router.put("/{manutencao_id}", response_model=ManutencaoResponse)
+@router.patch("/{manutencao_id}", response_model=ManutencaoResponse)
 def update_manutencao(
     manutencao_id: int,
     manutencao_data: ManutencaoUpdate,
@@ -207,7 +261,7 @@ def update_manutencao(
             status_code=status.HTTP_404_NOT_FOUND, detail="Manutenção não encontrada"
         )
 
-    update_data = manutencao_data.model_dump(exclude_unset=True)
+    update_data = _normalize_manutencao_payload(manutencao_data.model_dump(exclude_unset=True))
     for key, value in update_data.items():
         setattr(manutencao, key, value)
 
@@ -229,7 +283,7 @@ def completar_manutencao(
             status_code=status.HTTP_404_NOT_FOUND, detail="Manutenção não encontrada"
         )
 
-    manutencao.status = "completada"
+    manutencao.status = "concluida"
     manutencao.data_realizada = datetime.now().date()
     db.commit()
     db.refresh(manutencao)

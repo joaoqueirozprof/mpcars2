@@ -1,19 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session, joinedload
-from pydantic import BaseModel
-from typing import Optional, List
 from datetime import datetime
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy.orm import Session, joinedload
+
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.pagination import paginate
+from app.models import Cliente, Contrato, Reserva, Veiculo
 from app.models.user import User
-from app.models import Reserva, Cliente, Veiculo, Contrato
 
 
 router = APIRouter(prefix="/reservas", tags=["Reservas"])
 
 
 class ReservaBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     cliente_id: int
     veiculo_id: int
     data_inicio: datetime
@@ -26,6 +30,8 @@ class ReservaCreate(ReservaBase):
 
 
 class ReservaUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     data_inicio: Optional[datetime] = None
     data_fim: Optional[datetime] = None
     status: Optional[str] = None
@@ -40,49 +46,25 @@ class ReservaResponse(ReservaBase):
         from_attributes = True
 
 
-@router.get("/")
-def list_reservas(
-    page: int = 1,
-    limit: int = 50,
-    status_filter: Optional[str] = Query(None, alias="status"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+def _normalize_reserva_status(status_value: Optional[str]) -> Optional[str]:
+    status_map = {
+        "ativa": "pendente",
+        "pendente": "pendente",
+        "confirmada": "confirmada",
+        "convertida": "convertida",
+        "cancelada": "cancelada",
+    }
+    return status_map.get(status_value, status_value)
+
+
+def _verificar_conflitos_periodo(
+    db: Session,
+    veiculo_id: int,
+    data_inicio: datetime,
+    data_fim: datetime,
+    excluir_reserva_id: Optional[int] = None,
 ):
-    """List all reservations with pagination."""
-    query = db.query(Reserva).options(joinedload(Reserva.cliente), joinedload(Reserva.veiculo))
-    return paginate(
-        query=query,
-        page=page,
-        limit=limit,
-        model=Reserva,
-        status_filter=status_filter,
-    )
-
-
-@router.get("/agenda")
-def get_agenda_reservas(
-    veiculo_id: Optional[int] = None,
-    cliente_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Get reservations calendar/agenda."""
-    query = db.query(Reserva)
-    if veiculo_id:
-        query = query.filter(Reserva.veiculo_id == veiculo_id)
-    if cliente_id:
-        query = query.filter(Reserva.cliente_id == cliente_id)
-    reservas = query.all()
-    return reservas
-
-
-def _verificar_conflitos_periodo(db: Session, veiculo_id: int, data_inicio: datetime, data_fim: datetime, excluir_reserva_id: int = None):
-    """Verifica conflitos com reservas E contratos ativos no período.
-
-    CORRIGIDO: Agora verifica também conflitos com contratos ativos,
-    não apenas com outras reservas.
-    """
-    # Verificar conflito com outras reservas
+    """Verifica conflitos com reservas e contratos ativos no período."""
     query_reservas = db.query(Reserva).filter(
         (Reserva.veiculo_id == veiculo_id)
         & (Reserva.data_inicio <= data_fim)
@@ -99,7 +81,6 @@ def _verificar_conflitos_periodo(db: Session, veiculo_id: int, data_inicio: date
             detail="Veículo já reservado no período (reserva #{})".format(conflito_reserva.id),
         )
 
-    # Verificar conflito com contratos ativos
     conflito_contrato = db.query(Contrato).filter(
         (Contrato.veiculo_id == veiculo_id)
         & (Contrato.data_inicio <= data_fim)
@@ -113,18 +94,54 @@ def _verificar_conflitos_periodo(db: Session, veiculo_id: int, data_inicio: date
         )
 
 
+@router.get("/")
+def list_reservas(
+    page: int = 1,
+    limit: int = 50,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all reservations with pagination."""
+    query = db.query(Reserva).options(joinedload(Reserva.cliente), joinedload(Reserva.veiculo))
+
+    status_normalizado = _normalize_reserva_status(status_filter)
+    if status_filter == "ativa":
+        query = query.filter(Reserva.status.in_(["pendente", "confirmada"]))
+        status_normalizado = None
+
+    return paginate(
+        query=query,
+        page=page,
+        limit=limit,
+        model=Reserva,
+        status_filter=status_normalizado,
+    )
+
+
+@router.get("/agenda")
+def get_agenda_reservas(
+    veiculo_id: Optional[int] = None,
+    cliente_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get reservations calendar/agenda."""
+    query = db.query(Reserva)
+    if veiculo_id:
+        query = query.filter(Reserva.veiculo_id == veiculo_id)
+    if cliente_id:
+        query = query.filter(Reserva.cliente_id == cliente_id)
+    return query.all()
+
+
 @router.post("/", response_model=ReservaResponse)
 def create_reserva(
     reserva: ReservaCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create a new reservation.
-
-    CORRIGIDO: Agora verifica conflitos com contratos ativos além de reservas.
-    Também valida datas (inicio < fim).
-    """
-    # Validar datas
+    """Create a new reservation."""
     if reserva.data_inicio >= reserva.data_fim:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -143,7 +160,6 @@ def create_reserva(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
         )
 
-    # Verificar conflitos com reservas E contratos
     _verificar_conflitos_periodo(db, reserva.veiculo_id, reserva.data_inicio, reserva.data_fim)
 
     db_reserva = Reserva(**reserva.model_dump())
@@ -169,6 +185,7 @@ def get_reserva(
 
 
 @router.put("/{reserva_id}", response_model=ReservaResponse)
+@router.patch("/{reserva_id}", response_model=ReservaResponse)
 def update_reserva(
     reserva_id: int,
     reserva_data: ReservaUpdate,
@@ -183,8 +200,9 @@ def update_reserva(
         )
 
     update_data = reserva_data.model_dump(exclude_unset=True)
+    if "status" in update_data:
+        update_data["status"] = _normalize_reserva_status(update_data["status"])
 
-    # Se está alterando datas, verificar conflitos
     new_inicio = update_data.get("data_inicio", reserva.data_inicio)
     new_fim = update_data.get("data_fim", reserva.data_fim)
     if "data_inicio" in update_data or "data_fim" in update_data:
@@ -193,7 +211,13 @@ def update_reserva(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Data de início deve ser anterior à data de fim",
             )
-        _verificar_conflitos_periodo(db, reserva.veiculo_id, new_inicio, new_fim, excluir_reserva_id=reserva_id)
+        _verificar_conflitos_periodo(
+            db,
+            reserva.veiculo_id,
+            new_inicio,
+            new_fim,
+            excluir_reserva_id=reserva_id,
+        )
 
     for key, value in update_data.items():
         setattr(reserva, key, value)
@@ -229,10 +253,7 @@ def converter_para_contrato(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Convert a reservation to a contract.
-
-    CORRIGIDO: Agora atualiza o status do veículo para 'alugado'.
-    """
+    """Convert a reservation to a contract."""
     reserva = db.query(Reserva).filter(Reserva.id == reserva_id).first()
     if not reserva:
         raise HTTPException(
@@ -245,11 +266,9 @@ def converter_para_contrato(
             detail="Apenas reservas confirmadas podem ser convertidas",
         )
 
-    # Calculate days and total value
     dias = max(1, (reserva.data_fim - reserva.data_inicio).days)
     valor_total = round(dias * valor_diaria, 2)
 
-    # Create contract
     contrato = Contrato(
         numero="RES-{}-{}".format(reserva_id, datetime.now().strftime("%Y%m%d%H%M%S")),
         cliente_id=reserva.cliente_id,
@@ -263,7 +282,6 @@ def converter_para_contrato(
     db.add(contrato)
     reserva.status = "convertida"
 
-    # Atualizar status do veículo para 'alugado'
     veiculo = db.query(Veiculo).filter(Veiculo.id == reserva.veiculo_id).first()
     if veiculo:
         veiculo.status = "alugado"

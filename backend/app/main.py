@@ -14,6 +14,7 @@ from app.models import (  # noqa - Import all models
     DespesaVeiculo,
     DespesaLoja,
     DespesaOperacional,
+    LancamentoFinanceiro,
     Seguro,
     ParcelaSeguro,
     IpvaAliquota,

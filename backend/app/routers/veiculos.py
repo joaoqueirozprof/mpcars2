@@ -14,7 +14,7 @@ from app.core.pagination import paginate
 from app.models.user import User
 from app.models import (
     Veiculo, DespesaVeiculo, Contrato, DespesaOperacional,
-    Seguro, ParcelaSeguro, IpvaRegistro, Reserva, Multa, Manutencao,
+    Seguro, ParcelaSeguro, IpvaRegistro, IpvaParcela, Reserva, Multa, Manutencao,
     UsoVeiculoEmpresa, RelatorioNF, DespesaNF, Quilometragem,
     DespesaContrato, ProrrogacaoContrato, CheckinCheckout,
 )
@@ -440,11 +440,7 @@ def delete_veiculo(
     current_user: User = Depends(get_current_user),
     request: Request = None,
 ):
-    """Delete a vehicle and all related records.
-
-    CORRIGIDO: Agora verifica contratos ativos antes de deletar.
-    Com CASCADE nos models, dependentes sao deletados automaticamente.
-    """
+    """Delete a vehicle and all related records without relying on DB cascades."""
     veiculo = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
     if not veiculo:
         raise HTTPException(
@@ -468,14 +464,69 @@ def delete_veiculo(
         if os.path.exists(file_path):
             os.remove(file_path)
 
-    # Deletar contratos finalizados (RESTRICT impede cascade automatico)
-    contratos = db.query(Contrato).filter(Contrato.veiculo_id == veiculo_id).all()
-    for contrato in contratos:
-        db.delete(contrato)  # CASCADE deleta dependentes do contrato
+    contrato_ids = [
+        contrato_id
+        for (contrato_id,) in db.query(Contrato.id).filter(Contrato.veiculo_id == veiculo_id).all()
+    ]
+    if contrato_ids:
+        db.query(Quilometragem).filter(
+            Quilometragem.contrato_id.in_(contrato_ids)
+        ).delete(synchronize_session=False)
+        db.query(DespesaContrato).filter(
+            DespesaContrato.contrato_id.in_(contrato_ids)
+        ).delete(synchronize_session=False)
+        db.query(ProrrogacaoContrato).filter(
+            ProrrogacaoContrato.contrato_id.in_(contrato_ids)
+        ).delete(synchronize_session=False)
+        db.query(CheckinCheckout).filter(
+            CheckinCheckout.contrato_id.in_(contrato_ids)
+        ).delete(synchronize_session=False)
+        db.query(UsoVeiculoEmpresa).filter(
+            UsoVeiculoEmpresa.contrato_id.in_(contrato_ids)
+        ).update({UsoVeiculoEmpresa.contrato_id: None}, synchronize_session=False)
+        db.query(Multa).filter(
+            Multa.contrato_id.in_(contrato_ids)
+        ).delete(synchronize_session=False)
+        db.query(Contrato).filter(
+            Contrato.id.in_(contrato_ids)
+        ).delete(synchronize_session=False)
 
-    # Deletar registros que podem nao ter CASCADE configurado
+    seguro_ids = [
+        seguro_id
+        for (seguro_id,) in db.query(Seguro.id).filter(Seguro.veiculo_id == veiculo_id).all()
+    ]
+    if seguro_ids:
+        db.query(ParcelaSeguro).filter(
+            ParcelaSeguro.seguro_id.in_(seguro_ids)
+        ).delete(synchronize_session=False)
+
+    ipva_ids = [
+        ipva_id
+        for (ipva_id,) in db.query(IpvaRegistro.id).filter(IpvaRegistro.veiculo_id == veiculo_id).all()
+    ]
+    if ipva_ids:
+        db.query(IpvaParcela).filter(
+            IpvaParcela.ipva_id.in_(ipva_ids)
+        ).delete(synchronize_session=False)
+
+    uso_ids = [
+        uso_id
+        for (uso_id,) in db.query(UsoVeiculoEmpresa.id).filter(UsoVeiculoEmpresa.veiculo_id == veiculo_id).all()
+    ]
+    if uso_ids:
+        db.query(RelatorioNF).filter(
+            RelatorioNF.uso_id.in_(uso_ids)
+        ).delete(synchronize_session=False)
+
     db.query(DespesaOperacional).filter(DespesaOperacional.veiculo_id == veiculo_id).delete(synchronize_session=False)
+    db.query(DespesaVeiculo).filter(DespesaVeiculo.veiculo_id == veiculo_id).delete(synchronize_session=False)
+    db.query(ParcelaSeguro).filter(ParcelaSeguro.veiculo_id == veiculo_id).delete(synchronize_session=False)
+    db.query(Seguro).filter(Seguro.veiculo_id == veiculo_id).delete(synchronize_session=False)
+    db.query(IpvaParcela).filter(IpvaParcela.veiculo_id == veiculo_id).delete(synchronize_session=False)
+    db.query(IpvaRegistro).filter(IpvaRegistro.veiculo_id == veiculo_id).delete(synchronize_session=False)
     db.query(Reserva).filter(Reserva.veiculo_id == veiculo_id).delete(synchronize_session=False)
+    db.query(Multa).filter(Multa.veiculo_id == veiculo_id).delete(synchronize_session=False)
+    db.query(Manutencao).filter(Manutencao.veiculo_id == veiculo_id).delete(synchronize_session=False)
     db.query(DespesaNF).filter(DespesaNF.veiculo_id == veiculo_id).delete(synchronize_session=False)
     db.query(RelatorioNF).filter(RelatorioNF.veiculo_id == veiculo_id).delete(synchronize_session=False)
     db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.veiculo_id == veiculo_id).delete(synchronize_session=False)

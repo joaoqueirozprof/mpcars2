@@ -19,11 +19,17 @@ def run_migration():
         ("contratos", "valor_avarias", "NUMERIC(10,2)"),
         ("contratos", "desconto", "NUMERIC(10,2)"),
         ("contratos", "tipo", "VARCHAR DEFAULT 'cliente'"),
+        ("contratos", "cartao_ultimos4", "VARCHAR(4)"),
+        ("contratos", "cartao_bandeira", "VARCHAR"),
+        ("contratos", "cartao_titular", "VARCHAR"),
+        ("contratos", "cartao_numero", "VARCHAR"),
+        ("contratos", "cartao_validade", "VARCHAR"),
         ("contratos", "cartao_codigo", "VARCHAR"),
         ("contratos", "cartao_preautorizacao", "VARCHAR"),
         # Veiculo new fields
         ("veiculos", "categoria", "VARCHAR"),
         ("veiculos", "valor_diaria", "NUMERIC(10,2)"),
+        ("veiculos", "checklist", "JSONB DEFAULT '{}'::jsonb"),
         # DespesaVeiculo new field
         ("despesa_veiculo", "tipo", "VARCHAR"),
         # DespesaLoja new field

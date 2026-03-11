@@ -342,6 +342,26 @@ class DespesaOperacional(Base):
     ano = Column(Integer)
 
 
+class LancamentoFinanceiro(Base):
+    __tablename__ = "lancamentos_financeiros"
+
+    id = Column(Integer, primary_key=True, index=True)
+    data = Column(Date, nullable=False)
+    tipo = Column(String, nullable=False)
+    categoria = Column(String, nullable=False)
+    descricao = Column(String, nullable=False)
+    valor = Column(Numeric(10, 2), nullable=False)
+    status = Column(String, default="pendente")
+    data_criacao = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_lancamentos_financeiros_data", "data"),
+        Index("ix_lancamentos_financeiros_tipo", "tipo"),
+        Index("ix_lancamentos_financeiros_status", "status"),
+    )
+
+
 class Seguro(Base):
     __tablename__ = "seguros"
 

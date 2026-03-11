@@ -77,6 +77,34 @@ class IpvaParcelaResponse(BaseModel):
         from_attributes = True
 
 
+def _sync_ipva_status(db: Session, registro_id: int):
+    """Keep the parent IPVA record aligned with installment payments."""
+    registro = db.query(IpvaRegistro).filter(IpvaRegistro.id == registro_id).first()
+    if not registro:
+        return
+
+    parcelas = db.query(IpvaParcela).filter(IpvaParcela.ipva_id == registro_id).all()
+    if not parcelas:
+        return
+
+    total_pago = sum(
+        float(parcela.valor or 0) for parcela in parcelas if parcela.status == "pago"
+    )
+    total_registro = float(registro.valor_ipva or 0)
+    registro.valor_pago = total_pago
+
+    if total_pago <= 0:
+        registro.status = (
+            "vencido"
+            if registro.data_vencimento and registro.data_vencimento < date.today()
+            else "pendente"
+        )
+    elif total_pago + 0.01 >= total_registro:
+        registro.status = "pago"
+    else:
+        registro.status = "parcial"
+
+
 @router.get("/aliquotas", response_model=List[IpvaAliquotaResponse])
 def list_aliquotas(
     db: Session = Depends(get_db),
@@ -239,6 +267,7 @@ def get_registro(
 
 
 @router.put("/registros/{registro_id}", response_model=IpvaRegistroResponse)
+@router.patch("/registros/{registro_id}", response_model=IpvaRegistroResponse)
 def update_registro(
     registro_id: int,
     registro_data: IpvaRegistroUpdate,
@@ -276,7 +305,17 @@ def pagar_ipva(
         )
 
     registro.valor_pago = valor_pago
-    registro.status = "pago"
+    total_ipva = float(registro.valor_ipva or 0)
+    if valor_pago <= 0:
+        registro.status = (
+            "vencido"
+            if registro.data_vencimento and registro.data_vencimento < date.today()
+            else "pendente"
+        )
+    elif valor_pago + 0.01 >= total_ipva:
+        registro.status = "pago"
+    else:
+        registro.status = "parcial"
     db.commit()
     db.refresh(registro)
     return registro
@@ -390,9 +429,10 @@ def pagar_parcela_ipva(
     if not parcela:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Parcela não encontrada"
-        )
+    )
     parcela.status = "pago"
     parcela.data_pagamento = datetime.now().date()
+    _sync_ipva_status(db, parcela.ipva_id)
     db.commit()
     db.refresh(parcela)
     return parcela
@@ -404,12 +444,14 @@ def delete_registro(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete a licensing record."""
+    """Delete a licensing record and its installments safely."""
     registro = db.query(IpvaRegistro).filter(IpvaRegistro.id == registro_id).first()
     if not registro:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Registro não encontrado"
         )
-    # CASCADE handles parcelas deletion
+    db.query(IpvaParcela).filter(
+        IpvaParcela.ipva_id == registro_id
+    ).delete(synchronize_session=False)
     db.delete(registro)
     db.commit()

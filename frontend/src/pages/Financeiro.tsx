@@ -88,7 +88,7 @@ const FinanceiroPage: React.FC = () => {
       toast.success('Registro criado com sucesso!')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao criar registro')
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao criar registro')
     },
   })
 
@@ -101,7 +101,7 @@ const FinanceiroPage: React.FC = () => {
       toast.success('Registro atualizado com sucesso!')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao atualizar registro')
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao atualizar registro')
     },
   })
 
@@ -113,7 +113,7 @@ const FinanceiroPage: React.FC = () => {
       toast.success('Registro deletado com sucesso!')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao deletar registro')
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao deletar registro')
     },
   })
 
@@ -131,6 +131,10 @@ const FinanceiroPage: React.FC = () => {
 
   const handleOpenModal = (record?: Financeiro) => {
     if (record) {
+      if (!record.id.startsWith('fm-')) {
+        toast.error('Edite contratos e despesas nos módulos específicos. Aqui só editamos lançamentos manuais.')
+        return
+      }
       setEditingRecord(record)
       setFormData(record)
     } else {
@@ -451,6 +455,7 @@ const FinanceiroPage: React.FC = () => {
                             onClick={() => handleOpenModal(record)}
                             className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                             title="Editar"
+                            disabled={!record.id.startsWith('fm-')}
                           >
                             <Edit size={18} />
                           </button>

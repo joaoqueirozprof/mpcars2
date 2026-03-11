@@ -1,23 +1,38 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func as sqlfunc
-from pydantic import BaseModel
-from typing import Optional, List
 from datetime import datetime
+import re
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func as sqlfunc
+from sqlalchemy.orm import Session, joinedload
+
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.pagination import paginate
+from app.models import (
+    Cliente,
+    Contrato,
+    DespesaNF,
+    DespesaOperacional,
+    Empresa,
+    MotoristaEmpresa,
+    RelatorioNF,
+    UsoVeiculoEmpresa,
+    Veiculo,
+)
 from app.models.user import User
-from app.models import Empresa, MotoristaEmpresa, Cliente, UsoVeiculoEmpresa, Veiculo, DespesaNF, Contrato
 
 
 router = APIRouter(prefix="/empresas", tags=["Empresas"])
 
 
 class EmpresaBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     nome: str
     cnpj: str
-    razao_social: str
+    razao_social: Optional[str] = None
     endereco: Optional[str] = None
     cidade: Optional[str] = None
     estado: Optional[str] = None
@@ -25,6 +40,7 @@ class EmpresaBase(BaseModel):
     telefone: Optional[str] = None
     email: Optional[str] = None
     contato_principal: Optional[str] = None
+    responsavel: Optional[str] = None
 
 
 class EmpresaCreate(EmpresaBase):
@@ -32,12 +48,19 @@ class EmpresaCreate(EmpresaBase):
 
 
 class EmpresaUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     nome: Optional[str] = None
+    cnpj: Optional[str] = None
     razao_social: Optional[str] = None
     endereco: Optional[str] = None
+    cidade: Optional[str] = None
+    estado: Optional[str] = None
+    cep: Optional[str] = None
     telefone: Optional[str] = None
     email: Optional[str] = None
     contato_principal: Optional[str] = None
+    responsavel: Optional[str] = None
     ativo: Optional[bool] = None
 
 
@@ -60,6 +83,60 @@ class MotoristaEmpresaResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UsoVeiculoCreate(BaseModel):
+    veiculo_id: int
+    empresa_id: int
+    contrato_id: Optional[int] = None
+    km_inicial: Optional[float] = None
+    data_inicio: Optional[str] = None
+    data_fim: Optional[str] = None
+    km_referencia: Optional[float] = None
+    valor_km_extra: Optional[float] = None
+    valor_diaria_empresa: Optional[float] = None
+
+
+class UsoVeiculoUpdate(BaseModel):
+    km_final: Optional[float] = None
+    km_percorrido: Optional[float] = None
+    data_fim: Optional[str] = None
+    km_referencia: Optional[float] = None
+    valor_km_extra: Optional[float] = None
+    valor_diaria_empresa: Optional[float] = None
+    status: Optional[str] = None
+
+
+def _clean_digits(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+
+    digits = re.sub(r"\D", "", value)
+    return digits or None
+
+
+def _normalize_empresa_payload(payload: dict, is_create: bool = False) -> dict:
+    data = dict(payload)
+
+    responsavel = data.pop("responsavel", None)
+    if data.get("contato_principal") in (None, "") and responsavel not in (None, ""):
+        data["contato_principal"] = responsavel
+
+    if is_create and not data.get("razao_social"):
+        data["razao_social"] = data.get("nome")
+
+    if "cnpj" in data:
+        data["cnpj"] = _clean_digits(data.get("cnpj")) or data.get("cnpj")
+    if "telefone" in data:
+        data["telefone"] = _clean_digits(data.get("telefone"))
+    if "cep" in data:
+        data["cep"] = _clean_digits(data.get("cep"))
+
+    normalized = {}
+    for key, value in data.items():
+        normalized[key] = None if value == "" else value
+
+    return normalized
 
 
 @router.get("/")
@@ -89,13 +166,18 @@ def create_empresa(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new company."""
-    existing = db.query(Empresa).filter(Empresa.cnpj == empresa.cnpj).first()
+    empresa_data = _normalize_empresa_payload(
+        empresa.model_dump(exclude_unset=True),
+        is_create=True,
+    )
+
+    existing = db.query(Empresa).filter(Empresa.cnpj == empresa_data["cnpj"]).first()
     if existing:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="CNPJ ja cadastrado"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="CNPJ já cadastrado"
         )
 
-    db_empresa = Empresa(**empresa.model_dump())
+    db_empresa = Empresa(**empresa_data)
     db.add(db_empresa)
     db.commit()
     db.refresh(db_empresa)
@@ -112,12 +194,13 @@ def get_empresa(
     empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not empresa:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa nao encontrada"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada"
         )
     return empresa
 
 
 @router.put("/{empresa_id}", response_model=EmpresaResponse)
+@router.patch("/{empresa_id}", response_model=EmpresaResponse)
 def update_empresa(
     empresa_id: int,
     empresa_data: EmpresaUpdate,
@@ -128,12 +211,26 @@ def update_empresa(
     empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not empresa:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa nao encontrada"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada"
         )
 
-    update_data = empresa_data.model_dump(exclude_unset=True)
+    update_data = _normalize_empresa_payload(empresa_data.model_dump(exclude_unset=True))
+    if "cnpj" in update_data and update_data["cnpj"]:
+        existing = db.query(Empresa).filter(
+            Empresa.cnpj == update_data["cnpj"],
+            Empresa.id != empresa_id,
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="CNPJ já cadastrado",
+            )
+
     for key, value in update_data.items():
         setattr(empresa, key, value)
+
+    if not empresa.razao_social:
+        empresa.razao_social = empresa.nome
 
     db.commit()
     db.refresh(empresa)
@@ -146,17 +243,16 @@ def delete_empresa(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete a company."""
+    """Delete a company without relying on DB cascades."""
     empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
     if not empresa:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa nao encontrada"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada"
         )
 
-    # Block deletion if company has active contracts via clients
-    clientes_ids = db.query(Cliente.id).filter(Cliente.empresa_id == empresa_id).subquery()
-    contratos_ativos = db.query(Contrato).filter(
-        (Contrato.cliente_id.in_(clientes_ids))
+    clientes_subq = db.query(Cliente.id).filter(Cliente.empresa_id == empresa_id).subquery()
+    contratos_ativos = db.query(Contrato.id).filter(
+        (Contrato.cliente_id.in_(clientes_subq))
         & (Contrato.status == "ativo")
     ).count()
     if contratos_ativos > 0:
@@ -164,6 +260,37 @@ def delete_empresa(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Empresa possui {contratos_ativos} contrato(s) ativo(s). Finalize-os antes de excluir.",
         )
+
+    uso_ids = [
+        uso_id
+        for (uso_id,) in db.query(UsoVeiculoEmpresa.id).filter(
+            UsoVeiculoEmpresa.empresa_id == empresa_id
+        ).all()
+    ]
+
+    if uso_ids:
+        db.query(DespesaNF).filter(
+            DespesaNF.uso_id.in_(uso_ids)
+        ).delete(synchronize_session=False)
+        db.query(RelatorioNF).filter(
+            RelatorioNF.uso_id.in_(uso_ids)
+        ).delete(synchronize_session=False)
+
+    db.query(RelatorioNF).filter(
+        RelatorioNF.empresa_id == empresa_id
+    ).delete(synchronize_session=False)
+    db.query(UsoVeiculoEmpresa).filter(
+        UsoVeiculoEmpresa.empresa_id == empresa_id
+    ).delete(synchronize_session=False)
+    db.query(MotoristaEmpresa).filter(
+        MotoristaEmpresa.empresa_id == empresa_id
+    ).delete(synchronize_session=False)
+    db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id
+    ).update({Cliente.empresa_id: None}, synchronize_session=False)
+    db.query(DespesaOperacional).filter(
+        DespesaOperacional.empresa_id == empresa_id
+    ).update({DespesaOperacional.empresa_id: None}, synchronize_session=False)
 
     db.delete(empresa)
     db.commit()
@@ -203,7 +330,6 @@ def add_empresa_motorista(
             status_code=status.HTTP_404_NOT_FOUND, detail="Cliente nao encontrado"
         )
 
-    # Check if already linked
     existing = db.query(MotoristaEmpresa).filter(
         (MotoristaEmpresa.empresa_id == empresa_id)
         & (MotoristaEmpresa.cliente_id == cliente_id)
@@ -237,7 +363,6 @@ def get_empresa_performance(
             status_code=status.HTTP_404_NOT_FOUND, detail="Empresa nao encontrada"
         )
 
-    # Single query with conditional count
     result = db.query(
         sqlfunc.count(MotoristaEmpresa.id).label("total"),
         sqlfunc.count(
@@ -259,7 +384,6 @@ def get_empresa_faturamento(
     current_user: User = Depends(get_current_user),
 ):
     """Get billing information for a company - SQL aggregation instead of Python loop."""
-    # Single SQL query with subquery join
     clientes_subq = db.query(Cliente.id).filter(
         Cliente.empresa_id == empresa_id
     ).subquery()
@@ -276,33 +400,6 @@ def get_empresa_faturamento(
         "total_contratos": result.total_contratos or 0,
         "total_faturamento": float(result.total_faturamento),
     }
-
-
-# ============================================================
-# USO VEICULO EMPRESA (Veiculos locados para empresas)
-# ============================================================
-
-
-class UsoVeiculoCreate(BaseModel):
-    veiculo_id: int
-    empresa_id: int
-    contrato_id: Optional[int] = None
-    km_inicial: Optional[float] = None
-    data_inicio: Optional[str] = None
-    data_fim: Optional[str] = None
-    km_referencia: Optional[float] = None
-    valor_km_extra: Optional[float] = None
-    valor_diaria_empresa: Optional[float] = None
-
-
-class UsoVeiculoUpdate(BaseModel):
-    km_final: Optional[float] = None
-    km_percorrido: Optional[float] = None
-    data_fim: Optional[str] = None
-    km_referencia: Optional[float] = None
-    valor_km_extra: Optional[float] = None
-    valor_diaria_empresa: Optional[float] = None
-    status: Optional[str] = None
 
 
 @router.get("/{empresa_id}/usos")
@@ -426,7 +523,6 @@ def update_uso_veiculo(
         except ValueError:
             raise HTTPException(status_code=400, detail="Formato de data_fim invalido")
 
-    # Auto-calculate km_percorrido when km_final is set
     if "km_final" in update_data and update_data["km_final"] and uso.km_inicial:
         if update_data["km_final"] < uso.km_inicial:
             raise HTTPException(status_code=400, detail="km_final nao pode ser menor que km_inicial")
@@ -450,5 +546,13 @@ def delete_uso_veiculo(
     uso = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id == uso_id).first()
     if not uso:
         raise HTTPException(status_code=404, detail="Uso nao encontrado")
+
+    db.query(DespesaNF).filter(
+        DespesaNF.uso_id == uso_id
+    ).delete(synchronize_session=False)
+    db.query(RelatorioNF).filter(
+        RelatorioNF.uso_id == uso_id
+    ).delete(synchronize_session=False)
+
     db.delete(uso)
     db.commit()

@@ -4,6 +4,49 @@ from sqlalchemy.orm import Query
 import math
 
 
+def _apply_legacy_aliases(item, result: dict) -> dict:
+    """Expose compatibility aliases expected by the current frontend."""
+    table_name = getattr(item, "__tablename__", "")
+
+    if table_name == "clientes":
+        result["cpf_cnpj"] = result.get("cpf")
+        result["endereco"] = result.get("endereco_residencial")
+        result["cidade"] = result.get("cidade_residencial")
+        result["estado"] = result.get("estado_residencial")
+        result["cep"] = result.get("cep_residencial")
+        result["tipo"] = "pessoa_juridica" if result.get("empresa_id") else "pessoa_fisica"
+
+    elif table_name == "empresas":
+        result["responsavel"] = result.get("contato_principal")
+
+    elif table_name == "veiculos":
+        result["quilometragem"] = result.get("km_atual", 0)
+        result["data_compra"] = result.get("data_aquisicao")
+        result.setdefault("observacoes", "")
+
+    elif table_name == "contratos":
+        result["quilometragem_inicial"] = result.get("km_inicial")
+        result["quilometragem_final"] = result.get("km_final")
+
+    elif table_name == "manutencoes":
+        result["data_manutencao"] = result.get("data_realizada") or result.get("data_proxima")
+        result["valor"] = result.get("custo")
+        result["quilometragem"] = result.get("km_realizada") or result.get("km_proxima")
+
+        if result.get("status") == "em_andamento":
+            result["status"] = "em_progresso"
+        elif result.get("status") == "agendada":
+            result["status"] = "pendente"
+
+    elif table_name == "reservas":
+        result["data_reserva"] = result.get("data_criacao")
+        status = result.get("status")
+        if status in {"pendente", "confirmada"}:
+            result["status"] = "ativa"
+
+    return result
+
+
 def _serialize_item(item) -> dict:
     """Serialize a SQLAlchemy model instance to dict, including nested relationships."""
     if item is None:
@@ -44,7 +87,7 @@ def _serialize_item(item) -> dict:
     except Exception:
         pass
 
-    return result
+    return _apply_legacy_aliases(item, result)
 
 
 def paginate(

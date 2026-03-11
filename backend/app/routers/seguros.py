@@ -332,6 +332,8 @@ def delete_seguro(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Seguro não encontrado"
         )
-    # CASCADE handles parcelas deletion automatically
+    db.query(ParcelaSeguro).filter(
+        ParcelaSeguro.seguro_id == seguro_id
+    ).delete(synchronize_session=False)
     db.delete(seguro)
     db.commit()
