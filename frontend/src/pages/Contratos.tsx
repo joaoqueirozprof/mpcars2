@@ -467,67 +467,69 @@ const Contratos: React.FC = () => {
               <h3 className="text-lg font-display font-bold text-slate-900">{editingContract ? 'Editar Contrato' : 'Novo Contrato'}</h3>
               <button onClick={() => setIsModalOpen(false)} className="btn-icon"><X size={20} /></button>
             </div>
-            <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <form onSubmit={handleSubmit} className="flex flex-1 min-h-0 flex-col overflow-hidden">
+              <div className="modal-scroll-body space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="input-label">Cliente *</label>
+                    <select value={formData.cliente_id} onChange={(event) => setFormData({ ...formData, cliente_id: event.target.value })} className="input-field">
+                      <option value="">Selecione</option>
+                      {clientes?.map((cliente: any) => <option key={cliente.id} value={cliente.id}>{cliente.nome}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="input-label">Tipo</label>
+                    <select value={formData.tipo} onChange={(event) => setFormData({ ...formData, tipo: event.target.value as 'cliente' | 'empresa' })} className="input-field">
+                      <option value="cliente">Cliente</option>
+                      <option value="empresa">Empresa</option>
+                    </select>
+                  </div>
+                </div>
                 <div>
-                  <label className="input-label">Cliente *</label>
-                  <select value={formData.cliente_id} onChange={(event) => setFormData({ ...formData, cliente_id: event.target.value })} className="input-field">
+                  <label className="input-label">Veiculo *</label>
+                  <select value={formData.veiculo_id} onChange={(event) => handleVehicleChange(event.target.value)} className="input-field">
                     <option value="">Selecione</option>
-                    {clientes?.map((cliente: any) => <option key={cliente.id} value={cliente.id}>{cliente.nome}</option>)}
+                    {availableVehicles.map((veiculo: any) => <option key={veiculo.id} value={veiculo.id}>{veiculo.placa} - {veiculo.marca} {veiculo.modelo}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="input-label">Tipo</label>
-                  <select value={formData.tipo} onChange={(event) => setFormData({ ...formData, tipo: event.target.value as 'cliente' | 'empresa' })} className="input-field">
-                    <option value="cliente">Cliente</option>
-                    <option value="empresa">Empresa</option>
-                  </select>
+                {selectedCliente && selectedVeiculo && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-700">
+                    {selectedCliente.nome} | {selectedVeiculo.marca} {selectedVeiculo.modelo} | KM atual {selectedVeiculo.km_atual || 0}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div><label className="input-label">Data Inicio *</label><input type="date" value={formData.data_inicio} onChange={(event) => setFormData({ ...formData, data_inicio: event.target.value })} className="input-field" /></div>
+                  <div><label className="input-label">Data Fim *</label><input type="date" value={formData.data_fim} onChange={(event) => setFormData({ ...formData, data_fim: event.target.value })} className="input-field" /></div>
                 </div>
-              </div>
-              <div>
-                <label className="input-label">Veiculo *</label>
-                <select value={formData.veiculo_id} onChange={(event) => handleVehicleChange(event.target.value)} className="input-field">
-                  <option value="">Selecione</option>
-                  {availableVehicles.map((veiculo: any) => <option key={veiculo.id} value={veiculo.id}>{veiculo.placa} - {veiculo.marca} {veiculo.modelo}</option>)}
-                </select>
-              </div>
-              {selectedCliente && selectedVeiculo && (
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-700">
-                  {selectedCliente.nome} | {selectedVeiculo.marca} {selectedVeiculo.modelo} | KM atual {selectedVeiculo.km_atual || 0}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <p className="text-xs uppercase tracking-wide text-blue-700">KM Atual do Veiculo</p>
+                    <p className="text-2xl font-bold text-blue-950 mt-2">{formData.km_atual_veiculo.toLocaleString('pt-BR')}</p>
+                  </div>
+                  <div><label className="input-label">Hora de Saida</label><input type="time" value={formData.hora_saida} onChange={(event) => setFormData({ ...formData, hora_saida: event.target.value })} className="input-field" /></div>
                 </div>
-              )}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label className="input-label">Data Inicio *</label><input type="date" value={formData.data_inicio} onChange={(event) => setFormData({ ...formData, data_inicio: event.target.value })} className="input-field" /></div>
-                <div><label className="input-label">Data Fim *</label><input type="date" value={formData.data_fim} onChange={(event) => setFormData({ ...formData, data_fim: event.target.value })} className="input-field" /></div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <p className="text-xs uppercase tracking-wide text-blue-700">KM Atual do Veiculo</p>
-                  <p className="text-2xl font-bold text-blue-950 mt-2">{formData.km_atual_veiculo.toLocaleString('pt-BR')}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="input-label">Combustivel na Saida</label>
+                    <select value={formData.combustivel_saida} onChange={(event) => setFormData({ ...formData, combustivel_saida: event.target.value })} className="input-field">
+                      <option value="">Selecione</option>
+                      {fuelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                  </div>
+                  <div><label className="input-label">KM Livres</label><input type="number" value={formData.km_livres} onChange={(event) => setFormData({ ...formData, km_livres: Number(event.target.value) || 0 })} className="input-field" /></div>
                 </div>
-                <div><label className="input-label">Hora de Saida</label><input type="time" value={formData.hora_saida} onChange={(event) => setFormData({ ...formData, hora_saida: event.target.value })} className="input-field" /></div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="input-label">Combustivel na Saida</label>
-                  <select value={formData.combustivel_saida} onChange={(event) => setFormData({ ...formData, combustivel_saida: event.target.value })} className="input-field">
-                    <option value="">Selecione</option>
-                    {fuelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                  </select>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div><label className="input-label">Valor Diaria *</label><input type="number" step="0.01" value={formData.valor_diaria} onChange={(event) => setFormData({ ...formData, valor_diaria: Number(event.target.value) || 0 })} className="input-field" /></div>
+                  <div><label className="input-label">Valor KM Excedente</label><input type="number" step="0.01" value={formData.valor_km_excedente} onChange={(event) => setFormData({ ...formData, valor_km_excedente: Number(event.target.value) || 0 })} className="input-field" /></div>
+                  <div><label className="input-label">Desconto</label><input type="number" step="0.01" value={formData.desconto} onChange={(event) => setFormData({ ...formData, desconto: Number(event.target.value) || 0 })} className="input-field" /></div>
                 </div>
-                <div><label className="input-label">KM Livres</label><input type="number" value={formData.km_livres} onChange={(event) => setFormData({ ...formData, km_livres: Number(event.target.value) || 0 })} className="input-field" /></div>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm space-y-2">
+                  <div className="flex justify-between"><span>Periodo</span><strong>{dias} dia(s)</strong></div>
+                  <div className="flex justify-between"><span>Valor previsto</span><strong>{formatCurrency(valorPreview)}</strong></div>
+                </div>
+                <div><label className="input-label">Observacoes</label><textarea value={formData.observacoes} onChange={(event) => setFormData({ ...formData, observacoes: event.target.value })} rows={3} className="input-field" /></div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div><label className="input-label">Valor Diaria *</label><input type="number" step="0.01" value={formData.valor_diaria} onChange={(event) => setFormData({ ...formData, valor_diaria: Number(event.target.value) || 0 })} className="input-field" /></div>
-                <div><label className="input-label">Valor KM Excedente</label><input type="number" step="0.01" value={formData.valor_km_excedente} onChange={(event) => setFormData({ ...formData, valor_km_excedente: Number(event.target.value) || 0 })} className="input-field" /></div>
-                <div><label className="input-label">Desconto</label><input type="number" step="0.01" value={formData.desconto} onChange={(event) => setFormData({ ...formData, desconto: Number(event.target.value) || 0 })} className="input-field" /></div>
-              </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm space-y-2">
-                <div className="flex justify-between"><span>Periodo</span><strong>{dias} dia(s)</strong></div>
-                <div className="flex justify-between"><span>Valor previsto</span><strong>{formatCurrency(valorPreview)}</strong></div>
-              </div>
-              <div><label className="input-label">Observacoes</label><textarea value={formData.observacoes} onChange={(event) => setFormData({ ...formData, observacoes: event.target.value })} rows={3} className="input-field" /></div>
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="modal-footer">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="btn-secondary">Cancelar</button>
                 <button type="submit" className="btn-primary" disabled={createMutation.isPending || updateMutation.isPending}>{createMutation.isPending || updateMutation.isPending ? 'Salvando...' : 'Salvar Contrato'}</button>
               </div>
@@ -543,30 +545,32 @@ const Contratos: React.FC = () => {
               <h3 className="text-lg font-display font-bold text-slate-900">Encerrar Contrato</h3>
               <button onClick={() => setClosingContract(null)} className="btn-icon" disabled={closeMutation.isPending}><X size={20} /></button>
             </div>
-            <div className="px-6 py-5 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4"><p className="text-xs uppercase tracking-wide text-slate-500">KM de Retirada</p><p className="text-2xl font-bold text-slate-900 mt-2">{(closingContract.quilometragem_inicial || 0).toLocaleString('pt-BR')}</p></div>
-                <div><label className="input-label">KM Atual do Veiculo *</label><input type="number" min={closingContract.quilometragem_inicial || 0} value={closeoutData.km_atual_veiculo} onChange={(event) => setCloseoutData({ ...closeoutData, km_atual_veiculo: Number(event.target.value) || 0 })} className="input-field" /></div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="input-label">Combustivel Retorno</label>
-                  <select value={closeoutData.combustivel_retorno} onChange={(event) => setCloseoutData({ ...closeoutData, combustivel_retorno: event.target.value })} className="input-field">
-                    <option value="">Selecione</option>
-                    {fuelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                  </select>
+            <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+              <div className="modal-scroll-body space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4"><p className="text-xs uppercase tracking-wide text-slate-500">KM de Retirada</p><p className="text-2xl font-bold text-slate-900 mt-2">{(closingContract.quilometragem_inicial || 0).toLocaleString('pt-BR')}</p></div>
+                  <div><label className="input-label">KM Atual do Veiculo *</label><input type="number" min={closingContract.quilometragem_inicial || 0} value={closeoutData.km_atual_veiculo} onChange={(event) => setCloseoutData({ ...closeoutData, km_atual_veiculo: Number(event.target.value) || 0 })} className="input-field" /></div>
                 </div>
-                <div><label className="input-label">Valor Avarias</label><input type="number" step="0.01" value={closeoutData.valor_avarias} onChange={(event) => setCloseoutData({ ...closeoutData, valor_avarias: Number(event.target.value) || 0 })} className="input-field" /></div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="input-label">Combustivel Retorno</label>
+                    <select value={closeoutData.combustivel_retorno} onChange={(event) => setCloseoutData({ ...closeoutData, combustivel_retorno: event.target.value })} className="input-field">
+                      <option value="">Selecione</option>
+                      {fuelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                  </div>
+                  <div><label className="input-label">Valor Avarias</label><input type="number" step="0.01" value={closeoutData.valor_avarias} onChange={(event) => setCloseoutData({ ...closeoutData, valor_avarias: Number(event.target.value) || 0 })} className="input-field" /></div>
+                </div>
+                <div><label className="input-label">Desconto Final</label><input type="number" step="0.01" value={closeoutData.desconto} onChange={(event) => setCloseoutData({ ...closeoutData, desconto: Number(event.target.value) || 0 })} className="input-field" /></div>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm space-y-2">
+                  <div className="flex justify-between"><span>KM rodado</span><strong>{closeoutKmRodado.toLocaleString('pt-BR')}</strong></div>
+                  <div className="flex justify-between"><span>KM excedente</span><strong>{closeoutKmExcedente.toLocaleString('pt-BR')}</strong></div>
+                  <div className="flex justify-between"><span>Cobranca extra</span><strong>{formatCurrency(closeoutValorExtra)}</strong></div>
+                  <div className="flex justify-between pt-2 border-t border-blue-200"><span>Total estimado</span><strong>{formatCurrency(closeoutEstimativa)}</strong></div>
+                </div>
+                <div><label className="input-label">Observacoes</label><textarea rows={3} value={closeoutData.observacoes} onChange={(event) => setCloseoutData({ ...closeoutData, observacoes: event.target.value })} className="input-field" /></div>
               </div>
-              <div><label className="input-label">Desconto Final</label><input type="number" step="0.01" value={closeoutData.desconto} onChange={(event) => setCloseoutData({ ...closeoutData, desconto: Number(event.target.value) || 0 })} className="input-field" /></div>
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm space-y-2">
-                <div className="flex justify-between"><span>KM rodado</span><strong>{closeoutKmRodado.toLocaleString('pt-BR')}</strong></div>
-                <div className="flex justify-between"><span>KM excedente</span><strong>{closeoutKmExcedente.toLocaleString('pt-BR')}</strong></div>
-                <div className="flex justify-between"><span>Cobranca extra</span><strong>{formatCurrency(closeoutValorExtra)}</strong></div>
-                <div className="flex justify-between pt-2 border-t border-blue-200"><span>Total estimado</span><strong>{formatCurrency(closeoutEstimativa)}</strong></div>
-              </div>
-              <div><label className="input-label">Observacoes</label><textarea rows={3} value={closeoutData.observacoes} onChange={(event) => setCloseoutData({ ...closeoutData, observacoes: event.target.value })} className="input-field" /></div>
-              <div className="flex items-center justify-end gap-3">
+              <div className="modal-footer">
                 <button onClick={() => setClosingContract(null)} className="btn-secondary" disabled={closeMutation.isPending}>Cancelar</button>
                 <button onClick={handleCloseout} className="btn-primary" disabled={closeMutation.isPending}>{closeMutation.isPending ? 'Encerrando...' : 'Encerrar Contrato'}</button>
               </div>
