@@ -47,17 +47,21 @@ def run_migration():
         ("ipva_registro", "updated_at", "TIMESTAMP DEFAULT NOW()"),
         ("reservas", "updated_at", "TIMESTAMP DEFAULT NOW()"),
         ("multas", "updated_at", "TIMESTAMP DEFAULT NOW()"),
-        ("manutencao", "updated_at", "TIMESTAMP DEFAULT NOW()"),
+        ("manutencoes", "updated_at", "TIMESTAMP DEFAULT NOW()"),
     ]
-    
-    with engine.connect() as conn:
-        for table, column, col_type in columns_to_add:
-            try:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}"))
-                print(f"  OK: {table}.{column}")
-            except Exception as e:
-                print(f"  SKIP: {table}.{column} - {e}")
-        conn.commit()
+
+    # IMPORTANT: Each ALTER TABLE must be committed individually.
+    # In PostgreSQL, if any statement fails inside a transaction,
+    # the entire transaction is aborted and subsequent statements are ignored.
+    # Using autocommit per-statement prevents one failure from rolling back all changes.
+    for table, column, col_type in columns_to_add:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}".format(table, column, col_type)))
+                conn.commit()
+                print("  OK: {}.{}".format(table, column))
+        except Exception as e:
+            print("  SKIP: {}.{} - {}".format(table, column, e))
     print("Migration complete!")
 
 if __name__ == "__main__":
