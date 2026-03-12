@@ -22,8 +22,7 @@ import { BackupOverview, BackupRunResponse, OpsReadiness, VersionStatus } from '
 
 const Governanca: React.FC = () => {
   const queryClient = useQueryClient()
-  const { user } = useAuth()
-  const isAdmin = user?.perfil === 'admin'
+  const { isPlatformAdmin } = useAuth()
 
   const { data: backups, isLoading: loadingBackups } = useQuery({
     queryKey: ['ops-backups'],
@@ -39,7 +38,7 @@ const Governanca: React.FC = () => {
       const { data } = await api.get<OpsReadiness>('/ops/readiness')
       return data
     },
-    enabled: isAdmin,
+    enabled: isPlatformAdmin,
     retry: false,
   })
 
@@ -49,7 +48,7 @@ const Governanca: React.FC = () => {
       const { data } = await api.get<VersionStatus>('/ops/version')
       return data
     },
-    enabled: isAdmin,
+    enabled: isPlatformAdmin,
     retry: false,
   })
 
@@ -61,7 +60,7 @@ const Governanca: React.FC = () => {
     onSuccess: (data) => {
       toast.success(data.message || 'Backup executado com sucesso!')
       queryClient.invalidateQueries({ queryKey: ['ops-backups'] })
-      if (isAdmin) {
+      if (isPlatformAdmin) {
         queryClient.invalidateQueries({ queryKey: ['ops-readiness'] })
       }
     },
@@ -86,7 +85,7 @@ const Governanca: React.FC = () => {
                 Backups, versoes e seguranca operacional
               </h1>
               <p className="mt-3 max-w-3xl text-sm text-slate-600">
-                Este painel fica reservado para acessos de governanca. Aqui voce acompanha os ultimos backups, dispara um backup manual e, quando for administrador da plataforma, enxerga tambem prontidao de producao e versoes do sistema.
+                Este painel fica reservado para acessos de governanca. Aqui voce acompanha os ultimos backups e pode disparar um backup manual. Somente o acesso principal admin@mpcars.com enxerga prontidao de producao e versoes do sistema.
               </p>
 
               <div className="mt-5 flex flex-wrap gap-3">
@@ -126,7 +125,7 @@ const Governanca: React.FC = () => {
                   </p>
                   <p className="mt-1 text-sm text-slate-500">{backups?.directory || '/backups'}</p>
                 </div>
-                {isAdmin && (
+                {isPlatformAdmin && (
                   <div
                     className={cn(
                       'rounded-2xl border p-4',
@@ -155,7 +154,7 @@ const Governanca: React.FC = () => {
           </div>
         </section>
 
-        <div className={cn('grid gap-6', isAdmin ? 'xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.95fr)]' : 'grid-cols-1')}>
+        <div className={cn('grid gap-6', isPlatformAdmin ? 'xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.95fr)]' : 'grid-cols-1')}>
           <section className="card">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
@@ -223,7 +222,7 @@ const Governanca: React.FC = () => {
             )}
           </section>
 
-          {isAdmin && (
+          {isPlatformAdmin && (
             <div className="space-y-6">
               <section className="card">
                 <div className="flex items-center gap-3">
@@ -334,7 +333,7 @@ const Governanca: React.FC = () => {
           )}
         </div>
 
-        {isAdmin && (
+        {isPlatformAdmin && (
           <section className="card">
             <div className="flex items-center gap-3">
               <CheckCircle2 size={20} className="text-emerald-600" />

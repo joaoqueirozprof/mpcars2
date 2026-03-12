@@ -418,10 +418,10 @@ const Dashboard: React.FC = () => {
             <div className="dashboard-score-card">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.22em] text-sky-700/70">Saude da operacao</p>
+                  <p className="text-xs uppercase tracking-[0.22em] text-primary-dark/75">Saude da operacao</p>
                   <h2 className="mt-1 text-xl font-display font-bold text-slate-950">{scoreLabel}</h2>
                 </div>
-                <ShieldCheck size={22} className="text-sky-600" />
+                <ShieldCheck size={22} className="text-primary" />
               </div>
 
               <div className="mt-6 flex items-end justify-between gap-4">
@@ -434,7 +434,7 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div className="metric-progress-track mt-6 bg-sky-100">
+              <div className="metric-progress-track mt-6 bg-primary-100">
                 <div
                   className={cn(
                     'metric-progress-fill',
@@ -447,24 +447,24 @@ const Dashboard: React.FC = () => {
               </div>
 
               <div className="mt-6 grid grid-cols-2 gap-3">
-                <div className="dashboard-mini-card">
+                <div className="dashboard-mini-card flex flex-col gap-2">
                   <span className="text-xs uppercase tracking-wide text-slate-500">Disponiveis</span>
                   <CountUpValue value={stats?.veiculos_disponiveis || 0} className="mt-2 text-2xl font-display font-bold text-slate-950" />
                 </div>
-                <div className="dashboard-mini-card">
+                <div className="dashboard-mini-card flex flex-col gap-2">
                   <span className="text-xs uppercase tracking-wide text-slate-500">Reservas confirmadas</span>
                   <CountUpValue value={stats?.reservas_confirmadas || 0} className="mt-2 text-2xl font-display font-bold text-slate-950" />
                 </div>
-                <div className="dashboard-mini-card">
+                <div className="dashboard-mini-card flex flex-col gap-2">
                   <span className="text-xs uppercase tracking-wide text-slate-500">Atrasos</span>
                   <CountUpValue value={stats?.contratos_atrasados.length || 0} className="mt-2 text-2xl font-display font-bold text-slate-950" />
                 </div>
-                <div className="dashboard-mini-card">
+                <div className="dashboard-mini-card flex min-w-0 flex-col gap-2">
                   <span className="text-xs uppercase tracking-wide text-slate-500">Ticket medio</span>
                   <CountUpValue
                     value={stats?.ticket_medio || 0}
                     formatter={formatCurrency}
-                    className="mt-2 text-xl font-display font-bold text-slate-950"
+                    className="mt-2 block max-w-full text-[clamp(1rem,1.3vw,1.4rem)] font-display font-bold leading-tight tracking-[-0.02em] text-slate-950"
                   />
                 </div>
               </div>
@@ -735,12 +735,12 @@ const Dashboard: React.FC = () => {
             )}
           </div>
 
-          <div className="card overflow-hidden relative border-sky-100 bg-[linear-gradient(180deg,rgba(240,249,255,0.98),rgba(255,255,255,0.98))]">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(56,189,248,0.22),_transparent_45%)]" />
+          <div className="card overflow-hidden relative border-primary-100 bg-[linear-gradient(180deg,rgba(240,248,255,0.98),rgba(255,255,255,0.98))]">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(67,163,255,0.16),_transparent_45%)]" />
             <div className="relative">
               <div className="mb-6">
                 <h2 className="text-lg font-display font-bold flex items-center gap-2">
-                  <Sparkles size={20} className="text-sky-600" />
+                  <Sparkles size={20} className="text-primary" />
                   Leitura Rapida
                 </h2>
                 <p className="mt-1 text-sm text-slate-600">Resumo para decidir sua proxima acao em poucos segundos.</p>

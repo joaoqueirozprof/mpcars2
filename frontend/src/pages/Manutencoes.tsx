@@ -666,8 +666,8 @@ const Manutencoes: React.FC = () => {
                   Bloqueio automatico, fila por KM e calendario da frota
                 </span>
               </div>
-              <h1 className="mt-4 text-4xl font-display font-bold text-white">Manutencoes da frota</h1>
-              <p className="mt-3 max-w-2xl text-base text-blue-100/85">
+              <h1 className="mt-4 text-4xl font-display font-bold text-slate-950">Manutencoes da frota</h1>
+              <p className="mt-3 max-w-2xl text-base text-slate-600">
                 Bem-vindo, {user?.nome || 'Operador'}. Agora voce enxerga risco por quilometragem e por data,
                 acompanha bloqueios automaticos e libera a frota assim que a ordem for concluida.
               </p>
@@ -678,15 +678,14 @@ const Manutencoes: React.FC = () => {
                 <div
                   key={badge.label}
                   className={cn(
-                    'rounded-2xl border px-4 py-3 backdrop-blur-sm',
-                    badge.tone === 'red' && 'border-red-300/50 bg-red-500/15 text-white',
-                    badge.tone === 'emerald' && 'border-emerald-300/50 bg-emerald-500/15 text-white',
-                    badge.tone === 'amber' && 'border-amber-300/50 bg-amber-500/15 text-white',
-                    badge.tone === 'slate' && 'border-white/15 bg-white/10 text-white',
+                    'dashboard-hero-chip',
+                    badge.tone === 'red' && 'dashboard-hero-chip-red',
+                    badge.tone === 'emerald' && 'dashboard-hero-chip-emerald',
+                    badge.tone === 'amber' && 'dashboard-hero-chip-amber',
                   )}
                 >
-                  <p className="text-xs uppercase tracking-[0.18em] text-white/70">{badge.label}</p>
-                  <CountUpValue value={badge.value} className="mt-2 block text-2xl font-display font-bold text-white" />
+                  <p className="text-xs uppercase tracking-[0.18em] text-current/70">{badge.label}</p>
+                  <CountUpValue value={badge.value} className="mt-2 block text-2xl font-display font-bold text-slate-950" />
                 </div>
               ))}
             </div>
@@ -796,21 +795,21 @@ const Manutencoes: React.FC = () => {
             </div>
           </div>
 
-          <div className="card bg-slate-900 text-white">
+          <div className="card border-primary-100 bg-[linear-gradient(180deg,rgba(240,248,255,0.98),rgba(255,255,255,0.98))]">
             <div className="flex items-center gap-3">
-              <div className="rounded-2xl bg-white/10 p-3">
+              <div className="rounded-2xl bg-primary-100 p-3 text-primary-dark">
                 <Sparkles size={22} />
               </div>
               <div>
-                <p className="text-sm uppercase tracking-[0.18em] text-slate-300">Fluxo melhorado</p>
-                <h2 className="mt-1 text-2xl font-display font-bold">Operacao mais segura</h2>
+                <p className="text-sm uppercase tracking-[0.18em] text-primary-dark/70">Fluxo melhorado</p>
+                <h2 className="mt-1 text-2xl font-display font-bold text-slate-950">Operacao mais segura</h2>
               </div>
             </div>
 
-            <ul className="mt-6 space-y-3 text-sm text-slate-300">
-              <li className="rounded-2xl bg-white/5 px-4 py-3">Ordens abertas podem colocar o carro em manutencao automaticamente.</li>
-              <li className="rounded-2xl bg-white/5 px-4 py-3">Concluir a manutencao devolve o veiculo para disponibilidade quando nao ha outro bloqueio.</li>
-              <li className="rounded-2xl bg-white/5 px-4 py-3">A tela agora mostra risco por data e quilometragem sem depender de memoria operacional.</li>
+            <ul className="mt-6 space-y-3 text-sm text-slate-600">
+              <li className="rounded-2xl border border-primary-100 bg-white/92 px-4 py-3">Ordens abertas podem colocar o carro em manutencao automaticamente.</li>
+              <li className="rounded-2xl border border-primary-100 bg-white/92 px-4 py-3">Concluir a manutencao devolve o veiculo para disponibilidade quando nao ha outro bloqueio.</li>
+              <li className="rounded-2xl border border-primary-100 bg-white/92 px-4 py-3">A tela agora mostra risco por data e quilometragem sem depender de memoria operacional.</li>
             </ul>
           </div>
         </div>
@@ -818,7 +817,7 @@ const Manutencoes: React.FC = () => {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h1 className="page-title flex items-center gap-2">
-              <Wrench className="text-purple-600" size={32} />
+              <Wrench className="text-primary" size={32} />
               Manutenções
             </h1>
             <p className="page-subtitle">Gerenciamento de manutenção preventiva e corretiva da frota</p>
@@ -865,8 +864,8 @@ const Manutencoes: React.FC = () => {
         <div className="card">
           {isEmpty ? (
             <div className="empty-state py-12">
-              <div className="empty-state-icon bg-purple-50 mb-4">
-                <Wrench className="text-purple-600" size={40} />
+              <div className="empty-state-icon bg-primary-50 mb-4">
+                <Wrench className="text-primary" size={40} />
               </div>
               <h3 className="text-lg font-semibold text-slate-900 mb-2">Nenhuma manutenção registrada</h3>
               <p className="text-slate-600 mb-4">Registre a manutenção dos veículos para acompanhar o histórico</p>

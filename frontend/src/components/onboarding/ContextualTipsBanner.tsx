@@ -318,9 +318,9 @@ const tipDefinitions: TipDefinition[] = [
 
 const toneStyles = {
   blue: {
-    shell: 'from-blue-50 via-white to-cyan-50 border-blue-100',
-    icon: 'bg-blue-600 text-white shadow-[0_16px_34px_rgba(37,99,235,0.22)]',
-    chip: 'bg-blue-50 text-blue-700 ring-blue-100',
+    shell: 'from-primary-50 via-white to-cyan-50 border-primary-100',
+    icon: 'bg-primary text-white shadow-[0_16px_34px_rgba(67,163,255,0.22)]',
+    chip: 'bg-primary-50 text-primary-dark ring-primary-100',
   },
   emerald: {
     shell: 'from-emerald-50 via-white to-teal-50 border-emerald-100',
@@ -333,8 +333,8 @@ const toneStyles = {
     chip: 'bg-amber-50 text-amber-700 ring-amber-100',
   },
   slate: {
-    shell: 'from-slate-100 via-white to-slate-50 border-slate-200',
-    icon: 'bg-slate-900 text-white shadow-[0_16px_34px_rgba(15,23,42,0.18)]',
+    shell: 'from-slate-100 via-white to-primary-50 border-slate-200',
+    icon: 'bg-primary text-white shadow-[0_16px_34px_rgba(67,163,255,0.18)]',
     chip: 'bg-slate-100 text-slate-700 ring-slate-200',
   },
 }
@@ -342,7 +342,7 @@ const toneStyles = {
 const ContextualTipsBanner: React.FC<ContextualTipsBannerProps> = ({ onOpenGuide }) => {
   const location = useLocation()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, isPlatformAdmin } = useAuth()
   const [isTipDismissed, setIsTipDismissed] = useState(false)
 
   const currentTip = useMemo(
@@ -375,7 +375,7 @@ const ContextualTipsBanner: React.FC<ContextualTipsBannerProps> = ({ onOpenGuide
       return data
     },
     enabled:
-      user?.perfil === 'admin' &&
+      isPlatformAdmin &&
       location.pathname.startsWith('/dashboard'),
     retry: false,
     staleTime: 60_000,
@@ -540,7 +540,7 @@ const ContextualTipsBanner: React.FC<ContextualTipsBannerProps> = ({ onOpenGuide
                     className={cn(
                       'flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition-all duration-200',
                       action.variant === 'primary'
-                        ? 'border-slate-950 bg-slate-950 text-white hover:bg-slate-800'
+                        ? 'border-primary bg-primary text-white hover:bg-primary-dark'
                         : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white',
                     )}
                   >

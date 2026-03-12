@@ -133,10 +133,10 @@ const Header: React.FC<HeaderProps> = ({ onOpenCommandPalette, onOpenGuide }) =>
           <button
             type="button"
             onClick={onOpenCommandPalette}
-            className="hidden min-w-0 flex-1 items-center justify-between gap-3 rounded-2xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-left transition-all duration-200 hover:border-primary/30 hover:bg-white md:flex"
+            className="hidden min-w-0 flex-1 items-center justify-between gap-3 rounded-2xl border border-primary-100 bg-primary-50/80 px-4 py-3 text-left transition-all duration-200 hover:border-primary/30 hover:bg-white md:flex"
           >
             <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white text-sky-600 shadow-sm ring-1 ring-sky-100">
+              <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white text-primary shadow-sm ring-1 ring-primary-100">
                 <Search size={18} />
               </div>
               <div className="min-w-0">

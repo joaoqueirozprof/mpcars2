@@ -1,4 +1,8 @@
+import os
+import shutil
 import subprocess
+import tarfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -8,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_admin_user, get_ops_user
+from app.core.deps import get_ops_user, get_platform_admin_user
 from app.core.security import verify_password
 from app.models.user import User
 
@@ -34,6 +38,42 @@ def _resolve_path(value: Optional[str], default_relative: str) -> Path:
             return candidate
         return (_project_root() / candidate).resolve()
     return (_project_root() / default_relative).resolve()
+
+
+def _resolve_existing_path(value: Optional[str], default_relative: str) -> Path:
+    candidates: List[Path] = []
+    if value:
+        configured = Path(value)
+        if configured.is_absolute():
+            candidates.append(configured)
+            stripped = Path(str(value).lstrip("/\\"))
+            candidates.append((_project_root() / stripped).resolve())
+        else:
+            candidates.append((_project_root() / configured).resolve())
+
+    candidates.append((_project_root() / default_relative).resolve())
+
+    seen: set[str] = set()
+    unique_candidates: List[Path] = []
+    for candidate in candidates:
+        serialized = str(candidate)
+        if serialized in seen:
+            continue
+        seen.add(serialized)
+        unique_candidates.append(candidate)
+
+    for candidate in unique_candidates:
+        if candidate.exists():
+            return candidate
+
+    return unique_candidates[0]
+
+
+def _backup_root() -> Path:
+    candidate = Path(settings.BACKUP_DIRECTORY)
+    if candidate.is_absolute():
+        return candidate
+    return (_project_root() / candidate).resolve()
 
 
 def _build_check(
@@ -91,7 +131,7 @@ def _format_file_size(total_bytes: int) -> str:
 
 
 def _list_backups(limit: int = 10) -> List[Dict[str, Any]]:
-    backup_root = Path(settings.BACKUP_DIRECTORY)
+    backup_root = _backup_root()
     if not backup_root.exists() or not backup_root.is_dir():
         return []
 
@@ -146,9 +186,166 @@ def _run_command(command: List[str], cwd: Path) -> subprocess.CompletedProcess[s
         ) from exc
 
 
+def _write_database_dump(target_file: Path) -> str:
+    runtime_url = make_url(settings.database_url_for_runtime)
+    driver = (runtime_url.drivername or "").lower()
+
+    if driver.startswith("postgresql"):
+        command = [
+            "pg_dump",
+            "--no-owner",
+            "--no-privileges",
+            "--clean",
+            "--if-exists",
+            "-h",
+            runtime_url.host or "localhost",
+            "-p",
+            str(runtime_url.port or 5432),
+            "-U",
+            runtime_url.username or "postgres",
+            "-d",
+            (runtime_url.database or "").lstrip("/"),
+        ]
+        env = os.environ.copy()
+        if runtime_url.password:
+            env["PGPASSWORD"] = runtime_url.password
+
+        try:
+            with target_file.open("w", encoding="utf-8") as output_handle:
+                result = subprocess.run(
+                    command,
+                    cwd=str(_project_root()),
+                    env=env,
+                    stdout=output_handle,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=settings.BACKUP_COMMAND_TIMEOUT_SECONDS,
+                    check=False,
+                )
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="pg_dump nao esta disponivel no ambiente atual para gerar o backup.",
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(
+                status_code=504,
+                detail="O dump do banco demorou mais do que o tempo limite configurado.",
+            ) from exc
+
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=(result.stderr or "Falha ao gerar dump do banco.").strip(),
+            )
+
+        return f"Dump PostgreSQL gerado via pg_dump para {(runtime_url.database or '').lstrip('/')}"
+
+    if driver.startswith("sqlite"):
+        import sqlite3
+
+        database_path = runtime_url.database or ""
+        if not database_path or database_path == ":memory:":
+            target_file.write_text("-- SQLite em memoria: dump indisponivel\n", encoding="utf-8")
+            return "Ambiente de teste com SQLite em memoria registrado no manifesto."
+
+        connection = sqlite3.connect(database_path)
+        try:
+            with target_file.open("w", encoding="utf-8") as output_handle:
+                for line in connection.iterdump():
+                    output_handle.write(f"{line}\n")
+        finally:
+            connection.close()
+
+        return f"Dump SQLite salvo a partir de {database_path}"
+
+    raise HTTPException(
+        status_code=500,
+        detail=f"Banco {runtime_url.drivername} ainda nao suportado pelo backup automatico.",
+    )
+
+
+def _write_assets_archive(target_file: Path) -> str:
+    root = _project_root()
+    included_paths: List[str] = []
+
+    with tarfile.open(target_file, "w:gz") as archive:
+        for relative in ("uploads", "pdfs"):
+            source = root / relative
+            if not source.exists():
+                continue
+            archive.add(source, arcname=relative)
+            included_paths.append(relative)
+
+    if not included_paths:
+        return "Nenhum upload ou PDF encontrado; arquivo de assets criado vazio."
+
+    return "Assets salvos com: " + ", ".join(included_paths)
+
+
+def _cleanup_old_backups(backup_root: Path) -> int:
+    if not backup_root.exists():
+        return 0
+
+    removed = 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.BACKUP_RETENTION_DAYS)
+
+    for directory in backup_root.iterdir():
+        if not directory.is_dir():
+            continue
+        modified_at = datetime.fromtimestamp(directory.stat().st_mtime, tz=timezone.utc)
+        if modified_at < cutoff:
+            shutil.rmtree(directory, ignore_errors=True)
+            removed += 1
+
+    return removed
+
+
+def _run_native_backup() -> Dict[str, Any]:
+    backup_root = _backup_root()
+    backup_root.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    target_dir = backup_root / timestamp
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    database_file = target_dir / "database.sql"
+    assets_file = target_dir / "assets.tar.gz"
+    database_note = _write_database_dump(database_file)
+    assets_note = _write_assets_archive(assets_file)
+    removed_count = _cleanup_old_backups(backup_root)
+
+    manifest = {
+        "timestamp": timestamp,
+        "backup_mode": "native-api",
+        "database_note": database_note,
+        "assets_note": assets_note,
+        "backup_directory": str(target_dir),
+        "retention_days": str(settings.BACKUP_RETENTION_DAYS),
+        "removed_old_backups": str(removed_count),
+    }
+    manifest_lines = [f"{key}={value}" for key, value in manifest.items()]
+    (target_dir / "manifest.txt").write_text(
+        "\n".join(manifest_lines) + "\n",
+        encoding="utf-8",
+    )
+
+    return {
+        "target_dir": target_dir,
+        "output": "\n".join(
+            [
+                f"Backup salvo em {target_dir}",
+                database_note,
+                assets_note,
+                f"Backups antigos removidos: {removed_count}",
+            ]
+        ),
+    }
+
+
 @router.get("/readiness")
 def get_readiness(
-    _: User = Depends(get_admin_user), db: Session = Depends(get_db)
+    _: User = Depends(get_platform_admin_user), db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     checks: List[Dict[str, str]] = []
     seeded_admin = db.query(User).filter(User.email == "admin@mpcars.com").first()
@@ -312,12 +509,12 @@ def get_readiness(
 def list_backups(
     _: User = Depends(get_ops_user),
 ) -> Dict[str, Any]:
-    script_path = _resolve_path(settings.BACKUP_SCRIPT_PATH, "ops/backup_mpcars2.sh")
-    restore_path = _resolve_path(settings.RESTORE_SCRIPT_PATH, "ops/restore_mpcars2.sh")
+    script_path = _resolve_existing_path(settings.BACKUP_SCRIPT_PATH, "ops/backup_mpcars2.sh")
+    restore_path = _resolve_existing_path(settings.RESTORE_SCRIPT_PATH, "ops/restore_mpcars2.sh")
 
     return {
         "enabled": settings.BACKUP_ENABLED,
-        "directory": settings.BACKUP_DIRECTORY,
+        "directory": str(_backup_root()),
         "storage_label": settings.BACKUP_STORAGE_LABEL,
         "retention_days": settings.BACKUP_RETENTION_DAYS,
         "backup_script_exists": script_path.exists(),
@@ -332,32 +529,39 @@ def list_backups(
 def run_backup_now(
     _: User = Depends(get_ops_user),
 ) -> Dict[str, Any]:
-    script_path = _resolve_path(settings.BACKUP_SCRIPT_PATH, "ops/backup_mpcars2.sh")
-    if not script_path.exists():
+    if not settings.BACKUP_ENABLED:
         raise HTTPException(
-            status_code=500,
-            detail=f"Script de backup nao encontrado em {script_path}",
+            status_code=400,
+            detail="Backups estao desabilitados neste ambiente.",
         )
 
-    result = _run_command(["bash", str(script_path)], _project_root())
-    if result.returncode != 0:
-        raise HTTPException(
-            status_code=500,
-            detail=(result.stderr or result.stdout or "Falha ao executar backup.").strip(),
-        )
+    script_path = _resolve_existing_path(settings.BACKUP_SCRIPT_PATH, "ops/backup_mpcars2.sh")
+    output = ""
+
+    if script_path.exists():
+        result = _run_command(["bash", str(script_path)], _project_root())
+        if result.returncode == 0:
+            output = (result.stdout or "").strip()
+        else:
+            native_result = _run_native_backup()
+            script_error = (result.stderr or result.stdout or "Falha ao executar backup.").strip()
+            output = f"{native_result['output']}\nScript legado ignorado: {script_error}"
+    else:
+        native_result = _run_native_backup()
+        output = native_result["output"]
 
     items = _list_backups(limit=1)
     return {
         "status": "backup_executado",
         "message": "Backup solicitado com sucesso.",
-        "output": (result.stdout or "").strip(),
+        "output": output,
         "latest_backup": items[0] if items else None,
     }
 
 
 @router.get("/version")
 def get_version_status(
-    _: User = Depends(get_admin_user),
+    _: User = Depends(get_platform_admin_user),
 ) -> Dict[str, Any]:
     repo_path = _resolve_path(settings.GIT_REPOSITORY_PATH, ".")
     if not repo_path.exists():

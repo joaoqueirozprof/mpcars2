@@ -11,11 +11,13 @@ interface AuthContextType {
   setUser: (user: User | null) => void
   canAccess: (page: string) => boolean
   isAdmin: boolean
+  isPlatformAdmin: boolean
   isBackupOperator: boolean
   getHomeRoute: () => string
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
+const PLATFORM_ADMIN_EMAIL = 'admin@mpcars.com'
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null)
@@ -82,15 +84,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }
 
   const isAdmin = user?.perfil === 'admin'
-  const isBackupOperator = user?.perfil === 'admin' || user?.perfil === 'owner'
+  const isPlatformAdmin =
+    user?.perfil === 'admin' && user?.email?.toLowerCase() === PLATFORM_ADMIN_EMAIL
+  const isBackupOperator = isPlatformAdmin || user?.perfil === 'owner'
 
   const canAccess = useCallback((page: string): boolean => {
     if (!user) return false
-    if (user.perfil === 'admin') return true
     if (user.perfil === 'owner') return page === 'governanca'
+    if (user.perfil === 'admin') {
+      if (page === 'governanca') return isPlatformAdmin
+      return true
+    }
     const pages = user.permitted_pages || []
     return pages.includes(page)
-  }, [user])
+  }, [isPlatformAdmin, user])
 
   const getHomeRoute = useCallback(() => {
     if (!user) return '/login'
@@ -127,6 +134,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser,
         canAccess,
         isAdmin,
+        isPlatformAdmin,
         isBackupOperator,
         getHomeRoute,
       }}

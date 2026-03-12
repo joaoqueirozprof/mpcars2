@@ -8,6 +8,17 @@ from app.models.user import get_profile_pages
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+PLATFORM_ADMIN_EMAIL = "admin@mpcars.com"
+
+
+def is_platform_admin_email(email: str | None) -> bool:
+    return (email or "").strip().lower() == PLATFORM_ADMIN_EMAIL
+
+
+def is_platform_admin_user(user) -> bool:
+    return getattr(user, "perfil", None) == "admin" and is_platform_admin_email(
+        getattr(user, "email", None)
+    )
 
 
 def get_current_user(
@@ -64,10 +75,22 @@ def get_ops_user(
     current_user=Depends(get_current_user),
 ):
     """Allow platform admin or backup owner to access governance tools."""
-    if current_user.perfil not in {"admin", "owner"}:
+    if not (is_platform_admin_user(current_user) or current_user.perfil == "owner"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acesso restrito a administradores da plataforma",
+        )
+    return current_user
+
+
+def get_platform_admin_user(
+    current_user=Depends(get_current_user),
+):
+    """Require the platform admin account for production governance tools."""
+    if not is_platform_admin_user(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito ao administrador principal da plataforma",
         )
     return current_user
 

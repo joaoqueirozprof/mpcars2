@@ -317,8 +317,8 @@ const Usuarios: React.FC = () => {
               className={cn(
                 'flex-1 rounded-[18px] px-4 py-3 text-sm font-semibold transition-colors',
                 activeTab === tab.id
-                  ? 'bg-sky-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-sky-50 hover:text-sky-700',
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-primary-50 hover:text-primary-dark',
               )}
             >
               {tab.label}

@@ -1,3 +1,6 @@
+from pathlib import Path
+
+
 def test_admin_can_create_owner_with_governance_only(client, admin_headers):
     response = client.post(
         "/api/v1/usuarios/",
@@ -31,6 +34,50 @@ def test_owner_can_access_backups_but_not_clientes(client, user_factory, login_a
 
     assert backups_response.status_code == 200, backups_response.text
     assert clientes_response.status_code == 403, clientes_response.text
+
+
+def test_generic_admin_cannot_access_governance_panels(client, admin_headers):
+    backups_response = client.get("/api/v1/ops/backups", headers=admin_headers)
+    readiness_response = client.get("/api/v1/ops/readiness", headers=admin_headers)
+
+    assert backups_response.status_code == 403, backups_response.text
+    assert readiness_response.status_code == 403, readiness_response.text
+
+
+def test_platform_admin_can_run_backup_without_shell_script(
+    client,
+    platform_admin_headers,
+    monkeypatch,
+    tmp_path,
+):
+    from app.core.config import settings
+    from app.routers import ops
+
+    backup_root = tmp_path / "backups"
+
+    monkeypatch.setattr(settings, "BACKUP_ENABLED", True)
+    monkeypatch.setattr(settings, "BACKUP_DIRECTORY", str(backup_root))
+    monkeypatch.setattr(settings, "BACKUP_SCRIPT_PATH", "/ops/arquivo_inexistente.sh")
+
+    def fake_dump(target_file: Path) -> str:
+        target_file.write_text("-- dump de teste\n", encoding="utf-8")
+        return "Dump de teste criado"
+
+    def fake_assets(target_file: Path) -> str:
+        target_file.write_bytes(b"assets")
+        return "Assets de teste criados"
+
+    monkeypatch.setattr(ops, "_write_database_dump", fake_dump)
+    monkeypatch.setattr(ops, "_write_assets_archive", fake_assets)
+
+    response = client.post("/api/v1/ops/backups/run", headers=platform_admin_headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "backup_executado"
+    assert body["latest_backup"] is not None
+    assert "Dump de teste criado" in body["output"]
+    assert any(item.is_dir() for item in backup_root.iterdir())
 
 
 def test_admin_generates_recovery_link_and_user_completes_reset(

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_admin_user, get_current_user
+from app.core.deps import get_admin_user, get_current_user, is_platform_admin_email
 from app.core.security import get_password_hash, validate_password_strength
 from app.models.user import (
     ASSIGNABLE_PAGES,
@@ -105,13 +105,17 @@ def _build_password_reset_url(token: str) -> str:
 
 
 def _serialize_user(user: User) -> dict:
+    effective_pages = get_profile_pages(user.perfil, user.permitted_pages)
+    if user.perfil == "admin" and not is_platform_admin_email(user.email):
+        effective_pages = [page for page in effective_pages if page != "governanca"]
+
     return {
         "id": user.id,
         "email": user.email,
         "nome": user.nome,
         "perfil": user.perfil,
         "ativo": user.ativo,
-        "permitted_pages": get_profile_pages(user.perfil, user.permitted_pages),
+        "permitted_pages": effective_pages,
         "data_cadastro": user.data_cadastro,
     }
 
@@ -146,8 +150,8 @@ def _access_catalog() -> Dict[str, Any]:
             {
                 "id": "admin",
                 "label": "Administrador",
-                "description": "Acesso total ao sistema, incluindo usuarios, versoes e governanca.",
-                "fixed_pages": get_profile_pages("admin"),
+                "description": "Acesso total a operacao e usuarios. Governanca de producao fica reservada ao admin principal da plataforma.",
+                "fixed_pages": [page for page in get_profile_pages("admin") if page != "governanca"],
                 "manual_selection": False,
             },
             {

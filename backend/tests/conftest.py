@@ -112,3 +112,19 @@ def admin_user(db_session):
 @pytest.fixture
 def admin_headers(login_as, admin_user):
     return login_as(admin_user.email, "AdminSeguro123")
+
+
+@pytest.fixture
+def platform_admin_user(db_session):
+    return create_user(
+        db_session,
+        email="admin@mpcars.com",
+        password="AdminSeguro123",
+        nome="Administrador da Plataforma",
+        perfil="admin",
+    )
+
+
+@pytest.fixture
+def platform_admin_headers(login_as, platform_admin_user):
+    return login_as(platform_admin_user.email, "AdminSeguro123")

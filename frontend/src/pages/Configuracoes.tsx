@@ -11,7 +11,7 @@ import { OpsReadiness } from '@/types'
 type ConfigTab = 'empresa' | 'usuario' | 'sistema'
 
 const Configuracoes: React.FC = () => {
-  const { user, setUser } = useAuth()
+  const { user, setUser, isPlatformAdmin } = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -32,7 +32,7 @@ const Configuracoes: React.FC = () => {
       const { data } = await api.get<OpsReadiness>('/ops/readiness')
       return data
     },
-    enabled: user?.perfil === 'admin',
+    enabled: isPlatformAdmin,
     retry: false,
   })
 
@@ -519,7 +519,7 @@ const Configuracoes: React.FC = () => {
                 </div>
               </div>
 
-              {user?.perfil === 'admin' && (
+              {isPlatformAdmin && (
                 <div className="rounded-[24px] border border-sky-100 bg-[linear-gradient(135deg,#eff6ff_0%,#ffffff_100%)] p-5 shadow-sm">
                   <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                     <div className="max-w-2xl">
@@ -531,7 +531,7 @@ const Configuracoes: React.FC = () => {
                         Backups, versoes e checklist de producao
                       </h3>
                       <p className="mt-2 text-sm text-slate-600">
-                        A parte sensivel de operacao saiu desta tela para ficar mais simples para o usuario comum. Agora ela fica reunida no painel de backups e governanca, visivel so para voce.
+                        A parte sensivel de operacao saiu desta tela para ficar mais simples para o usuario comum. Agora ela fica reunida no painel de backups e governanca, visivel so para o acesso principal admin@mpcars.com.
                       </p>
                     </div>
 
@@ -550,7 +550,7 @@ const Configuracoes: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => navigate('/backups')}
-                    className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-sky-700"
+                    className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-dark"
                   >
                     <HardDriveDownload size={16} />
                     Abrir painel de backups e governanca
