@@ -90,6 +90,7 @@ export interface Contrato {
     modelo: string;
     placa: string;
     km_atual?: number;
+    checklist?: Record<string, boolean>;
   };
 }
 

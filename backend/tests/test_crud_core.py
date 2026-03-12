@@ -146,6 +146,11 @@ def test_contrato_uses_vehicle_km_and_can_be_closed(client, admin_headers, db_se
         json={
             "km_atual_veiculo": 15480,
             "combustivel_retorno": "3/4",
+            "itens_checklist": {
+                "estepe": True,
+                "triangulo": False,
+                "documento": True,
+            },
             "valor_avarias": 50,
             "taxa_combustivel": 40,
             "taxa_limpeza": 25,
@@ -174,6 +179,8 @@ def test_contrato_uses_vehicle_km_and_can_be_closed(client, admin_headers, db_se
     assert float(veiculo.km_atual) == 15480
     assert veiculo.status == "disponivel"
     assert len(checkins) == 2
+    devolucao = next(checkin for checkin in checkins if checkin.tipo == "devolucao")
+    assert devolucao.itens_checklist["triangulo"] is False
 
 
 def test_dashboard_root_returns_operational_data(client, admin_headers, db_session):

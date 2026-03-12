@@ -117,6 +117,7 @@ class ContratoFinalizeRequest(BaseModel):
     quilometragem_final: Optional[float] = None
     km_atual_veiculo: Optional[float] = None
     combustivel_retorno: Optional[str] = None
+    itens_checklist: Optional[dict] = None
     valor_avarias: Optional[float] = None
     taxa_combustivel: Optional[float] = None
     taxa_limpeza: Optional[float] = None
@@ -667,6 +668,15 @@ def finalizar_contrato(
     )
     data_finalizacao = finalize_data.get("data_finalizacao") or datetime.now()
     km_final = finalize_data.get("km_final")
+    checklist_retorno = finalize_data.get("itens_checklist")
+
+    if isinstance(checklist_retorno, dict):
+        checklist_retorno = {
+            str(chave): bool(valor)
+            for chave, valor in checklist_retorno.items()
+        }
+    else:
+        checklist_retorno = None
 
     if km_final is not None and contrato.km_inicial is not None and float(km_final) < float(contrato.km_inicial):
         raise HTTPException(
@@ -736,6 +746,7 @@ def finalizar_contrato(
             data_hora=data_finalizacao,
             km=contrato.km_final if contrato.km_final is not None else veiculo.km_atual,
             nivel_combustivel=contrato.combustivel_retorno,
+            itens_checklist=checklist_retorno or veiculo.checklist or {},
             avarias=finalize_data.get("observacoes"),
         )
     )

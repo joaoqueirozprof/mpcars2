@@ -42,6 +42,7 @@ type ContractForm = {
 type CloseoutForm = {
   km_atual_veiculo: number
   combustivel_retorno: string
+  itens_checklist: CloseoutChecklist
   valor_avarias: number
   taxa_combustivel: number
   taxa_limpeza: number
@@ -54,6 +55,19 @@ type CloseoutForm = {
   observacoes: string
 }
 
+type CloseoutChecklistKey =
+  | 'macaco'
+  | 'estepe'
+  | 'chave_de_roda'
+  | 'triangulo'
+  | 'documento'
+  | 'chave_reserva'
+  | 'tapetes'
+  | 'multimidia'
+  | 'limpeza_ok'
+
+type CloseoutChecklist = Record<CloseoutChecklistKey, boolean>
+
 type CloseoutFeeFieldKey =
   | 'valor_avarias'
   | 'taxa_combustivel'
@@ -65,6 +79,18 @@ type CloseoutFeeFieldKey =
   | 'taxa_administrativa'
 
 const fuelOptions = ['1/4', '1/2', '3/4', 'Cheio']
+
+const closeoutChecklistFields: Array<{ key: CloseoutChecklistKey; label: string; hint: string }> = [
+  { key: 'macaco', label: 'Macaco', hint: 'Equipamento presente no carro' },
+  { key: 'estepe', label: 'Estepe', hint: 'Roda reserva devolvida' },
+  { key: 'chave_de_roda', label: 'Chave de roda', hint: 'Ferramenta de troca de pneu' },
+  { key: 'triangulo', label: 'Triangulo', hint: 'Item de seguranca obrigatorio' },
+  { key: 'documento', label: 'Documento', hint: 'CRLV ou documento liberado' },
+  { key: 'chave_reserva', label: 'Chave reserva', hint: 'Chave extra ou chaveiro devolvido' },
+  { key: 'tapetes', label: 'Tapetes', hint: 'Jogo de tapetes conferido' },
+  { key: 'multimidia', label: 'Multimidia / som', hint: 'Som, tela ou acessorio eletronico' },
+  { key: 'limpeza_ok', label: 'Limpeza geral', hint: 'Veiculo voltou limpo e organizado' },
+]
 
 const closeoutFeeFields: Array<{ key: CloseoutFeeFieldKey; label: string; hint: string }> = [
   { key: 'valor_avarias', label: 'Avarias / funilaria', hint: 'Batidas, riscos, lanternas, para-choque' },
@@ -114,6 +140,29 @@ const getRoundedDaysBetween = (start?: string, end?: string | Date) => {
   return Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)))
 }
 
+const buildCloseoutChecklist = (veiculo?: any): CloseoutChecklist => {
+  const source = veiculo?.checklist || {}
+  const resolve = (keys: string[]) => {
+    for (const key of keys) {
+      if (source[key] !== undefined) return Boolean(source[key])
+      if (veiculo?.[key] !== undefined) return Boolean(veiculo[key])
+    }
+    return true
+  }
+
+  return {
+    macaco: resolve(['macaco', 'checklist_item_1']),
+    estepe: resolve(['estepe', 'checklist_item_2']),
+    chave_de_roda: resolve(['chave_de_roda', 'ferramentas', 'checklist_item_3']),
+    triangulo: resolve(['triangulo', 'checklist_item_4']),
+    documento: resolve(['documento', 'documentos', 'checklist_item_5']),
+    chave_reserva: resolve(['chave_reserva', 'chave_extra']),
+    tapetes: resolve(['tapetes', 'checklist_item_8']),
+    multimidia: resolve(['multimidia', 'som', 'cd_player', 'checklist_item_9', 'checklist_item_10']),
+    limpeza_ok: resolve(['limpeza_ok', 'limpo']),
+  }
+}
+
 const Contratos: React.FC = () => {
   const queryClient = useQueryClient()
   const config = useConfig()
@@ -145,6 +194,7 @@ const Contratos: React.FC = () => {
   const [closeoutData, setCloseoutData] = useState<CloseoutForm>({
     km_atual_veiculo: 0,
     combustivel_retorno: '',
+    itens_checklist: buildCloseoutChecklist(),
     valor_avarias: 0,
     taxa_combustivel: 0,
     taxa_limpeza: 0,
@@ -314,6 +364,7 @@ const Contratos: React.FC = () => {
     setCloseoutData({
       km_atual_veiculo: contrato.veiculo?.km_atual ?? contrato.quilometragem_inicial ?? 0,
       combustivel_retorno: contrato.combustivel_retorno || '',
+      itens_checklist: buildCloseoutChecklist(contrato.veiculo),
       valor_avarias: contrato.valor_avarias || 0,
       taxa_combustivel: contrato.taxa_combustivel || 0,
       taxa_limpeza: contrato.taxa_limpeza || 0,
@@ -366,6 +417,9 @@ const Contratos: React.FC = () => {
   const closeoutTaxasOperacionais = closeoutFeeFields.reduce(
     (total, field) => total + Number(closeoutData[field.key] || 0),
     0
+  )
+  const closeoutChecklistPendencias = closeoutChecklistFields.filter(
+    (field) => !closeoutData.itens_checklist[field.key]
   )
   const closeoutFeeBreakdown = closeoutFeeFields
     .map((field) => ({ ...field, value: Number(closeoutData[field.key] || 0) }))
@@ -616,7 +670,7 @@ const Contratos: React.FC = () => {
 
       {closingContract && (
         <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !closeMutation.isPending && setClosingContract(null)}>
-          <div className="modal-content max-w-5xl w-full" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-content max-w-6xl w-full" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
               <h3 className="text-lg font-display font-bold text-slate-900">Encerrar Contrato</h3>
               <button onClick={() => setClosingContract(null)} className="btn-icon" disabled={closeMutation.isPending}><X size={20} /></button>
@@ -631,95 +685,169 @@ const Contratos: React.FC = () => {
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">KM de Retirada</p>
-                    <p className="text-2xl font-bold text-slate-900 mt-2">{(closingContract.quilometragem_inicial || 0).toLocaleString('pt-BR')}</p>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Diarias Faturadas</p>
-                    <p className="text-2xl font-bold text-slate-900 mt-2">{closeoutDiasFaturados}</p>
-                    <p className="mt-2 text-sm text-slate-600">
-                      Contratadas: {closeoutDiasContratados} | Base atualizada: {formatCurrency(closeoutValorBaseAtualizado)}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="input-label">KM Atual do Veiculo *</label>
-                    <input
-                      type="number"
-                      min={closingContract.quilometragem_inicial || 0}
-                      value={closeoutData.km_atual_veiculo}
-                      onChange={(event) => setCloseoutData({ ...closeoutData, km_atual_veiculo: Number(event.target.value) || 0 })}
-                      className="input-field"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="input-label">Combustivel Retorno</label>
-                    <select value={closeoutData.combustivel_retorno} onChange={(event) => setCloseoutData({ ...closeoutData, combustivel_retorno: event.target.value })} className="input-field">
-                      <option value="">Selecione</option>
-                      {fuelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="input-label">Desconto Final</label>
-                    <input type="number" step="0.01" value={closeoutData.desconto} onChange={(event) => setCloseoutData({ ...closeoutData, desconto: Number(event.target.value) || 0 })} className="input-field" />
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
-                    <div>
-                      <h4 className="text-base font-semibold text-slate-900">Taxas de devolucao</h4>
-                      <p className="text-sm text-slate-500">Preencha apenas as situacoes que realmente aconteceram com o veiculo.</p>
-                    </div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Campos adicionais de cobranca</p>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {closeoutFeeFields.map((field) => (
-                      <div key={field.key} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-                        <label className="input-label">{field.label}</label>
-                        <p className="mb-3 text-xs text-slate-500">{field.hint}</p>
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.9fr)_minmax(320px,0.95fr)]">
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">KM de Retirada</p>
+                        <p className="text-2xl font-bold text-slate-900 mt-2">{(closingContract.quilometragem_inicial || 0).toLocaleString('pt-BR')}</p>
+                      </div>
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">Diarias Faturadas</p>
+                        <p className="text-2xl font-bold text-slate-900 mt-2">{closeoutDiasFaturados}</p>
+                        <p className="mt-2 text-sm text-slate-600">
+                          Contratadas: {closeoutDiasContratados} | Base atualizada: {formatCurrency(closeoutValorBaseAtualizado)}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="input-label">KM Atual do Veiculo *</label>
                         <input
                           type="number"
-                          step="0.01"
-                          min="0"
-                          value={closeoutData[field.key]}
-                          onChange={(event) => setCloseoutData({ ...closeoutData, [field.key]: Number(event.target.value) || 0 })}
-                          className="input-field bg-white"
+                          min={closingContract.quilometragem_inicial || 0}
+                          value={closeoutData.km_atual_veiculo}
+                          onChange={(event) => setCloseoutData({ ...closeoutData, km_atual_veiculo: Number(event.target.value) || 0 })}
+                          className="input-field"
                         />
                       </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm space-y-2">
-                  <div className="flex justify-between"><span>Valor base contratado</span><strong>{formatCurrency(closeoutValorBaseContratado)}</strong></div>
-                  <div className="flex justify-between"><span>Valor base atualizado</span><strong>{formatCurrency(closeoutValorBaseAtualizado)}</strong></div>
-                  {closeoutValorAtraso > 0 && <div className="flex justify-between text-amber-700"><span>Acrescimo por atraso</span><strong>{formatCurrency(closeoutValorAtraso)}</strong></div>}
-                  <div className="flex justify-between"><span>KM rodado</span><strong>{closeoutKmRodado.toLocaleString('pt-BR')}</strong></div>
-                  <div className="flex justify-between"><span>KM excedente</span><strong>{closeoutKmExcedente.toLocaleString('pt-BR')}</strong></div>
-                  <div className="flex justify-between"><span>Cobranca KM excedente</span><strong>{formatCurrency(closeoutValorKmExcedente)}</strong></div>
-                  <div className="flex justify-between"><span>Taxas operacionais</span><strong>{formatCurrency(closeoutTaxasOperacionais)}</strong></div>
-                  {closeoutFeeBreakdown.length > 0 && (
-                    <div className="pt-2 border-t border-blue-200 space-y-1">
-                      {closeoutFeeBreakdown.map((field) => (
-                        <div key={field.key} className="flex justify-between text-slate-600">
-                          <span>{field.label}</span>
-                          <strong>{formatCurrency(field.value)}</strong>
-                        </div>
-                      ))}
                     </div>
-                  )}
-                  <div className="flex justify-between text-red-600"><span>Desconto final</span><strong>- {formatCurrency(closeoutData.desconto)}</strong></div>
-                  <div className="flex justify-between pt-2 border-t border-blue-200 text-base"><span>Total estimado</span><strong>{formatCurrency(closeoutEstimativa)}</strong></div>
-                </div>
 
-                <div>
-                  <label className="input-label">Observacoes</label>
-                  <textarea rows={4} value={closeoutData.observacoes} onChange={(event) => setCloseoutData({ ...closeoutData, observacoes: event.target.value })} className="input-field" />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="input-label">Combustivel Retorno</label>
+                        <select value={closeoutData.combustivel_retorno} onChange={(event) => setCloseoutData({ ...closeoutData, combustivel_retorno: event.target.value })} className="input-field">
+                          <option value="">Selecione</option>
+                          {fuelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="input-label">Desconto Final</label>
+                        <input type="number" step="0.01" value={closeoutData.desconto} onChange={(event) => setCloseoutData({ ...closeoutData, desconto: Number(event.target.value) || 0 })} className="input-field" />
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+                        <div>
+                          <h4 className="text-base font-semibold text-slate-900">Checklist de devolucao</h4>
+                          <p className="text-sm text-slate-500">Desmarque o que faltou ou voltou com problema na vistoria.</p>
+                        </div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Conferencia fisica do veiculo</p>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {closeoutChecklistFields.map((field) => {
+                          const checked = closeoutData.itens_checklist[field.key]
+                          return (
+                            <label
+                              key={field.key}
+                              className={`flex items-start gap-3 rounded-xl border p-4 cursor-pointer transition-colors ${
+                                checked ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(event) =>
+                                  setCloseoutData({
+                                    ...closeoutData,
+                                    itens_checklist: {
+                                      ...closeoutData.itens_checklist,
+                                      [field.key]: event.target.checked,
+                                    },
+                                  })
+                                }
+                                className="mt-1 h-4 w-4 rounded border-slate-300"
+                              />
+                              <div>
+                                <p className="text-sm font-semibold text-slate-900">{field.label}</p>
+                                <p className="mt-1 text-xs text-slate-500">{field.hint}</p>
+                              </div>
+                            </label>
+                          )
+                        })}
+                      </div>
+                      {closeoutChecklistPendencias.length > 0 && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                          Itens pendentes: {closeoutChecklistPendencias.map((field) => field.label).join(', ')}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+                        <div>
+                          <h4 className="text-base font-semibold text-slate-900">Taxas de devolucao</h4>
+                          <p className="text-sm text-slate-500">Preencha apenas as situacoes que realmente aconteceram com o veiculo.</p>
+                        </div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Campos adicionais de cobranca</p>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {closeoutFeeFields.map((field) => (
+                          <div key={field.key} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                            <label className="input-label">{field.label}</label>
+                            <p className="mb-3 text-xs text-slate-500">{field.hint}</p>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={closeoutData[field.key]}
+                              onChange={(event) => setCloseoutData({ ...closeoutData, [field.key]: Number(event.target.value) || 0 })}
+                              className="input-field bg-white"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="input-label">Observacoes</label>
+                      <textarea rows={4} value={closeoutData.observacoes} onChange={(event) => setCloseoutData({ ...closeoutData, observacoes: event.target.value })} className="input-field" />
+                    </div>
+                  </div>
+
+                  <div className="xl:sticky xl:top-0">
+                    <div className="space-y-4">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-blue-700">Resumo Financeiro</p>
+                            <h4 className="text-base font-semibold text-slate-900">Fechamento da devolucao</h4>
+                          </div>
+                          <div className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-blue-700">
+                            {closeoutChecklistPendencias.length} pendencia(s)
+                          </div>
+                        </div>
+                        <div className="flex justify-between"><span>Valor base contratado</span><strong>{formatCurrency(closeoutValorBaseContratado)}</strong></div>
+                        <div className="flex justify-between"><span>Valor base atualizado</span><strong>{formatCurrency(closeoutValorBaseAtualizado)}</strong></div>
+                        {closeoutValorAtraso > 0 && <div className="flex justify-between text-amber-700"><span>Acrescimo por atraso</span><strong>{formatCurrency(closeoutValorAtraso)}</strong></div>}
+                        <div className="flex justify-between"><span>KM rodado</span><strong>{closeoutKmRodado.toLocaleString('pt-BR')}</strong></div>
+                        <div className="flex justify-between"><span>KM excedente</span><strong>{closeoutKmExcedente.toLocaleString('pt-BR')}</strong></div>
+                        <div className="flex justify-between"><span>Cobranca KM excedente</span><strong>{formatCurrency(closeoutValorKmExcedente)}</strong></div>
+                        <div className="flex justify-between"><span>Itens pendentes no checklist</span><strong>{closeoutChecklistPendencias.length}</strong></div>
+                        <div className="flex justify-between"><span>Taxas operacionais</span><strong>{formatCurrency(closeoutTaxasOperacionais)}</strong></div>
+                        {closeoutFeeBreakdown.length > 0 && (
+                          <div className="pt-2 border-t border-blue-200 space-y-1">
+                            {closeoutFeeBreakdown.map((field) => (
+                              <div key={field.key} className="flex justify-between text-slate-600">
+                                <span>{field.label}</span>
+                                <strong>{formatCurrency(field.value)}</strong>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex justify-between text-red-600"><span>Desconto final</span><strong>- {formatCurrency(closeoutData.desconto)}</strong></div>
+                        <div className="flex justify-between pt-2 border-t border-blue-200 text-base"><span>Total estimado</span><strong>{formatCurrency(closeoutEstimativa)}</strong></div>
+                      </div>
+
+                      {closeoutChecklistPendencias.length > 0 && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                          <p className="font-semibold">Checklist com pendencias</p>
+                          <p className="mt-1">
+                            Revise os itens faltantes antes de concluir: {closeoutChecklistPendencias.map((field) => field.label).join(', ')}.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
               <div className="modal-footer">
