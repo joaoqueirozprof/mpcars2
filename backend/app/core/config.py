@@ -25,7 +25,14 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://mpcars2-redis:6379/0"
     BACKUP_ENABLED: bool = False
     BACKUP_DIRECTORY: str = "/backups"
+    BACKUP_STORAGE_LABEL: str = "Drive dedicado da VPS"
     BACKUP_RETENTION_DAYS: int = 14
+    BACKUP_SCRIPT_PATH: str = "ops/backup_mpcars2.sh"
+    RESTORE_SCRIPT_PATH: str = "ops/restore_mpcars2.sh"
+    BACKUP_COMMAND_TIMEOUT_SECONDS: int = 300
+    GIT_REPOSITORY_PATH: Optional[str] = None
+    PASSWORD_RESET_BASE_URL: Optional[str] = None
+    PASSWORD_RESET_TOKEN_TTL_MINUTES: int = 30
 
     CORS_ORIGINS: List[str] = [
         "http://72.61.129.78:3002",
@@ -67,6 +74,12 @@ class Settings(BaseSettings):
 
         if self.BACKUP_RETENTION_DAYS < 1:
             raise ValueError("BACKUP_RETENTION_DAYS deve ser no minimo 1")
+
+        if self.BACKUP_COMMAND_TIMEOUT_SECONDS < 30:
+            raise ValueError("BACKUP_COMMAND_TIMEOUT_SECONDS deve ser no minimo 30")
+
+        if self.PASSWORD_RESET_TOKEN_TTL_MINUTES < 5:
+            raise ValueError("PASSWORD_RESET_TOKEN_TTL_MINUTES deve ser no minimo 5")
 
         if self.ENVIRONMENT == "production" and len(self.SECRET_KEY or "") < 32:
             raise ValueError("SECRET_KEY deve ter ao menos 32 caracteres em producao")

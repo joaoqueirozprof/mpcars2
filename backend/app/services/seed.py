@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
 from datetime import datetime, date, timedelta
 from decimal import Decimal
-from app.models.user import User, ALL_PAGES
+from app.core.config import settings
+from app.models.user import User, get_profile_pages
 from app.models import (
     Configuracao, IpvaAliquota, Cliente, Veiculo, Contrato,
     Empresa, DespesaContrato, DespesaVeiculo, DespesaLoja,
@@ -14,24 +15,25 @@ from app.core.security import get_password_hash
 def seed_database(db: Session):
     """Seed the database with initial data."""
 
-    # Check if admin user already exists
+    # Only seed the default admin outside the real production environment.
     admin_exists = db.query(User).filter(User.email == "admin@mpcars.com").first()
-    if not admin_exists:
-        admin_user = User(
-            email="admin@mpcars.com",
-            hashed_password=get_password_hash("123456"),
-            nome="Administrador",
-            perfil="admin",
-            ativo=True,
-            permitted_pages=ALL_PAGES,
-        )
-        db.add(admin_user)
-        db.commit()
-    else:
-        # Ensure existing admin has all pages
-        if not admin_exists.permitted_pages or len(admin_exists.permitted_pages) < len(ALL_PAGES):
-            admin_exists.permitted_pages = ALL_PAGES
+    if settings.ENVIRONMENT != "production":
+        if not admin_exists:
+            admin_user = User(
+                email="admin@mpcars.com",
+                hashed_password=get_password_hash("123456"),
+                nome="Administrador",
+                perfil="admin",
+                ativo=True,
+                permitted_pages=get_profile_pages("admin"),
+            )
+            db.add(admin_user)
             db.commit()
+        else:
+            expected_pages = get_profile_pages("admin")
+            if not admin_exists.permitted_pages or len(admin_exists.permitted_pages) < len(expected_pages):
+                admin_exists.permitted_pages = expected_pages
+                db.commit()
 
     # Check if configurations already exist
     config_count = db.query(Configuracao).count()

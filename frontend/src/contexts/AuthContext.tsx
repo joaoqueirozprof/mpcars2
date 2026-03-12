@@ -11,6 +11,8 @@ interface AuthContextType {
   setUser: (user: User | null) => void
   canAccess: (page: string) => boolean
   isAdmin: boolean
+  isBackupOperator: boolean
+  getHomeRoute: () => string
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -80,16 +82,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }
 
   const isAdmin = user?.perfil === 'admin'
+  const isBackupOperator = user?.perfil === 'admin' || user?.perfil === 'owner'
 
   const canAccess = useCallback((page: string): boolean => {
     if (!user) return false
     if (user.perfil === 'admin') return true
+    if (user.perfil === 'owner') return page === 'governanca'
     const pages = user.permitted_pages || []
     return pages.includes(page)
   }, [user])
 
+  const getHomeRoute = useCallback(() => {
+    if (!user) return '/login'
+    if (user.perfil === 'owner') return '/backups'
+    if (canAccess('dashboard')) return '/dashboard'
+
+    const fallbackPages = [
+      'contratos',
+      'reservas',
+      'clientes',
+      'veiculos',
+      'financeiro',
+      'relatorios',
+      'configuracoes',
+      'governanca',
+    ]
+    const firstAllowedPage = fallbackPages.find((page) => canAccess(page))
+
+    if (!firstAllowedPage || firstAllowedPage === 'dashboard') {
+      return '/dashboard'
+    }
+
+    return firstAllowedPage === 'governanca' ? '/backups' : `/${firstAllowedPage}`
+  }, [canAccess, user])
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, isAuthenticated: !!user, login, logout, setUser, canAccess, isAdmin }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        isLoading,
+        isAuthenticated: !!user,
+        login,
+        logout,
+        setUser,
+        canAccess,
+        isAdmin,
+        isBackupOperator,
+        getHomeRoute,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

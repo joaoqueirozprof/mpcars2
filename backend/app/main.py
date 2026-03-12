@@ -102,6 +102,15 @@ def run_startup_tasks() -> None:
                 if "permitted_pages" not in columns:
                     conn.execute(text("ALTER TABLE users ADD COLUMN permitted_pages JSON"))
                     conn.commit()
+                if "password_reset_token_hash" not in columns:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN password_reset_token_hash VARCHAR"))
+                    conn.commit()
+                if "password_reset_expires_at" not in columns:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN password_reset_expires_at TIMESTAMP"))
+                    conn.commit()
+                if "password_reset_requested_at" not in columns:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN password_reset_requested_at TIMESTAMP"))
+                    conn.commit()
 
         try:
             from add_columns_migration import run_migration

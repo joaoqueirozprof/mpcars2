@@ -7,6 +7,7 @@ import {
   DollarSign,
   FileCheck,
   FileText,
+  HardDriveDownload,
   LayoutDashboard,
   LucideIcon,
   PlusCircle,
@@ -196,6 +197,15 @@ export const navigationSections: NavigationSection[] = [
     label: 'Administracao',
     tone: 'slate',
     items: [
+      {
+        id: 'backups',
+        label: 'Backups',
+        href: '/backups',
+        icon: HardDriveDownload,
+        slug: 'governanca',
+        description: 'Backups, historico de restore e governanca do ambiente.',
+        keywords: ['backup', 'restore', 'seguranca', 'versao'],
+      },
       {
         id: 'configuracoes',
         label: 'Configuracoes',

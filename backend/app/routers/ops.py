@@ -1,12 +1,14 @@
-from typing import Any, Dict, List
+import subprocess
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_admin_user
+from app.core.deps import get_admin_user, get_ops_user
 from app.core.security import verify_password
 from app.models.user import User
 
@@ -19,6 +21,19 @@ DEFAULT_SECRET_MARKERS = {
     "mpcars2-secret-key-change-in-production-2024",
 }
 DEFAULT_PASSWORD_MARKERS = {"mpcars2pass", "postgres", "admin", "123456"}
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _resolve_path(value: Optional[str], default_relative: str) -> Path:
+    if value:
+        candidate = Path(value)
+        if candidate.is_absolute():
+            return candidate
+        return (_project_root() / candidate).resolve()
+    return (_project_root() / default_relative).resolve()
 
 
 def _build_check(
@@ -52,6 +67,85 @@ def _secret_is_default() -> bool:
     return not secret or any(marker in secret for marker in DEFAULT_SECRET_MARKERS)
 
 
+def _parse_manifest(manifest_path: Path) -> Dict[str, str]:
+    data: Dict[str, str] = {}
+    if not manifest_path.exists():
+        return data
+
+    for line in manifest_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        data[key.strip()] = value.strip()
+    return data
+
+
+def _format_file_size(total_bytes: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(max(total_bytes, 0))
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} {unit}"
+        size /= 1024
+    return f"{int(size)} B"
+
+
+def _list_backups(limit: int = 10) -> List[Dict[str, Any]]:
+    backup_root = Path(settings.BACKUP_DIRECTORY)
+    if not backup_root.exists() or not backup_root.is_dir():
+        return []
+
+    backups: List[Dict[str, Any]] = []
+    for directory in sorted(
+        [item for item in backup_root.iterdir() if item.is_dir()],
+        key=lambda item: item.name,
+        reverse=True,
+    )[:limit]:
+        manifest = _parse_manifest(directory / "manifest.txt")
+        total_bytes = sum(
+            file.stat().st_size for file in directory.rglob("*") if file.is_file()
+        )
+        backups.append(
+            {
+                "id": directory.name,
+                "timestamp": manifest.get("timestamp", directory.name),
+                "directory": str(directory),
+                "database_file": str(directory / "database.sql")
+                if (directory / "database.sql").exists()
+                else None,
+                "assets_file": str(directory / "assets.tar.gz")
+                if (directory / "assets.tar.gz").exists()
+                else None,
+                "size_bytes": total_bytes,
+                "size_human": _format_file_size(total_bytes),
+                "manifest": manifest,
+            }
+        )
+    return backups
+
+
+def _run_command(command: List[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            command,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=settings.BACKUP_COMMAND_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Comando indisponivel no ambiente atual: {command[0]}",
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="O processo demorou mais do que o tempo limite configurado.",
+        ) from exc
+
+
 @router.get("/readiness")
 def get_readiness(
     _: User = Depends(get_admin_user), db: Session = Depends(get_db)
@@ -76,7 +170,6 @@ def get_readiness(
             "Defina ENVIRONMENT=production no arquivo .env.production e reinicie os containers.",
         )
     )
-
     checks.append(
         _build_check(
             "secret_key",
@@ -89,7 +182,6 @@ def get_readiness(
             "Gere uma chave longa e unica antes de expor o sistema para usuarios reais.",
         )
     )
-
     checks.append(
         _build_check(
             "database_password",
@@ -102,7 +194,6 @@ def get_readiness(
             "Altere POSTGRES_PASSWORD e DATABASE_URL para uma credencial exclusiva do ambiente real.",
         )
     )
-
     checks.append(
         _build_check(
             "api_docs",
@@ -115,7 +206,6 @@ def get_readiness(
             "Defina ENABLE_API_DOCS=false em producao para reduzir superficie de exposicao.",
         )
     )
-
     checks.append(
         _build_check(
             "seed_startup",
@@ -128,7 +218,6 @@ def get_readiness(
             "Defina SEED_ON_STARTUP=false antes de operar com cadastros reais.",
         )
     )
-
     checks.append(
         _build_check(
             "legacy_migrations",
@@ -141,7 +230,6 @@ def get_readiness(
             "Defina RUN_LEGACY_COLUMN_MIGRATIONS=false quando a base estiver alinhada com as migracoes.",
         )
     )
-
     checks.append(
         _build_check(
             "cors_hosts",
@@ -156,7 +244,6 @@ def get_readiness(
             "Cadastre apenas os dominios reais em CORS_ORIGINS e TRUSTED_HOSTS.",
         )
     )
-
     checks.append(
         _build_check(
             "backup_policy",
@@ -166,10 +253,9 @@ def get_readiness(
             "Ainda nao existe sinalizacao de backup automatico configurado."
             if not settings.BACKUP_ENABLED
             else f"Backups apontados para {settings.BACKUP_DIRECTORY}.",
-            "Ative BACKUP_ENABLED, defina BACKUP_DIRECTORY e use o script ops/backup_mpcars2.sh em cron.",
+            "Ative BACKUP_ENABLED, defina BACKUP_DIRECTORY e use o script de backup em uma rotina automatica.",
         )
     )
-
     checks.append(
         _build_check(
             "default_admin",
@@ -182,7 +268,6 @@ def get_readiness(
             "Troque a senha do admin seeded ou remova a conta padrao antes do go-live.",
         )
     )
-
     checks.append(
         _build_check(
             "public_registration",
@@ -200,8 +285,6 @@ def get_readiness(
     warning_count = sum(1 for check in checks if check["status"] == "warning")
     ok_count = sum(1 for check in checks if check["status"] == "ok")
 
-    next_steps = [check["action"] for check in checks if check["status"] != "ok"][:6]
-
     return {
         "environment": settings.ENVIRONMENT,
         "ready_for_production": critical_count == 0 and settings.ENVIRONMENT == "production",
@@ -214,11 +297,102 @@ def get_readiness(
         "backup": {
             "enabled": settings.BACKUP_ENABLED,
             "directory": settings.BACKUP_DIRECTORY,
+            "storage_label": settings.BACKUP_STORAGE_LABEL,
             "retention_days": settings.BACKUP_RETENTION_DAYS,
             "scripts": {
-                "backup": "ops/backup_mpcars2.sh",
-                "restore": "ops/restore_mpcars2.sh",
+                "backup": settings.BACKUP_SCRIPT_PATH,
+                "restore": settings.RESTORE_SCRIPT_PATH,
             },
         },
-        "next_steps": next_steps,
+        "next_steps": [check["action"] for check in checks if check["status"] != "ok"][:6],
+    }
+
+
+@router.get("/backups")
+def list_backups(
+    _: User = Depends(get_ops_user),
+) -> Dict[str, Any]:
+    script_path = _resolve_path(settings.BACKUP_SCRIPT_PATH, "ops/backup_mpcars2.sh")
+    restore_path = _resolve_path(settings.RESTORE_SCRIPT_PATH, "ops/restore_mpcars2.sh")
+
+    return {
+        "enabled": settings.BACKUP_ENABLED,
+        "directory": settings.BACKUP_DIRECTORY,
+        "storage_label": settings.BACKUP_STORAGE_LABEL,
+        "retention_days": settings.BACKUP_RETENTION_DAYS,
+        "backup_script_exists": script_path.exists(),
+        "restore_script_exists": restore_path.exists(),
+        "backup_script": str(script_path),
+        "restore_script": str(restore_path),
+        "items": _list_backups(),
+    }
+
+
+@router.post("/backups/run")
+def run_backup_now(
+    _: User = Depends(get_ops_user),
+) -> Dict[str, Any]:
+    script_path = _resolve_path(settings.BACKUP_SCRIPT_PATH, "ops/backup_mpcars2.sh")
+    if not script_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Script de backup nao encontrado em {script_path}",
+        )
+
+    result = _run_command(["bash", str(script_path)], _project_root())
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=(result.stderr or result.stdout or "Falha ao executar backup.").strip(),
+        )
+
+    items = _list_backups(limit=1)
+    return {
+        "status": "backup_executado",
+        "message": "Backup solicitado com sucesso.",
+        "output": (result.stdout or "").strip(),
+        "latest_backup": items[0] if items else None,
+    }
+
+
+@router.get("/version")
+def get_version_status(
+    _: User = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    repo_path = _resolve_path(settings.GIT_REPOSITORY_PATH, ".")
+    if not repo_path.exists():
+        raise HTTPException(status_code=500, detail="Repositorio git nao encontrado para leitura de versao.")
+
+    branch = _run_command(["git", "rev-parse", "--abbrev-ref", "HEAD"], repo_path)
+    if branch.returncode != 0:
+        raise HTTPException(status_code=500, detail=(branch.stderr or "Falha ao consultar branch git").strip())
+
+    commit = _run_command(["git", "rev-parse", "HEAD"], repo_path)
+    short_commit = _run_command(["git", "rev-parse", "--short", "HEAD"], repo_path)
+    message = _run_command(["git", "log", "-1", "--pretty=%s"], repo_path)
+    recent = _run_command(
+        ["git", "log", "-5", "--pretty=%h|%s|%cd", "--date=iso"],
+        repo_path,
+    )
+    dirty = _run_command(["git", "status", "--porcelain"], repo_path)
+
+    recent_commits = []
+    for line in (recent.stdout or "").splitlines():
+        short_hash, title, committed_at = (line.split("|", 2) + ["", "", ""])[:3]
+        recent_commits.append(
+            {
+                "short_hash": short_hash,
+                "title": title,
+                "committed_at": committed_at,
+            }
+        )
+
+    return {
+        "repository": str(repo_path),
+        "branch": (branch.stdout or "").strip(),
+        "commit_hash": (commit.stdout or "").strip(),
+        "short_hash": (short_commit.stdout or "").strip(),
+        "last_message": (message.stdout or "").strip(),
+        "dirty": bool((dirty.stdout or "").strip()),
+        "recent_commits": recent_commits,
     }

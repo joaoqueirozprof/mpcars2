@@ -283,16 +283,16 @@ const tipDefinitions: TipDefinition[] = [
     match: (pathname) => pathname.startsWith('/configuracoes'),
     eyebrow: 'Ajustes da operacao',
     title: 'Aqui ficam os parametros da locadora e a checagem de producao',
-    description: 'Antes de operar com dados reais, revise empresa, usuario, sistema e a aba Operacao.',
+    description: 'Antes de operar com dados reais, revise empresa, usuario, sistema e o painel de backups e governanca.',
     icon: Settings2,
     tone: 'slate',
     bullets: [
       'Confira nome da empresa, e-mail e dados operacionais basicos.',
       'Troque senha fraca antes de usar o sistema em producao real.',
-      'Na aba Operacao voce encontra o checklist de producao, backup e seguranca.',
+      'No painel de backups e governanca voce encontra checklist de producao, backup e seguranca.',
     ],
     actions: [
-      { label: 'Abrir operacao', href: '/configuracoes?tab=operacao', variant: 'primary' },
+      { label: 'Abrir backups', href: '/backups', variant: 'primary' },
       { label: 'Guia completo', openGuide: true, variant: 'secondary' },
     ],
   },
@@ -310,7 +310,7 @@ const tipDefinitions: TipDefinition[] = [
       'Desative usuarios antigos quando alguem sair da operacao.',
     ],
     actions: [
-      { label: 'Abrir configuracoes', href: '/configuracoes?tab=operacao', variant: 'primary' },
+      { label: 'Abrir backups', href: '/backups', variant: 'primary' },
       { label: 'Guia completo', openGuide: true, variant: 'secondary' },
     ],
   },
@@ -346,7 +346,12 @@ const ContextualTipsBanner: React.FC<ContextualTipsBannerProps> = ({ onOpenGuide
   const [isTipDismissed, setIsTipDismissed] = useState(false)
 
   const currentTip = useMemo(
-    () => tipDefinitions.find((definition) => definition.match(location.pathname)),
+    () => {
+      if (!location.pathname.startsWith('/dashboard')) {
+        return undefined
+      }
+      return tipDefinitions.find((definition) => definition.id === 'dashboard')
+    },
     [location.pathname],
   )
 
@@ -371,12 +376,16 @@ const ContextualTipsBanner: React.FC<ContextualTipsBannerProps> = ({ onOpenGuide
     },
     enabled:
       user?.perfil === 'admin' &&
-      (location.pathname.startsWith('/dashboard') || location.pathname.startsWith('/configuracoes')),
+      location.pathname.startsWith('/dashboard'),
     retry: false,
     staleTime: 60_000,
   })
 
-  const hasProductionIssues = Boolean(opsReadiness && !opsReadiness.ready_for_production)
+  const hasProductionIssues = Boolean(
+    location.pathname.startsWith('/dashboard') &&
+      opsReadiness &&
+      !opsReadiness.ready_for_production,
+  )
 
   const handleDismiss = () => {
     if (typeof window !== 'undefined' && dismissKey) {
@@ -451,10 +460,10 @@ const ContextualTipsBanner: React.FC<ContextualTipsBannerProps> = ({ onOpenGuide
                 ))}
               </div>
               <button
-                onClick={() => navigate('/configuracoes?tab=operacao')}
+                onClick={() => navigate('/backups')}
                 className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-red-700 transition-colors hover:text-red-800"
               >
-                Abrir checklist de producao
+                Abrir painel de governanca
                 <ArrowRight size={15} />
               </button>
             </div>

@@ -34,6 +34,7 @@ const LayoutContent: React.FC<AppLayoutProps> = ({ children }) => {
 
   useEffect(() => {
     if (!user) return
+    if (user.perfil === 'owner') return
     if (typeof window === 'undefined') return
     if (window.localStorage.getItem(guideStorageKey) === '1') return
     if (window.sessionStorage.getItem(guideSessionKey) === '1') return

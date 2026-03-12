@@ -6,7 +6,7 @@ import toast from 'react-hot-toast'
 
 const Login: React.FC = () => {
   const navigate = useNavigate()
-  const { login } = useAuth()
+  const { login, getHomeRoute } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -26,7 +26,7 @@ const Login: React.FC = () => {
 
       await login(email, password)
       toast.success('Login realizado com sucesso!')
-      navigate('/dashboard')
+      navigate(getHomeRoute())
     } catch (err: any) {
       const message = err.response?.data?.message || 'Falha ao fazer login'
       setError(message)
@@ -95,9 +95,9 @@ const Login: React.FC = () => {
               {isLoading ? 'Entrando...' : 'Entrar'}
             </button>
 
-            <p className="text-center text-sm text-slate-600">
-              Demo: use credenciais do seu sistema
-            </p>
+            <div className="rounded-2xl border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm text-sky-800">
+              Se voce perdeu a senha, solicite ao administrador um link temporario de redefinicao.
+            </div>
           </form>
         </div>
 

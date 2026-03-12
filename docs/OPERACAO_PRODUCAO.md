@@ -11,6 +11,7 @@
    - `SEED_ON_STARTUP=false`
    - `RUN_LEGACY_COLUMN_MIGRATIONS=false`
    - `BACKUP_ENABLED=true`
+   - `BACKUP_DIRECTORY` apontando para um drive dedicado da VPS
 5. Suba a producao com:
 
 ```bash
@@ -35,6 +36,13 @@ Sugestao de cron:
 ```bash
 0 2 * * * cd /docker/mpcars2 && ./ops/backup_mpcars2.sh >> /var/log/mpcars2-backup.log 2>&1
 ```
+
+## Governanca de acesso
+
+- O painel `/backups` fica reservado a `admin` e `owner`.
+- O perfil `owner` enxerga apenas backups e nao acessa dados operacionais.
+- A area de usuarios e versoes permanece exclusiva do `admin`.
+- Recuperacao de senha deve ser feita por link temporario gerado pelo admin, sem definir a senha final do usuario.
 
 ## Restore
 

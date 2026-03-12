@@ -1,3 +1,5 @@
+import hashlib
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -13,7 +15,7 @@ from app.core.security import (
     validate_password_strength,
     verify_password,
 )
-from app.models.user import ALL_PAGES, User
+from app.models.user import User, get_profile_pages
 from app.services.activity_logger import log_activity
 
 
@@ -29,7 +31,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     nome: str
-    perfil: str = "user"
+    perfil: str = "operador"
 
 
 class TokenResponse(BaseModel):
@@ -60,6 +62,15 @@ class ChangePasswordRequest(BaseModel):
     senha_nova: str
 
 
+class PasswordResetTokenRequest(BaseModel):
+    token: str
+
+
+class PasswordResetCompleteRequest(BaseModel):
+    token: str
+    senha_nova: str
+
+
 class ProfileUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -68,10 +79,11 @@ class ProfileUpdateRequest(BaseModel):
 
 
 def _get_user_pages(user: User) -> list:
-    """Get permitted pages for a user. Admin gets all pages."""
-    if user.perfil == "admin":
-        return ALL_PAGES
-    return user.permitted_pages or []
+    return get_profile_pages(user.perfil, user.permitted_pages)
+
+
+def _hash_reset_token(token: str) -> str:
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
 
 
 def _serialize_user(user: User) -> dict:
@@ -148,9 +160,9 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
         email=normalized_email,
         hashed_password=get_password_hash(request.password),
         nome=request.nome,
-        perfil="user",
+        perfil="operador",
         ativo=True,
-        permitted_pages=[],
+        permitted_pages=get_profile_pages("operador"),
     )
     db.add(new_user)
     db.commit()
@@ -237,3 +249,61 @@ def update_profile(
     db.commit()
     db.refresh(current_user)
     return _serialize_user(current_user)
+
+
+@router.post("/password-reset/validate")
+def validate_password_reset_token(
+    request: PasswordResetTokenRequest,
+    db: Session = Depends(get_db),
+):
+    hashed_token = _hash_reset_token(request.token)
+    user = db.query(User).filter(User.password_reset_token_hash == hashed_token).first()
+
+    if not user or not user.password_reset_expires_at:
+        raise HTTPException(status_code=400, detail="Link de recuperacao invalido")
+
+    if user.password_reset_expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
+        raise HTTPException(status_code=400, detail="Link de recuperacao expirado")
+
+    return {
+        "status": "ok",
+        "usuario": {
+            "nome": user.nome,
+            "email": user.email,
+        },
+        "expires_at": user.password_reset_expires_at,
+    }
+
+
+@router.post("/password-reset/complete")
+def complete_password_reset(
+    request: PasswordResetCompleteRequest,
+    db: Session = Depends(get_db),
+):
+    hashed_token = _hash_reset_token(request.token)
+    user = db.query(User).filter(User.password_reset_token_hash == hashed_token).first()
+
+    if not user or not user.password_reset_expires_at:
+        raise HTTPException(status_code=400, detail="Link de recuperacao invalido")
+
+    if user.password_reset_expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
+        raise HTTPException(status_code=400, detail="Link de recuperacao expirado")
+
+    try:
+        validate_password_strength(request.senha_nova)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    user.hashed_password = get_password_hash(request.senha_nova)
+    user.password_reset_token_hash = None
+    user.password_reset_expires_at = None
+    user.password_reset_requested_at = None
+    db.commit()
+
+    return {
+        "status": "Senha redefinida com sucesso",
+        "next_step": "Faça login com a nova senha.",
+    }

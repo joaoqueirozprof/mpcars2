@@ -1,52 +1,52 @@
-import React, { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import React, { useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Plus, Edit, Key, UserCheck, UserX, Search,
-  Shield, Eye, Clock, User as UserIcon, Activity,
-  CheckSquare, Square, ChevronDown, Loader, RefreshCw,
-  X
+  AlertTriangle,
+  CheckCircle2,
+  ChevronRight,
+  Copy,
+  KeyRound,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+  ShieldCheck,
+  UserCheck,
+  UserCog,
+  UserX,
+  X,
 } from 'lucide-react'
-import api from '@/services/api'
-import AppLayout from '@/components/layout/AppLayout'
 import toast from 'react-hot-toast'
 
-const ALL_PAGES = [
-  { slug: 'dashboard', label: 'Dashboard' },
-  { slug: 'clientes', label: 'Clientes' },
-  { slug: 'veiculos', label: 'Veiculos' },
-  { slug: 'contratos', label: 'Contratos' },
-  { slug: 'empresas', label: 'Empresas' },
-  { slug: 'financeiro', label: 'Financeiro' },
-  { slug: 'seguros', label: 'Seguros' },
-  { slug: 'ipva', label: 'Licenciamento' },
-  { slug: 'multas', label: 'Multas' },
-  { slug: 'manutencoes', label: 'Manutencoes' },
-  { slug: 'reservas', label: 'Reservas' },
-  { slug: 'despesas-loja', label: 'Despesas Loja' },
-  { slug: 'relatorios', label: 'Relatorios' },
-  { slug: 'configuracoes', label: 'Configuracoes' },
-]
+import AppLayout from '@/components/layout/AppLayout'
+import { cn } from '@/lib/utils'
+import api from '@/services/api'
+import { AccessCatalog } from '@/types'
 
 interface UsuarioType {
   id: number
   nome: string
   email: string
-  perfil: string
+  perfil: 'admin' | 'gerente' | 'operador' | 'owner'
   ativo: boolean
   permitted_pages: string[]
   data_cadastro: string | null
 }
 
+interface ResetLinkResponse {
+  status: string
+  recovery_url: string
+  expires_at: string
+  instructions: string
+}
+
 interface ActivityLogType {
   id: number
-  usuario_id: number | null
   usuario_nome: string | null
   usuario_email: string | null
   acao: string | null
   recurso: string | null
-  recurso_id: number | null
   descricao: string | null
-  ip_address: string | null
   timestamp: string | null
 }
 
@@ -54,109 +54,146 @@ const Usuarios: React.FC = () => {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<'usuarios' | 'logs'>('usuarios')
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [isResetModal, setIsResetModal] = useState(false)
   const [editingUser, setEditingUser] = useState<UsuarioType | null>(null)
-  const [resetUserId, setResetUserId] = useState<number | null>(null)
-  const [resetUserName, setResetUserName] = useState('')
-  const [novaSenha, setNovaSenha] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
-
-  // Filters for logs
-  const [logUsuarioId, setLogUsuarioId] = useState<string>('')
-  const [logAcao, setLogAcao] = useState<string>('')
-  const [logDataInicio, setLogDataInicio] = useState<string>('')
-  const [logDataFim, setLogDataFim] = useState<string>('')
+  const [generatedReset, setGeneratedReset] = useState<ResetLinkResponse | null>(null)
+  const [resetTarget, setResetTarget] = useState<UsuarioType | null>(null)
+  const [logAcao, setLogAcao] = useState('')
 
   const [formData, setFormData] = useState({
     nome: '',
     email: '',
     password: '',
-    perfil: 'user',
+    perfil: 'operador' as UsuarioType['perfil'],
     permitted_pages: [] as string[],
   })
 
-  // === Queries ===
-  const { data: usuarios = [], isLoading: loadingUsers } = useQuery<UsuarioType[]>({
-    queryKey: ['usuarios'],
+  const { data: accessCatalog } = useQuery({
+    queryKey: ['usuarios-catalogo'],
     queryFn: async () => {
-      const res = await api.get('/usuarios/')
-      return res.data
+      const { data } = await api.get<AccessCatalog>('/usuarios/catalogo-acesso')
+      return data
     },
   })
 
-  const { data: logs = [], isLoading: loadingLogs } = useQuery<ActivityLogType[]>({
-    queryKey: ['activity-logs', logUsuarioId, logAcao, logDataInicio, logDataFim],
+  const { data: usuarios = [], isLoading: loadingUsers } = useQuery({
+    queryKey: ['usuarios'],
     queryFn: async () => {
-      const params: any = { limit: 100 }
-      if (logUsuarioId) params.usuario_id = logUsuarioId
-      if (logAcao) params.acao = logAcao
-      if (logDataInicio) params.data_inicio = logDataInicio
-      if (logDataFim) params.data_fim = logDataFim
-      const res = await api.get('/usuarios/logs', { params })
-      return res.data
+      const { data } = await api.get<UsuarioType[]>('/usuarios/')
+      return data
+    },
+  })
+
+  const { data: logs = [], isLoading: loadingLogs } = useQuery({
+    queryKey: ['usuarios-logs', logAcao],
+    queryFn: async () => {
+      const { data } = await api.get<ActivityLogType[]>('/usuarios/logs', {
+        params: {
+          limit: 80,
+          acao: logAcao || undefined,
+        },
+      })
+      return data
     },
     enabled: activeTab === 'logs',
   })
 
-  // === Mutations ===
   const createMutation = useMutation({
-    mutationFn: (data: any) => api.post('/usuarios/', data),
+    mutationFn: async (payload: typeof formData) => {
+      const { data } = await api.post('/usuarios/', payload)
+      return data
+    },
     onSuccess: () => {
+      toast.success('Usuario criado com sucesso!')
       queryClient.invalidateQueries({ queryKey: ['usuarios'] })
       closeModal()
-      toast.success('Usuario criado com sucesso!')
     },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.detail || 'Erro ao criar usuario')
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Nao foi possivel criar o usuario.')
     },
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: any }) => api.put(`/usuarios/${id}`, data),
+    mutationFn: async ({ id, payload }: { id: number; payload: Partial<typeof formData> }) => {
+      const { data } = await api.put(`/usuarios/${id}`, payload)
+      return data
+    },
     onSuccess: () => {
+      toast.success('Usuario atualizado com sucesso!')
       queryClient.invalidateQueries({ queryKey: ['usuarios'] })
       closeModal()
-      toast.success('Usuario atualizado com sucesso!')
     },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.detail || 'Erro ao atualizar usuario')
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Nao foi possivel atualizar o usuario.')
     },
   })
 
   const toggleMutation = useMutation({
-    mutationFn: (id: number) => api.patch(`/usuarios/${id}/toggle`),
+    mutationFn: async (id: number) => {
+      const { data } = await api.patch(`/usuarios/${id}/toggle`)
+      return data
+    },
     onSuccess: () => {
+      toast.success('Status atualizado com sucesso!')
       queryClient.invalidateQueries({ queryKey: ['usuarios'] })
-      toast.success('Status alterado!')
     },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.detail || 'Erro ao alterar status')
-    },
-  })
-
-  const resetSenhaMutation = useMutation({
-    mutationFn: ({ id, nova_senha }: { id: number; nova_senha: string }) =>
-      api.post(`/usuarios/${id}/reset-senha`, { nova_senha }),
-    onSuccess: () => {
-      setIsResetModal(false)
-      setNovaSenha('')
-      toast.success('Senha alterada com sucesso!')
-    },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.detail || 'Erro ao resetar senha')
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Nao foi possivel alterar o status.')
     },
   })
 
-  // === Helpers ===
+  const resetMutation = useMutation({
+    mutationFn: async (user: UsuarioType) => {
+      const { data } = await api.post<ResetLinkResponse>(`/usuarios/${user.id}/reset-senha`, {})
+      return { target: user, data }
+    },
+    onSuccess: ({ target, data }) => {
+      setResetTarget(target)
+      setGeneratedReset(data)
+      toast.success('Link de redefinicao gerado com sucesso!')
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Nao foi possivel gerar o link de redefinicao.')
+    },
+  })
+
+  const selectedProfile = useMemo(
+    () => accessCatalog?.profiles.find((profile) => profile.id === formData.perfil),
+    [accessCatalog, formData.perfil],
+  )
+
+  const filteredUsers = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return usuarios
+    return usuarios.filter(
+      (user) =>
+        user.nome.toLowerCase().includes(query) ||
+        user.email.toLowerCase().includes(query) ||
+        user.perfil.toLowerCase().includes(query),
+    )
+  }, [searchQuery, usuarios])
+
   const closeModal = () => {
     setIsModalOpen(false)
     setEditingUser(null)
-    setFormData({ nome: '', email: '', password: '', perfil: 'user', permitted_pages: [] })
+    setFormData({
+      nome: '',
+      email: '',
+      password: '',
+      perfil: 'operador',
+      permitted_pages: [],
+    })
   }
 
   const openCreate = () => {
     setEditingUser(null)
-    setFormData({ nome: '', email: '', password: '', perfil: 'user', permitted_pages: [] })
+    setFormData({
+      nome: '',
+      email: '',
+      password: '',
+      perfil: 'operador',
+      permitted_pages: accessCatalog?.profiles.find((profile) => profile.id === 'operador')?.fixed_pages || [],
+    })
     setIsModalOpen(true)
   }
 
@@ -172,260 +209,263 @@ const Usuarios: React.FC = () => {
     setIsModalOpen(true)
   }
 
-  const openResetSenha = (user: UsuarioType) => {
-    setResetUserId(user.id)
-    setResetUserName(user.nome)
-    setNovaSenha('')
-    setIsResetModal(true)
-  }
-
-  const generatePassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
-    let pw = ''
-    for (let i = 0; i < 8; i++) pw += chars.charAt(Math.floor(Math.random() * chars.length))
-    setNovaSenha(pw)
+  const handleProfileChange = (perfil: UsuarioType['perfil']) => {
+    const profile = accessCatalog?.profiles.find((item) => item.id === perfil)
+    setFormData((current) => ({
+      ...current,
+      perfil,
+      permitted_pages: profile?.fixed_pages || [],
+    }))
   }
 
   const togglePage = (slug: string) => {
-    setFormData(prev => ({
-      ...prev,
-      permitted_pages: prev.permitted_pages.includes(slug)
-        ? prev.permitted_pages.filter(p => p !== slug)
-        : [...prev.permitted_pages, slug]
+    setFormData((current) => ({
+      ...current,
+      permitted_pages: current.permitted_pages.includes(slug)
+        ? current.permitted_pages.filter((page) => page !== slug)
+        : [...current.permitted_pages, slug],
     }))
   }
 
-  const selectAllPages = () => {
-    const allSlugs = ALL_PAGES.map(p => p.slug)
-    setFormData(prev => ({
-      ...prev,
-      permitted_pages: prev.permitted_pages.length === allSlugs.length ? [] : allSlugs
-    }))
-  }
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault()
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (editingUser) {
-      const updateData: any = {
-        nome: formData.nome,
-        email: formData.email,
-        perfil: formData.perfil,
-        permitted_pages: formData.permitted_pages,
-      }
-      updateMutation.mutate({ id: editingUser.id, data: updateData })
-    } else {
-      if (!formData.password) {
-        toast.error('Senha e obrigatoria para novo usuario')
-        return
-      }
-      createMutation.mutate(formData)
+    const payload = {
+      nome: formData.nome,
+      email: formData.email,
+      password: formData.password,
+      perfil: formData.perfil,
+      permitted_pages: selectedProfile?.manual_selection ? formData.permitted_pages : selectedProfile?.fixed_pages || [],
     }
+
+    if (editingUser) {
+      updateMutation.mutate({
+        id: editingUser.id,
+        payload: {
+          nome: payload.nome,
+          email: payload.email,
+          perfil: payload.perfil,
+          permitted_pages: payload.permitted_pages,
+        },
+      })
+      return
+    }
+
+    if (!payload.password) {
+      toast.error('Defina uma senha inicial para o usuario.')
+      return
+    }
+
+    createMutation.mutate(payload)
   }
 
-  const filteredUsers = usuarios.filter(u =>
-    u.nome.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.email.toLowerCase().includes(searchQuery.toLowerCase())
-  )
-
-  const formatDate = (d: string | null) => {
-    if (!d) return '-'
-    try {
-      return new Date(d).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
-    } catch { return d }
+  const copyResetLink = async () => {
+    if (!generatedReset?.recovery_url) return
+    await navigator.clipboard.writeText(generatedReset.recovery_url)
+    toast.success('Link copiado para a area de transferencia!')
   }
 
-  const acaoColor = (acao: string | null) => {
-    switch (acao) {
-      case 'LOGIN': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-      case 'CRIAR': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-      case 'EDITAR': return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-      case 'EXCLUIR': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-      default: return 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400'
+  const profileTone = (perfil: UsuarioType['perfil']) => {
+    switch (perfil) {
+      case 'admin':
+        return 'bg-sky-100 text-sky-700'
+      case 'gerente':
+        return 'bg-emerald-100 text-emerald-700'
+      case 'owner':
+        return 'bg-amber-100 text-amber-700'
+      default:
+        return 'bg-slate-100 text-slate-700'
     }
   }
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-display font-bold text-foreground">Gerenciamento de Usuarios</h1>
-            <p className="text-sm text-muted mt-1">Controle de acesso e permissoes do sistema</p>
+      <div className="space-y-6 pb-8">
+        <section className="overflow-hidden rounded-[30px] border border-sky-100 bg-[linear-gradient(135deg,#e0f2fe_0%,#ffffff_55%,#f8fbff_100%)] p-6 shadow-[0_20px_55px_rgba(96,165,250,0.12)]">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            <div className="max-w-3xl">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-700 ring-1 ring-sky-100">
+                <UserCog size={13} />
+                Controle de acessos
+              </div>
+              <h1 className="mt-4 text-3xl font-display font-bold text-slate-950">
+                Usuarios e permissoes do sistema
+              </h1>
+              <p className="mt-3 text-sm text-slate-600">
+                Perfis mais simples para evitar erro: administrador, gerente, operador e dono da empresa. O dono enxerga apenas backups. A redefinicao de senha agora acontece por link temporario, sem o admin conhecer a senha final.
+              </p>
+            </div>
+
+            <div className="rounded-[24px] border border-white bg-white/90 p-5 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Equipe cadastrada</p>
+              <p className="mt-3 text-3xl font-display font-bold text-slate-950">{usuarios.length}</p>
+              <p className="mt-2 text-sm text-slate-500">
+                {usuarios.filter((user) => user.ativo).length} ativo(s) e {usuarios.filter((user) => !user.ativo).length} inativo(s)
+              </p>
+            </div>
           </div>
+        </section>
+
+        <div className="flex gap-2 rounded-[22px] border border-slate-200 bg-white p-1.5">
+          {[
+            { id: 'usuarios', label: 'Usuarios' },
+            { id: 'logs', label: 'Logs de atividade' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as 'usuarios' | 'logs')}
+              className={cn(
+                'flex-1 rounded-[18px] px-4 py-3 text-sm font-semibold transition-colors',
+                activeTab === tab.id
+                  ? 'bg-sky-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-sky-50 hover:text-sky-700',
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 bg-surface-alt rounded-lg p-1">
-          <button
-            onClick={() => setActiveTab('usuarios')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium transition-all ${
-              activeTab === 'usuarios'
-                ? 'bg-white dark:bg-gray-700 text-foreground shadow-sm'
-                : 'text-muted hover:text-foreground'
-            }`}
-          >
-            <Shield size={16} />
-            Usuarios
-          </button>
-          <button
-            onClick={() => setActiveTab('logs')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium transition-all ${
-              activeTab === 'logs'
-                ? 'bg-white dark:bg-gray-700 text-foreground shadow-sm'
-                : 'text-muted hover:text-foreground'
-            }`}
-          >
-            <Activity size={16} />
-            Logs de Atividade
-          </button>
-        </div>
-
-        {/* TAB: Usuarios */}
         {activeTab === 'usuarios' && (
-          <div className="space-y-4">
-            {/* Toolbar */}
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
+          <section className="card">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="relative max-w-xl flex-1">
+                <Search size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Buscar por nome ou email..."
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-border bg-surface text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Buscar por nome, email ou perfil"
+                  className="input-field pl-11"
                 />
               </div>
-              <button
-                onClick={openCreate}
-                className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium"
-              >
-                <Plus size={18} />
-                Novo Usuario
+              <button onClick={openCreate} className="btn-primary inline-flex items-center gap-2">
+                <Plus size={16} />
+                Novo usuario
               </button>
             </div>
 
-            {/* Table */}
-            {loadingUsers ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader className="animate-spin text-primary" size={32} />
-              </div>
-            ) : (
-              <div className="bg-surface rounded-xl border border-border overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="bg-surface-alt border-b border-border">
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">Nome</th>
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">Email</th>
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">Perfil</th>
-                        <th className="text-center px-4 py-3 text-xs font-semibold text-muted uppercase">Paginas</th>
-                        <th className="text-center px-4 py-3 text-xs font-semibold text-muted uppercase">Status</th>
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">Cadastro</th>
-                        <th className="text-center px-4 py-3 text-xs font-semibold text-muted uppercase">Acoes</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {filteredUsers.map((user) => (
-                        <tr key={user.id} className="hover:bg-surface-alt/50 transition-colors">
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                                <UserIcon size={16} className="text-primary" />
-                              </div>
-                              <span className="text-sm font-medium text-foreground">{user.nome}</span>
+            <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_340px]">
+              <div className="space-y-3">
+                {loadingUsers ? (
+                  [...Array(4)].map((_, index) => (
+                    <div key={index} className="h-24 animate-pulse rounded-[24px] bg-slate-100" />
+                  ))
+                ) : filteredUsers.length ? (
+                  filteredUsers.map((user) => (
+                    <div key={user.id} className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
+                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
+                              <UserCog size={18} />
                             </div>
-                          </td>
-                          <td className="px-4 py-3 text-sm text-muted">{user.email}</td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                              user.perfil === 'admin'
-                                ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                                : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                            }`}>
-                              <Shield size={12} />
-                              {user.perfil === 'admin' ? 'Admin' : 'Usuario'}
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-950">{user.nome}</p>
+                              <p className="truncate text-sm text-slate-500">{user.email}</p>
+                            </div>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <span className={cn('rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]', profileTone(user.perfil))}>
+                              {user.perfil}
                             </span>
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className="text-sm text-muted">
-                              {user.perfil === 'admin' ? 'Todas' : `${(user.permitted_pages || []).length}/${ALL_PAGES.length}`}
+                            <span className={cn(
+                              'rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]',
+                              user.ativo ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700',
+                            )}>
+                              {user.ativo ? 'ativo' : 'inativo'}
                             </span>
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                            <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200">
+                              {user.perfil === 'admin'
+                                ? 'acesso total'
+                                : user.perfil === 'owner'
+                                  ? 'somente backups'
+                                  : `${user.permitted_pages.length} pagina(s) liberada(s)`}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => openEdit(user)}
+                            className="btn-secondary inline-flex items-center gap-2"
+                          >
+                            <Pencil size={16} />
+                            Editar
+                          </button>
+                          <button
+                            onClick={() => resetMutation.mutate(user)}
+                            className="btn-secondary inline-flex items-center gap-2"
+                          >
+                            <KeyRound size={16} />
+                            Gerar link de senha
+                          </button>
+                          <button
+                            onClick={() => toggleMutation.mutate(user.id)}
+                            className={cn(
+                              'inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition-colors',
                               user.ativo
-                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                                : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                            }`}>
-                              {user.ativo ? <UserCheck size={12} /> : <UserX size={12} />}
-                              {user.ativo ? 'Ativo' : 'Inativo'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-sm text-muted">{formatDate(user.data_cadastro)}</td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center justify-center gap-1">
-                              <button
-                                onClick={() => openEdit(user)}
-                                title="Editar"
-                                className="p-1.5 rounded-lg hover:bg-surface-alt text-muted hover:text-primary transition-colors"
-                              >
-                                <Edit size={16} />
-                              </button>
-                              <button
-                                onClick={() => openResetSenha(user)}
-                                title="Resetar senha"
-                                className="p-1.5 rounded-lg hover:bg-surface-alt text-muted hover:text-yellow-600 transition-colors"
-                              >
-                                <Key size={16} />
-                              </button>
-                              <button
-                                onClick={() => toggleMutation.mutate(user.id)}
-                                title={user.ativo ? 'Desativar' : 'Ativar'}
-                                className={`p-1.5 rounded-lg hover:bg-surface-alt transition-colors ${
-                                  user.ativo ? 'text-muted hover:text-red-600' : 'text-muted hover:text-green-600'
-                                }`}
-                              >
-                                {user.ativo ? <UserX size={16} /> : <UserCheck size={16} />}
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredUsers.length === 0 && (
-                        <tr>
-                          <td colSpan={7} className="px-4 py-12 text-center text-muted text-sm">
-                            Nenhum usuario encontrado
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                                ? 'bg-red-50 text-red-700 hover:bg-red-100'
+                                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+                            )}
+                          >
+                            {user.ativo ? <UserX size={16} /> : <UserCheck size={16} />}
+                            {user.ativo ? 'Desativar' : 'Ativar'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="empty-state py-12">
+                    <div className="empty-state-icon">
+                      <UserCog size={24} className="text-slate-400" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-500">Nenhum usuario encontrado.</p>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+
+              <aside className="space-y-4">
+                <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-5">
+                  <p className="text-sm font-semibold text-slate-950">Perfis prontos para usar</p>
+                  <div className="mt-4 space-y-3">
+                    {accessCatalog?.profiles.map((profile) => (
+                      <div key={profile.id} className="rounded-[20px] border border-white bg-white p-4 shadow-sm">
+                        <p className="text-sm font-semibold text-slate-900">{profile.label}</p>
+                        <p className="mt-1 text-sm text-slate-500">{profile.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-[24px] border border-amber-100 bg-amber-50/80 p-5">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle size={18} className="mt-0.5 text-amber-600" />
+                    <div>
+                      <p className="text-sm font-semibold text-amber-900">Recuperacao de senha segura</p>
+                      <p className="mt-1 text-sm text-amber-800">
+                        O administrador gera um link temporario, mas quem define a senha final e sempre o proprio usuario dono da conta.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </section>
         )}
 
-        {/* TAB: Logs */}
         {activeTab === 'logs' && (
-          <div className="space-y-4">
-            {/* Filters */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <select
-                value={logUsuarioId}
-                onChange={(e) => setLogUsuarioId(e.target.value)}
-                className="px-3 py-2.5 rounded-lg border border-border bg-surface text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
-              >
-                <option value="">Todos os usuarios</option>
-                {usuarios.map(u => (
-                  <option key={u.id} value={u.id}>{u.nome}</option>
-                ))}
-              </select>
+          <section className="card">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-xl font-display font-bold text-slate-950">Logs de atividade</h2>
+                <p className="mt-1 text-sm text-slate-500">Acompanhe criacoes, edicoes e redefinicoes de acesso.</p>
+              </div>
               <select
                 value={logAcao}
-                onChange={(e) => setLogAcao(e.target.value)}
-                className="px-3 py-2.5 rounded-lg border border-border bg-surface text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                onChange={(event) => setLogAcao(event.target.value)}
+                className="input-field max-w-[220px]"
               >
                 <option value="">Todas as acoes</option>
                 <option value="LOGIN">Login</option>
@@ -433,248 +473,249 @@ const Usuarios: React.FC = () => {
                 <option value="EDITAR">Editar</option>
                 <option value="EXCLUIR">Excluir</option>
               </select>
-              <input
-                type="date"
-                value={logDataInicio}
-                onChange={(e) => setLogDataInicio(e.target.value)}
-                placeholder="Data inicio"
-                className="px-3 py-2.5 rounded-lg border border-border bg-surface text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
-              />
-              <input
-                type="date"
-                value={logDataFim}
-                onChange={(e) => setLogDataFim(e.target.value)}
-                placeholder="Data fim"
-                className="px-3 py-2.5 rounded-lg border border-border bg-surface text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
-              />
             </div>
 
-            {/* Logs Table */}
             {loadingLogs ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader className="animate-spin text-primary" size={32} />
+              <div className="mt-6 space-y-3">
+                {[...Array(4)].map((_, index) => (
+                  <div key={index} className="h-20 animate-pulse rounded-[24px] bg-slate-100" />
+                ))}
               </div>
             ) : (
-              <div className="bg-surface rounded-xl border border-border overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="bg-surface-alt border-b border-border">
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">Data/Hora</th>
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">Usuario</th>
-                        <th className="text-center px-4 py-3 text-xs font-semibold text-muted uppercase">Acao</th>
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">Recurso</th>
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">Descricao</th>
-                        <th className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">IP</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {logs.map((log) => (
-                        <tr key={log.id} className="hover:bg-surface-alt/50 transition-colors">
-                          <td className="px-4 py-3 text-sm text-muted whitespace-nowrap">{formatDate(log.timestamp)}</td>
-                          <td className="px-4 py-3 text-sm text-foreground">{log.usuario_nome || '-'}</td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${acaoColor(log.acao)}`}>
-                              {log.acao || '-'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-sm text-muted">{log.recurso || '-'}</td>
-                          <td className="px-4 py-3 text-sm text-foreground max-w-xs truncate">{log.descricao || '-'}</td>
-                          <td className="px-4 py-3 text-xs text-muted font-mono">{log.ip_address || '-'}</td>
-                        </tr>
-                      ))}
-                      {logs.length === 0 && (
-                        <tr>
-                          <td colSpan={6} className="px-4 py-12 text-center text-muted text-sm">
-                            Nenhum log encontrado
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+              <div className="mt-6 space-y-3">
+                {logs.map((log) => (
+                  <div key={log.id} className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{log.descricao || 'Sem descricao'}</p>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {log.usuario_nome || log.usuario_email || 'Usuario desconhecido'} · {log.recurso || 'recurso'}
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600 ring-1 ring-slate-200">
+                        {log.acao || 'acao'}
+                      </span>
+                    </div>
+                    <p className="mt-3 text-xs text-slate-400">{log.timestamp || '-'}</p>
+                  </div>
+                ))}
+                {!logs.length && (
+                  <div className="empty-state py-12">
+                    <div className="empty-state-icon">
+                      <ShieldCheck size={24} className="text-slate-400" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-500">Nenhum log encontrado para esse filtro.</p>
+                  </div>
+                )}
               </div>
             )}
-          </div>
+          </section>
         )}
       </div>
 
-      {/* Modal Criar/Editar Usuario */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-surface rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-              <h2 className="text-lg font-display font-bold text-foreground">
-                {editingUser ? 'Editar Usuario' : 'Novo Usuario'}
-              </h2>
-              <button onClick={closeModal} className="p-1 rounded-lg hover:bg-surface-alt text-muted">
-                <X size={20} />
+        <div className="modal-overlay" onClick={(event) => event.currentTarget === event.target && closeModal()}>
+          <div className="modal-content max-w-4xl w-full" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-600">
+                  {editingUser ? 'Editar acesso' : 'Novo acesso'}
+                </p>
+                <h2 className="mt-1 text-2xl font-display font-bold text-slate-950">
+                  {editingUser ? 'Editar usuario' : 'Criar usuario'}
+                </h2>
+              </div>
+              <button onClick={closeModal} className="btn-icon">
+                <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Nome</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.nome}
-                  onChange={(e) => setFormData(prev => ({ ...prev, nome: e.target.value }))}
-                  className="w-full px-3 py-2.5 rounded-lg border border-border bg-surface text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Email</label>
-                <input
-                  type="email"
-                  required
-                  value={formData.email}
-                  onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                  className="w-full px-3 py-2.5 rounded-lg border border-border bg-surface text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
-                />
+            <form onSubmit={handleSubmit} className="modal-scroll-body space-y-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="input-label">Nome</label>
+                  <input
+                    type="text"
+                    value={formData.nome}
+                    onChange={(event) => setFormData((current) => ({ ...current, nome: event.target.value }))}
+                    className="input-field"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="input-label">Email</label>
+                  <input
+                    type="email"
+                    value={formData.email}
+                    onChange={(event) => setFormData((current) => ({ ...current, email: event.target.value }))}
+                    className="input-field"
+                    required
+                  />
+                </div>
               </div>
 
               {!editingUser && (
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-1">Senha</label>
+                  <label className="input-label">Senha inicial</label>
                   <input
                     type="text"
-                    required
                     value={formData.password}
-                    onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                    placeholder="Senha inicial do usuario"
-                    className="w-full px-3 py-2.5 rounded-lg border border-border bg-surface text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                    onChange={(event) => setFormData((current) => ({ ...current, password: event.target.value }))}
+                    className="input-field"
+                    placeholder="O usuario podera trocá-la depois"
                   />
                 </div>
               )}
 
               <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Perfil</label>
-                <select
-                  value={formData.perfil}
-                  onChange={(e) => setFormData(prev => ({ ...prev, perfil: e.target.value }))}
-                  className="w-full px-3 py-2.5 rounded-lg border border-border bg-surface text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
-                >
-                  <option value="user">Usuario</option>
-                  <option value="admin">Administrador</option>
-                </select>
+                <label className="input-label">Perfil de acesso</label>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {accessCatalog?.profiles.map((profile) => (
+                    <button
+                      key={profile.id}
+                      type="button"
+                      onClick={() => handleProfileChange(profile.id)}
+                      className={cn(
+                        'rounded-[22px] border p-4 text-left transition-all',
+                        formData.perfil === profile.id
+                          ? 'border-sky-300 bg-sky-50 shadow-sm'
+                          : 'border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50/50',
+                      )}
+                    >
+                      <p className="text-sm font-semibold text-slate-900">{profile.label}</p>
+                      <p className="mt-2 text-sm text-slate-500">{profile.description}</p>
+                      <div className="mt-3 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                        {profile.manual_selection ? 'pode ajustar paginas' : 'acesso fixo'}
+                        <ChevronRight size={14} />
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {formData.perfil !== 'admin' && (
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50/70 p-5">
+                <p className="text-sm font-semibold text-slate-900">Resumo do perfil</p>
+                <p className="mt-2 text-sm text-slate-500">{selectedProfile?.description}</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {(selectedProfile?.manual_selection ? formData.permitted_pages : selectedProfile?.fixed_pages || []).map((page) => (
+                    <span key={page} className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200">
+                      {page}
+                    </span>
+                  ))}
+                  {!((selectedProfile?.manual_selection ? formData.permitted_pages : selectedProfile?.fixed_pages || []).length) && (
+                    <span className="text-sm text-slate-500">Nenhuma pagina operacional liberada.</span>
+                  )}
+                </div>
+              </div>
+
+              {selectedProfile?.manual_selection && (
                 <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm font-medium text-foreground">Permissoes de Paginas</label>
-                    <button
-                      type="button"
-                      onClick={selectAllPages}
-                      className="text-xs text-primary hover:underline"
-                    >
-                      {formData.permitted_pages.length === ALL_PAGES.length ? 'Desmarcar todas' : 'Selecionar todas'}
-                    </button>
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="input-label mb-0">Paginas liberadas</label>
+                    <span className="text-xs text-slate-500">
+                      {formData.permitted_pages.length} selecionada(s)
+                    </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto border border-border rounded-lg p-3">
-                    {ALL_PAGES.map((page) => (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {accessCatalog?.assignable_pages.map((page) => (
                       <label
                         key={page.slug}
-                        className="flex items-center gap-2 cursor-pointer hover:bg-surface-alt rounded px-2 py-1.5 transition-colors"
+                        className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 transition-colors hover:border-sky-200 hover:bg-sky-50/50"
                       >
                         <input
                           type="checkbox"
                           checked={formData.permitted_pages.includes(page.slug)}
                           onChange={() => togglePage(page.slug)}
-                          className="rounded border-border text-primary focus:ring-primary/20"
+                          className="rounded border-slate-300"
                         />
-                        <span className="text-sm text-foreground">{page.label}</span>
+                        {page.label}
                       </label>
                     ))}
                   </div>
-                  <p className="text-xs text-muted mt-1">
-                    {formData.permitted_pages.length} de {ALL_PAGES.length} paginas selecionadas
-                  </p>
                 </div>
               )}
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="flex-1 px-4 py-2.5 rounded-lg border border-border text-foreground hover:bg-surface-alt transition-colors text-sm font-medium"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                  className="flex-1 px-4 py-2.5 rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors text-sm font-medium disabled:opacity-50"
-                >
-                  {(createMutation.isPending || updateMutation.isPending) ? (
-                    <Loader className="animate-spin mx-auto" size={18} />
-                  ) : editingUser ? 'Salvar' : 'Criar'}
-                </button>
-              </div>
             </form>
+
+            <div className="modal-footer">
+              <button type="button" onClick={closeModal} className="btn-secondary">
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={createMutation.isPending || updateMutation.isPending}
+                className="btn-primary inline-flex items-center gap-2 disabled:opacity-60"
+              >
+                {createMutation.isPending || updateMutation.isPending ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <CheckCircle2 size={16} />
+                )}
+                {editingUser ? 'Salvar alteracoes' : 'Criar usuario'}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Modal Resetar Senha */}
-      {isResetModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-surface rounded-2xl shadow-xl w-full max-w-md">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-              <h2 className="text-lg font-display font-bold text-foreground">Resetar Senha</h2>
-              <button onClick={() => setIsResetModal(false)} className="p-1 rounded-lg hover:bg-surface-alt text-muted">
-                <X size={20} />
+      {generatedReset && resetTarget && (
+        <div
+          className="modal-overlay"
+          onClick={(event) => {
+            if (event.currentTarget === event.target) {
+              setGeneratedReset(null)
+              setResetTarget(null)
+            }
+          }}
+        >
+          <div className="modal-content max-w-2xl w-full" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-600">Redefinicao segura</p>
+                <h2 className="mt-1 text-2xl font-display font-bold text-slate-950">Link de recuperacao pronto</h2>
+              </div>
+              <button onClick={() => {
+                setGeneratedReset(null)
+                setResetTarget(null)
+              }} className="btn-icon">
+                <X size={18} />
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
-              <p className="text-sm text-muted">
-                Resetar a senha do usuario <strong className="text-foreground">{resetUserName}</strong>
-              </p>
+            <div className="modal-scroll-body space-y-5">
+              <div className="rounded-[24px] border border-emerald-100 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-emerald-900">
+                  Conta: {resetTarget.nome}
+                </p>
+                <p className="mt-1 text-sm text-emerald-800">
+                  O usuario vai abrir o link abaixo e escolher a propria senha. O administrador nao define nem visualiza a senha final.
+                </p>
+              </div>
 
               <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Nova Senha</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={novaSenha}
-                    onChange={(e) => setNovaSenha(e.target.value)}
-                    placeholder="Digite a nova senha"
-                    className="flex-1 px-3 py-2.5 rounded-lg border border-border bg-surface text-foreground text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={generatePassword}
-                    title="Gerar senha aleatoria"
-                    className="px-3 py-2.5 rounded-lg border border-border text-muted hover:bg-surface-alt transition-colors"
-                  >
-                    <RefreshCw size={16} />
-                  </button>
+                <label className="input-label">Link de redefinicao</label>
+                <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                  <p className="break-all text-sm text-slate-700">{generatedReset.recovery_url}</p>
                 </div>
+                <p className="mt-2 text-xs text-slate-500">Expira em: {generatedReset.expires_at}</p>
               </div>
 
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => setIsResetModal(false)}
-                  className="flex-1 px-4 py-2.5 rounded-lg border border-border text-foreground hover:bg-surface-alt transition-colors text-sm font-medium"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => {
-                    if (!novaSenha.trim()) { toast.error('Digite uma senha'); return }
-                    if (resetUserId) resetSenhaMutation.mutate({ id: resetUserId, nova_senha: novaSenha })
-                  }}
-                  disabled={resetSenhaMutation.isPending}
-                  className="flex-1 px-4 py-2.5 rounded-lg bg-yellow-500 text-white hover:bg-yellow-600 transition-colors text-sm font-medium disabled:opacity-50"
-                >
-                  {resetSenhaMutation.isPending ? (
-                    <Loader className="animate-spin mx-auto" size={18} />
-                  ) : 'Resetar Senha'}
-                </button>
+              <div className="rounded-[24px] border border-amber-100 bg-amber-50/80 p-4 text-sm text-amber-900">
+                {generatedReset.instructions}
               </div>
+            </div>
+
+            <div className="modal-footer">
+              <button type="button" onClick={() => {
+                setGeneratedReset(null)
+                setResetTarget(null)
+              }} className="btn-secondary">
+                Fechar
+              </button>
+              <button type="button" onClick={copyResetLink} className="btn-primary inline-flex items-center gap-2">
+                <Copy size={16} />
+                Copiar link
+              </button>
             </div>
           </div>
         </div>

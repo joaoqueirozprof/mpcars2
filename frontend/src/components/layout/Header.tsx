@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Bell, CheckCheck, ChevronDown, Command, LifeBuoy, Menu, Search, Sparkles, X } from 'lucide-react'
+import { Bell, CheckCheck, ChevronDown, Command, Menu, Search, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { findNavigationItem, inferAlertRoute } from '@/config/navigation'
@@ -25,7 +25,7 @@ interface HeaderNotification {
 }
 
 const Header: React.FC<HeaderProps> = ({ onOpenCommandPalette, onOpenGuide }) => {
-  const { user, logout } = useAuth()
+  const { user, logout, canAccess } = useAuth()
   const { toggleMobile, isMobileOpen } = useSidebar()
   const navigate = useNavigate()
   const location = useLocation()
@@ -45,6 +45,7 @@ const Header: React.FC<HeaderProps> = ({ onOpenCommandPalette, onOpenGuide }) =>
       return data
     },
     staleTime: 60 * 1000,
+    enabled: canAccess('dashboard'),
   })
 
   const notifications = useMemo<HeaderNotification[]>(() => {
@@ -132,18 +133,18 @@ const Header: React.FC<HeaderProps> = ({ onOpenCommandPalette, onOpenGuide }) =>
           <button
             type="button"
             onClick={onOpenCommandPalette}
-            className="hidden min-w-0 flex-1 items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/90 px-4 py-3 text-left transition-all duration-200 hover:border-primary/30 hover:bg-white md:flex"
+            className="hidden min-w-0 flex-1 items-center justify-between gap-3 rounded-2xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-left transition-all duration-200 hover:border-primary/30 hover:bg-white md:flex"
           >
             <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+              <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white text-sky-600 shadow-sm ring-1 ring-sky-100">
                 <Search size={18} />
               </div>
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-slate-900">
-                  Buscar pagina, cliente, fluxo ou atalho
+                  Buscar pagina ou acao rapida
                 </p>
                 <p className="truncate text-xs text-slate-500">
-                  Pule entre contratos, reservas, frota, financeiro e criacao rapida
+                  Use a busca para chegar mais rapido no que voce precisa
                 </p>
               </div>
             </div>
@@ -162,27 +163,14 @@ const Header: React.FC<HeaderProps> = ({ onOpenCommandPalette, onOpenGuide }) =>
           </button>
 
           <div className="hidden min-w-0 xl:block">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-700">
-                <Sparkles size={12} />
-                UX fluida
-              </span>
-              <p className="truncate text-sm font-semibold text-slate-900">{activePage.label}</p>
-            </div>
+            <p className="truncate text-sm font-semibold text-slate-900">{activePage.label}</p>
             <p className="truncate text-xs text-slate-500">{activePage.description}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={onOpenGuide}
-            className="rounded-2xl border border-slate-200 bg-white p-2.5 text-slate-600 transition-colors hover:border-primary/30 hover:text-primary"
-            title="Guia rapido"
-          >
-            <LifeBuoy size={20} />
-          </button>
-
-          <div ref={notifRef} className="relative">
+          {canAccess('dashboard') && (
+            <div ref={notifRef} className="relative">
             <button
               onClick={() => {
                 setShowNotifications((current) => !current)
@@ -196,7 +184,7 @@ const Header: React.FC<HeaderProps> = ({ onOpenCommandPalette, onOpenGuide }) =>
                   {unreadCount}
                 </span>
               )}
-            </button>
+              </button>
 
             {showNotifications && (
               <div className="absolute right-0 mt-3 w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-2xl animate-in">
@@ -273,6 +261,7 @@ const Header: React.FC<HeaderProps> = ({ onOpenCommandPalette, onOpenGuide }) =>
               </div>
             )}
           </div>
+          )}
 
           <div ref={userMenuRef} className="relative">
             <button

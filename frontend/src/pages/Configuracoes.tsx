@@ -1,17 +1,18 @@
 import React, { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import AppLayout from '@/components/layout/AppLayout'
 import api from '@/services/api'
 import toast from 'react-hot-toast'
-import { Settings, Building2, User, Sliders, ShieldCheck, Database, TriangleAlert } from 'lucide-react'
+import { Settings, Building2, User, Sliders, HardDriveDownload, ShieldCheck } from 'lucide-react'
 import { OpsReadiness } from '@/types'
 
-type ConfigTab = 'empresa' | 'usuario' | 'sistema' | 'operacao'
+type ConfigTab = 'empresa' | 'usuario' | 'sistema'
 
 const Configuracoes: React.FC = () => {
   const { user, setUser } = useAuth()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState<ConfigTab>('empresa')
@@ -170,16 +171,11 @@ const Configuracoes: React.FC = () => {
     { id: 'empresa', label: 'Empresa', icon: Building2 },
     { id: 'usuario', label: 'Usuário', icon: User },
     { id: 'sistema', label: 'Sistema', icon: Sliders },
-    { id: 'operacao', label: 'Operacao', icon: ShieldCheck, adminOnly: true },
   ].filter((tab) => !tab.adminOnly || user?.perfil === 'admin')
 
   useEffect(() => {
     const requestedTab = searchParams.get('tab') as ConfigTab | null
-    const allowedTabs = new Set<ConfigTab>(
-      user?.perfil === 'admin'
-        ? ['empresa', 'usuario', 'sistema', 'operacao']
-        : ['empresa', 'usuario', 'sistema'],
-    )
+    const allowedTabs = new Set<ConfigTab>(['empresa', 'usuario', 'sistema'])
 
     if (requestedTab && allowedTabs.has(requestedTab)) {
       setActiveTab(requestedTab)
@@ -523,6 +519,45 @@ const Configuracoes: React.FC = () => {
                 </div>
               </div>
 
+              {user?.perfil === 'admin' && (
+                <div className="rounded-[24px] border border-sky-100 bg-[linear-gradient(135deg,#eff6ff_0%,#ffffff_100%)] p-5 shadow-sm">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                    <div className="max-w-2xl">
+                      <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-700 ring-1 ring-sky-100">
+                        <ShieldCheck size={13} />
+                        Governanca exclusiva do admin
+                      </div>
+                      <h3 className="mt-4 text-lg font-display font-bold text-slate-950">
+                        Backups, versoes e checklist de producao
+                      </h3>
+                      <p className="mt-2 text-sm text-slate-600">
+                        A parte sensivel de operacao saiu desta tela para ficar mais simples para o usuario comum. Agora ela fica reunida no painel de backups e governanca, visivel so para voce.
+                      </p>
+                    </div>
+
+                    <div className="rounded-[22px] border border-white bg-white/90 p-4 shadow-sm">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Status atual</p>
+                      <p className="mt-2 text-base font-semibold text-slate-900">
+                        {isLoadingOps
+                          ? 'Conferindo ambiente...'
+                          : opsReadiness?.ready_for_production
+                            ? 'Pronto para operar'
+                            : `${opsReadiness?.summary.critical || 0} critico(s) pendentes`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate('/backups')}
+                    className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-sky-700"
+                  >
+                    <HardDriveDownload size={16} />
+                    Abrir painel de backups e governanca
+                  </button>
+                </div>
+              )}
+
               <div className="flex gap-3 justify-end pt-4 border-t border-slate-200">
                 <button
                   type="button"
@@ -537,167 +572,6 @@ const Configuracoes: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'operacao' && (
-          <div className="space-y-6">
-            {user?.perfil !== 'admin' ? (
-              <div className="card max-w-3xl">
-                <h2 className="text-xl font-display font-bold text-slate-900">Operacao e Producao</h2>
-                <p className="mt-2 text-sm text-slate-500">
-                  Esta area e reservada para administradores porque mostra checklist de producao, seguranca e backup.
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="rounded-[28px] border border-slate-200 bg-[radial-gradient(circle_at_top_left,rgba(191,219,254,0.75),transparent_28%),linear-gradient(135deg,#eff6ff_0%,#ffffff_65%,#f8fafc_100%)] p-6 shadow-sm">
-                  <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                    <div className="max-w-3xl">
-                      <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-700 ring-1 ring-blue-100">
-                        <ShieldCheck size={13} />
-                        Checklist de producao
-                      </div>
-                      <h2 className="mt-4 text-3xl font-display font-bold text-slate-950">
-                        Seguranca, backup e prontidao operacional
-                      </h2>
-                      <p className="mt-3 text-sm text-slate-600">
-                        Antes de operar com cadastros reais, confirme segredos, dominios, backup e politicas de startup.
-                      </p>
-                    </div>
-
-                    <div className={`rounded-[24px] border px-5 py-4 shadow-sm ${
-                      opsReadiness?.ready_for_production
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                        : 'border-amber-200 bg-amber-50 text-amber-800'
-                    }`}>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em]">
-                        Status geral
-                      </p>
-                      <p className="mt-3 text-2xl font-display font-bold">
-                        {opsReadiness?.ready_for_production ? 'Pronto para producao' : 'Pede ajustes'}
-                      </p>
-                      <p className="mt-2 text-sm">
-                        {isLoadingOps
-                          ? 'Conferindo ambiente...'
-                          : `${opsReadiness?.summary.critical || 0} critico(s) e ${opsReadiness?.summary.warning || 0} alerta(s) detectados.`}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <div className="rounded-[24px] border border-white/80 bg-white/90 p-4 shadow-sm">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Checks ok</p>
-                      <p className="mt-3 text-3xl font-display font-bold text-slate-950">{opsReadiness?.summary.ok || 0}</p>
-                    </div>
-                    <div className="rounded-[24px] border border-white/80 bg-white/90 p-4 shadow-sm">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Alertas</p>
-                      <p className="mt-3 text-3xl font-display font-bold text-amber-600">{opsReadiness?.summary.warning || 0}</p>
-                    </div>
-                    <div className="rounded-[24px] border border-white/80 bg-white/90 p-4 shadow-sm">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Criticos</p>
-                      <p className="mt-3 text-3xl font-display font-bold text-red-600">{opsReadiness?.summary.critical || 0}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.8fr)]">
-                  <div className="card">
-                    <div className="flex items-center gap-3">
-                      <ShieldCheck className="text-blue-600" size={22} />
-                      <div>
-                        <h3 className="text-lg font-display font-bold text-slate-900">Checklist do ambiente</h3>
-                        <p className="text-sm text-slate-500">Cada item abaixo mostra o que precisa ser conferido antes de ir para producao.</p>
-                      </div>
-                    </div>
-
-                    <div className="mt-5 space-y-3">
-                      {(opsReadiness?.checks || []).map((check) => (
-                        <div
-                          key={check.id}
-                          className={`rounded-[22px] border p-4 ${
-                            check.status === 'ok'
-                              ? 'border-emerald-200 bg-emerald-50/70'
-                              : check.status === 'critical'
-                                ? 'border-red-200 bg-red-50/70'
-                                : 'border-amber-200 bg-amber-50/70'
-                          }`}
-                        >
-                          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-slate-900">{check.title}</p>
-                              <p className="mt-1 text-sm text-slate-600">{check.details}</p>
-                              <p className="mt-2 text-xs font-medium uppercase tracking-wide text-slate-500">
-                                Acao recomendada
-                              </p>
-                              <p className="mt-1 text-sm text-slate-700">{check.action}</p>
-                            </div>
-                            <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${
-                              check.status === 'ok'
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : check.status === 'critical'
-                                  ? 'bg-red-100 text-red-700'
-                                  : 'bg-amber-100 text-amber-700'
-                            }`}>
-                              {check.status}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-6">
-                    <div className="card">
-                      <div className="flex items-center gap-3">
-                        <Database className="text-emerald-600" size={22} />
-                        <div>
-                          <h3 className="text-lg font-display font-bold text-slate-900">Rotina de backup</h3>
-                          <p className="text-sm text-slate-500">O sistema agora tem scripts de backup e restore para a operacao real.</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 space-y-3">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Diretorio</p>
-                          <p className="mt-2 text-sm font-semibold text-slate-900">{opsReadiness?.backup.directory || '/backups'}</p>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Retencao</p>
-                          <p className="mt-2 text-sm font-semibold text-slate-900">{opsReadiness?.backup.retention_days || 14} dias</p>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Scripts</p>
-                          <p className="mt-2 text-sm text-slate-700">{opsReadiness?.backup.scripts.backup || 'ops/backup_mpcars2.sh'}</p>
-                          <p className="mt-1 text-sm text-slate-700">{opsReadiness?.backup.scripts.restore || 'ops/restore_mpcars2.sh'}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="card">
-                      <div className="flex items-center gap-3">
-                        <TriangleAlert className="text-amber-600" size={22} />
-                        <div>
-                          <h3 className="text-lg font-display font-bold text-slate-900">Proximos passos</h3>
-                          <p className="text-sm text-slate-500">Resumo prático do que falta antes do go-live.</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 space-y-3">
-                        {(opsReadiness?.next_steps || []).length === 0 ? (
-                          <p className="text-sm text-slate-500">Nenhum ajuste pendente detectado no momento.</p>
-                        ) : (
-                          (opsReadiness?.next_steps || []).map((item, index) => (
-                            <div key={`${index}-${item}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                              {item}
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        )}
       </div>
     </AppLayout>
   )

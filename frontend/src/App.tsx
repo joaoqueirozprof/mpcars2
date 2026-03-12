@@ -21,6 +21,8 @@ const Relatorios = lazy(() => import('@/pages/Relatorios'))
 const Configuracoes = lazy(() => import('@/pages/Configuracoes'))
 const DespesasLoja = lazy(() => import('@/pages/DespesasLoja'))
 const Usuarios = lazy(() => import('@/pages/Usuarios'))
+const Governanca = lazy(() => import('@/pages/Governanca'))
+const ResetPassword = lazy(() => import('@/pages/ResetPassword'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -46,7 +48,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 }
 
 const PermissionRoute: React.FC<{ children: React.ReactNode; page: string }> = ({ children, page }) => {
-  const { isAuthenticated, isLoading, canAccess } = useAuth()
+  const { isAuthenticated, isLoading, canAccess, getHomeRoute } = useAuth()
 
   if (isLoading) {
     return <RouteLoader />
@@ -57,7 +59,7 @@ const PermissionRoute: React.FC<{ children: React.ReactNode; page: string }> = (
   }
 
   if (!canAccess(page)) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to={getHomeRoute()} replace />
   }
 
   return <>{children}</>
@@ -82,13 +84,15 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 }
 
 const AppRoutes: React.FC = () => {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, getHomeRoute } = useAuth()
+  const homeRoute = getHomeRoute()
 
   return (
     <Suspense fallback={<RouteLoader />}>
       <Routes>
-        <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />} />
-        <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route path="/login" element={isAuthenticated ? <Navigate to={homeRoute} replace /> : <Login />} />
+        <Route path="/redefinir-senha" element={<ResetPassword />} />
+        <Route path="/dashboard" element={<PermissionRoute page="dashboard"><Dashboard /></PermissionRoute>} />
         <Route path="/clientes" element={<PermissionRoute page="clientes"><Clientes /></PermissionRoute>} />
         <Route path="/veiculos" element={<PermissionRoute page="veiculos"><Veiculos /></PermissionRoute>} />
         <Route path="/contratos" element={<PermissionRoute page="contratos"><Contratos /></PermissionRoute>} />
@@ -103,8 +107,9 @@ const AppRoutes: React.FC = () => {
         <Route path="/despesas-loja" element={<PermissionRoute page="despesas-loja"><DespesasLoja /></PermissionRoute>} />
         <Route path="/configuracoes" element={<PermissionRoute page="configuracoes"><Configuracoes /></PermissionRoute>} />
         <Route path="/usuarios" element={<AdminRoute><Usuarios /></AdminRoute>} />
-        <Route path="/" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />} />
-        <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />} />
+        <Route path="/backups" element={<PermissionRoute page="governanca"><Governanca /></PermissionRoute>} />
+        <Route path="/" element={<Navigate to={isAuthenticated ? homeRoute : '/login'} replace />} />
+        <Route path="*" element={<Navigate to={isAuthenticated ? homeRoute : '/login'} replace />} />
       </Routes>
     </Suspense>
   )

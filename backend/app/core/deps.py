@@ -4,6 +4,7 @@ from jose import JWTError
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import decode_token
+from app.models.user import get_profile_pages
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -59,12 +60,21 @@ def get_admin_user(
     return current_user
 
 
+def get_ops_user(
+    current_user=Depends(get_current_user),
+):
+    """Allow platform admin or backup owner to access governance tools."""
+    if current_user.perfil not in {"admin", "owner"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito a administradores da plataforma",
+        )
+    return current_user
+
+
 def require_page_access(page_slug: str):
     def dependency(current_user=Depends(get_current_user)):
-        if current_user.perfil == "admin":
-            return current_user
-
-        permitted_pages = current_user.permitted_pages or []
+        permitted_pages = get_profile_pages(current_user.perfil, current_user.permitted_pages)
         if page_slug not in permitted_pages:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

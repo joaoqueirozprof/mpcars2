@@ -4,7 +4,7 @@ export interface User {
   email: string;
   empresa_id?: string;
   perfil: string;
-  role?: 'admin' | 'gerente' | 'operador' | 'cliente';
+  role?: 'admin' | 'gerente' | 'operador' | 'owner' | 'cliente';
   ativo: boolean;
   permitted_pages?: string[];
 }
@@ -281,6 +281,64 @@ export interface OpsReadiness {
     };
   };
   next_steps: string[];
+}
+
+export interface BackupHistoryItem {
+  id: string;
+  timestamp: string;
+  directory: string;
+  database_file?: string | null;
+  assets_file?: string | null;
+  size_bytes: number;
+  size_human: string;
+  manifest: Record<string, string>;
+}
+
+export interface BackupOverview {
+  enabled: boolean;
+  directory: string;
+  storage_label: string;
+  retention_days: number;
+  backup_script_exists: boolean;
+  restore_script_exists: boolean;
+  backup_script: string;
+  restore_script: string;
+  items: BackupHistoryItem[];
+}
+
+export interface BackupRunResponse {
+  status: string;
+  message: string;
+  output?: string;
+  latest_backup?: BackupHistoryItem | null;
+}
+
+export interface VersionStatus {
+  repository: string;
+  branch: string;
+  commit_hash: string;
+  short_hash: string;
+  last_message: string;
+  dirty: boolean;
+  recent_commits: Array<{
+    short_hash: string;
+    title: string;
+    committed_at: string;
+  }>;
+}
+
+export interface AccessCatalogProfile {
+  id: 'admin' | 'gerente' | 'operador' | 'owner';
+  label: string;
+  description: string;
+  fixed_pages: string[];
+  manual_selection: boolean;
+}
+
+export interface AccessCatalog {
+  profiles: AccessCatalogProfile[];
+  assignable_pages: Array<{ slug: string; label: string }>;
+  hidden_pages: string[];
 }
 
 export interface PaginationParams {

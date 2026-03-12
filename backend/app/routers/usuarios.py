@@ -1,28 +1,36 @@
-from datetime import datetime
-from typing import List, Optional
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_admin_user, get_current_user
 from app.core.security import get_password_hash, validate_password_strength
-from app.models.user import ALL_PAGES, ActivityLog, User
+from app.models.user import (
+    ASSIGNABLE_PAGES,
+    ActivityLog,
+    DEFAULT_PAGES_BY_PROFILE,
+    User,
+    VALID_USER_PROFILES,
+    get_profile_pages,
+)
 from app.services.activity_logger import log_activity
 
 
-router = APIRouter(prefix="/usuarios", tags=["UsuÃ¡rios"])
-
-VALID_PROFILES = {"admin", "user"}
+router = APIRouter(prefix="/usuarios", tags=["Usuários"])
 
 
 class UsuarioCreate(BaseModel):
     email: EmailStr
     password: str
     nome: str
-    perfil: str = "user"
+    perfil: str = "operador"
     permitted_pages: List[str] = Field(default_factory=list)
 
 
@@ -47,7 +55,7 @@ class UsuarioResponse(BaseModel):
 
 
 class ResetSenhaRequest(BaseModel):
-    nova_senha: str
+    validade_minutos: int = Field(default=0, ge=0, le=240)
 
 
 class ActivityLogResponse(BaseModel):
@@ -71,23 +79,29 @@ def _normalize_profile(perfil: Optional[str]) -> Optional[str]:
         return None
 
     normalized = perfil.strip().lower()
-    if normalized not in VALID_PROFILES:
+    if normalized == "user":
+        normalized = "operador"
+    if normalized not in VALID_USER_PROFILES:
         raise HTTPException(status_code=400, detail="Perfil invalido")
     return normalized
 
 
 def _normalize_pages(perfil: str, pages: Optional[List[str]]) -> List[str]:
-    if perfil == "admin":
-        return list(ALL_PAGES)
+    return get_profile_pages(perfil, pages if pages is not None else None)
 
-    if not pages:
-        return []
 
-    normalized = []
-    for page in pages:
-        if page in ALL_PAGES and page not in normalized:
-            normalized.append(page)
-    return normalized
+def _hash_reset_token(token: str) -> str:
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
+
+def _build_password_reset_url(token: str) -> str:
+    if settings.PASSWORD_RESET_BASE_URL:
+        return f"{settings.PASSWORD_RESET_BASE_URL.rstrip('/')}?token={token}"
+
+    if settings.CORS_ORIGINS:
+        return f"{settings.CORS_ORIGINS[0].rstrip('/')}/redefinir-senha?token={token}"
+
+    return f"/redefinir-senha?token={token}"
 
 
 def _serialize_user(user: User) -> dict:
@@ -97,7 +111,7 @@ def _serialize_user(user: User) -> dict:
         "nome": user.nome,
         "perfil": user.perfil,
         "ativo": user.ativo,
-        "permitted_pages": user.permitted_pages or (ALL_PAGES if user.perfil == "admin" else []),
+        "permitted_pages": get_profile_pages(user.perfil, user.permitted_pages),
         "data_cadastro": user.data_cadastro,
     }
 
@@ -106,12 +120,78 @@ def _active_admin_count(db: Session) -> int:
     return db.query(User).filter(User.perfil == "admin", User.ativo == True).count()
 
 
+def _active_owner_count(db: Session) -> int:
+    return db.query(User).filter(User.perfil == "owner", User.ativo == True).count()
+
+
+def _access_catalog() -> Dict[str, Any]:
+    labels = {
+        "dashboard": "Dashboard",
+        "clientes": "Clientes",
+        "veiculos": "Veiculos",
+        "contratos": "Contratos",
+        "empresas": "Empresas",
+        "financeiro": "Financeiro",
+        "seguros": "Seguros",
+        "ipva": "Licenciamento",
+        "multas": "Multas",
+        "manutencoes": "Manutencoes",
+        "reservas": "Reservas",
+        "despesas-loja": "Despesas da loja",
+        "relatorios": "Relatorios",
+        "configuracoes": "Configuracoes",
+    }
+    return {
+        "profiles": [
+            {
+                "id": "admin",
+                "label": "Administrador",
+                "description": "Acesso total ao sistema, incluindo usuarios, versoes e governanca.",
+                "fixed_pages": get_profile_pages("admin"),
+                "manual_selection": False,
+            },
+            {
+                "id": "gerente",
+                "label": "Gerente",
+                "description": "Pode cuidar da operacao e do financeiro, sem acessar usuarios e governanca.",
+                "fixed_pages": DEFAULT_PAGES_BY_PROFILE["gerente"],
+                "manual_selection": True,
+            },
+            {
+                "id": "operador",
+                "label": "Operador",
+                "description": "Acesso simples para atendimento, reservas, contratos e frota.",
+                "fixed_pages": DEFAULT_PAGES_BY_PROFILE["operador"],
+                "manual_selection": True,
+            },
+            {
+                "id": "owner",
+                "label": "Dono da empresa",
+                "description": "Acesso apenas ao painel de backups. Nao enxerga clientes, contratos nem financeiro.",
+                "fixed_pages": ["governanca"],
+                "manual_selection": False,
+            },
+        ],
+        "assignable_pages": [
+            {"slug": slug, "label": labels.get(slug, slug.replace("-", " ").title())}
+            for slug in ASSIGNABLE_PAGES
+        ],
+        "hidden_pages": ["usuarios", "governanca"],
+    }
+
+
+@router.get("/catalogo-acesso")
+def obter_catalogo_acesso(
+    _: User = Depends(get_admin_user),
+):
+    return _access_catalog()
+
+
 @router.get("/", response_model=List[UsuarioResponse])
 def listar_usuarios(
     db: Session = Depends(get_db),
-    admin: User = Depends(get_admin_user),
+    _: User = Depends(get_admin_user),
 ):
-    """List all users (admin only)."""
     users = db.query(User).order_by(User.id).all()
     return [_serialize_user(user) for user in users]
 
@@ -123,22 +203,24 @@ def criar_usuario(
     db: Session = Depends(get_db),
     admin: User = Depends(get_admin_user),
 ):
-    """Create a new user (admin only)."""
     normalized_email = data.email.lower()
     existing = db.query(User).filter(User.email == normalized_email).first()
     if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email jÃ¡ cadastrado",
-        )
+        raise HTTPException(status_code=400, detail="Email ja cadastrado")
 
     try:
         validate_password_strength(data.password)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    perfil = _normalize_profile(data.perfil) or "user"
-    valid_pages = _normalize_pages(perfil, data.permitted_pages)
+    perfil = _normalize_profile(data.perfil) or "operador"
+    if perfil == "owner" and _active_owner_count(db) >= 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Ja existe um usuario dono da empresa ativo. Edite o acesso atual em vez de criar outro.",
+        )
+
+    valid_pages = _normalize_pages(perfil, data.permitted_pages or None)
 
     new_user = User(
         email=normalized_email,
@@ -157,7 +239,7 @@ def criar_usuario(
         admin,
         "CRIAR",
         "usuarios",
-        f"Criou usuÃ¡rio: {new_user.nome} ({new_user.email})",
+        f"Criou usuario: {new_user.nome} ({new_user.email}) [{perfil}]",
         new_user.id,
         request,
     )
@@ -173,21 +255,25 @@ def atualizar_usuario(
     db: Session = Depends(get_db),
     admin: User = Depends(get_admin_user),
 ):
-    """Update user info and permissions (admin only)."""
     user = db.query(User).filter(User.id == usuario_id).first()
     if not user:
-        raise HTTPException(status_code=404, detail="UsuÃ¡rio nÃ£o encontrado")
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
 
-    changes = []
+    changes: List[str] = []
+
     if data.nome is not None and data.nome != user.nome:
         changes.append(f"nome: {user.nome} -> {data.nome}")
         user.nome = data.nome
 
     if data.email is not None and data.email.lower() != user.email:
         normalized_email = data.email.lower()
-        existing = db.query(User).filter(User.email == normalized_email, User.id != usuario_id).first()
+        existing = (
+            db.query(User)
+            .filter(User.email == normalized_email, User.id != usuario_id)
+            .first()
+        )
         if existing:
-            raise HTTPException(status_code=400, detail="Email jÃ¡ em uso")
+            raise HTTPException(status_code=400, detail="Email ja em uso")
         changes.append(f"email: {user.email} -> {normalized_email}")
         user.email = normalized_email
 
@@ -195,15 +281,17 @@ def atualizar_usuario(
         novo_perfil = _normalize_profile(data.perfil)
         if user.perfil == "admin" and novo_perfil != "admin" and user.ativo and _active_admin_count(db) <= 1:
             raise HTTPException(status_code=400, detail="Nao e possivel remover o ultimo administrador ativo")
+        if novo_perfil == "owner" and user.perfil != "owner" and _active_owner_count(db) >= 1:
+            raise HTTPException(status_code=400, detail="Ja existe um usuario dono da empresa ativo")
         changes.append(f"perfil: {user.perfil} -> {novo_perfil}")
         user.perfil = novo_perfil
 
     if data.permitted_pages is not None:
-        valid_pages = _normalize_pages(user.perfil, data.permitted_pages)
+        valid_pages = _normalize_pages(user.perfil, data.permitted_pages or None)
         user.permitted_pages = valid_pages
         changes.append(f"permissoes atualizadas ({len(valid_pages)} paginas)")
     elif data.perfil is not None:
-        user.permitted_pages = _normalize_pages(user.perfil, user.permitted_pages)
+        user.permitted_pages = _normalize_pages(user.perfil, None)
 
     db.commit()
     db.refresh(user)
@@ -214,7 +302,7 @@ def atualizar_usuario(
             admin,
             "EDITAR",
             "usuarios",
-            f"Editou usuÃ¡rio {user.nome}: {', '.join(changes)}",
+            f"Editou usuario {user.nome}: {', '.join(changes)}",
             user.id,
             request,
         )
@@ -229,13 +317,12 @@ def toggle_usuario(
     db: Session = Depends(get_db),
     admin: User = Depends(get_admin_user),
 ):
-    """Activate/deactivate a user (admin only)."""
     user = db.query(User).filter(User.id == usuario_id).first()
     if not user:
-        raise HTTPException(status_code=404, detail="UsuÃ¡rio nÃ£o encontrado")
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
 
     if user.id == admin.id:
-        raise HTTPException(status_code=400, detail="NÃ£o Ã© possÃ­vel desativar a si mesmo")
+        raise HTTPException(status_code=400, detail="Nao e possivel desativar a si mesmo")
 
     if user.perfil == "admin" and user.ativo and _active_admin_count(db) <= 1:
         raise HTTPException(status_code=400, detail="Nao e possivel desativar o ultimo administrador ativo")
@@ -250,7 +337,7 @@ def toggle_usuario(
         admin,
         "EDITAR",
         "usuarios",
-        f"{status_text.capitalize()} usuÃ¡rio: {user.nome}",
+        f"{status_text.capitalize()} usuario: {user.nome}",
         user.id,
         request,
     )
@@ -266,17 +353,19 @@ def reset_senha(
     db: Session = Depends(get_db),
     admin: User = Depends(get_admin_user),
 ):
-    """Admin resets another user's password."""
     user = db.query(User).filter(User.id == usuario_id).first()
     if not user:
-        raise HTTPException(status_code=404, detail="UsuÃ¡rio nÃ£o encontrado")
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
 
-    try:
-        validate_password_strength(data.nova_senha)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    validity_minutes = data.validade_minutos or settings.PASSWORD_RESET_TOKEN_TTL_MINUTES
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(minutes=validity_minutes)
+    ).replace(tzinfo=None)
 
-    user.hashed_password = get_password_hash(data.nova_senha)
+    user.password_reset_token_hash = _hash_reset_token(raw_token)
+    user.password_reset_expires_at = expires_at
+    user.password_reset_requested_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
 
     log_activity(
@@ -284,12 +373,17 @@ def reset_senha(
         admin,
         "EDITAR",
         "usuarios",
-        f"Resetou senha do usuÃ¡rio: {user.nome}",
+        f"Iniciou recuperacao de senha para o usuario: {user.nome}",
         user.id,
         request,
     )
 
-    return {"status": "Senha alterada com sucesso"}
+    return {
+        "status": "Link de redefinicao gerado com sucesso",
+        "recovery_url": _build_password_reset_url(raw_token),
+        "expires_at": expires_at,
+        "instructions": "Compartilhe este link apenas com o usuario dono da conta. A nova senha sera definida por ele.",
+    }
 
 
 @router.get("/logs", response_model=List[ActivityLogResponse])
@@ -302,9 +396,8 @@ def listar_logs(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
-    admin: User = Depends(get_admin_user),
+    _: User = Depends(get_admin_user),
 ):
-    """List activity logs with filters (admin only)."""
     query = db.query(ActivityLog).order_by(desc(ActivityLog.timestamp))
 
     if usuario_id:
@@ -336,7 +429,9 @@ def listar_logs(
 
 @router.get("/pages-list")
 def listar_paginas(
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
-    """List all available page slugs."""
-    return {"pages": ALL_PAGES}
+    return {
+        "pages": ASSIGNABLE_PAGES,
+        "hidden_pages": ["usuarios", "governanca"],
+    }
