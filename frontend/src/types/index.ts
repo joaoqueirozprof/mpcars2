@@ -206,8 +206,14 @@ export interface DashboardStats {
   total_veiculos: number;
   veiculos_alugados: number;
   veiculos_disponiveis: number;
+  veiculos_manutencao: number;
   total_clientes: number;
   contratos_ativos: number;
+  reservas_pendentes: number;
+  reservas_confirmadas: number;
+  manutencoes_abertas: number;
+  retiradas_hoje: number;
+  devolucoes_hoje: number;
   receita_mensal: number;
   taxa_ocupacao: number;
   ticket_medio: number;
@@ -218,6 +224,15 @@ export interface DashboardStats {
   alertas: Array<{ id: string; tipo: string; titulo: string; descricao: string; urgencia: 'critica' | 'atencao' | 'info'; }>;
   contratos_atrasados: Contrato[];
   proximos_vencimentos: Array<{ id: string; titulo: string; data_vencimento: string; tipo: string }>;
+  agenda_hoje: Array<{
+    id: string;
+    tipo: string;
+    titulo: string;
+    descricao: string;
+    horario?: string | null;
+    urgencia: 'critica' | 'atencao' | 'info';
+    rota: string;
+  }>;
 }
 
 export interface PaginationParams {

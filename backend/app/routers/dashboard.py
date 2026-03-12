@@ -18,6 +18,7 @@ from app.models import (
     LancamentoFinanceiro,
     Manutencao,
     Multa,
+    Reserva,
     Seguro,
     Veiculo,
 )
@@ -261,6 +262,123 @@ def _build_proximos_vencimentos(db: Session, now: datetime) -> List[dict]:
     return itens[:8]
 
 
+def _build_agenda_hoje(db: Session, now: datetime) -> List[dict]:
+    inicio_dia = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    fim_dia = inicio_dia + timedelta(days=1)
+    agenda = []
+
+    reservas = (
+        db.query(Reserva)
+        .options(joinedload(Reserva.cliente), joinedload(Reserva.veiculo))
+        .filter(
+            Reserva.status.in_(["pendente", "confirmada"]),
+            Reserva.data_inicio >= inicio_dia,
+            Reserva.data_inicio < fim_dia,
+        )
+        .order_by(Reserva.data_inicio.asc())
+        .limit(4)
+        .all()
+    )
+    for reserva in reservas:
+        cliente_nome = reserva.cliente.nome if reserva.cliente else "Cliente"
+        placa = reserva.veiculo.placa if reserva.veiculo else "Veiculo"
+        agenda.append(
+            {
+                "id": "reserva-{}".format(reserva.id),
+                "tipo": "Reserva",
+                "titulo": "Reserva para retirada",
+                "descricao": "{} • {}".format(cliente_nome, placa),
+                "horario": reserva.data_inicio.isoformat() if reserva.data_inicio else None,
+                "urgencia": "atencao" if reserva.status == "pendente" else "info",
+                "rota": "/reservas",
+            }
+        )
+
+    retiradas = (
+        db.query(Contrato)
+        .options(joinedload(Contrato.cliente), joinedload(Contrato.veiculo))
+        .filter(
+            Contrato.data_inicio >= inicio_dia,
+            Contrato.data_inicio < fim_dia,
+        )
+        .order_by(Contrato.data_inicio.asc())
+        .limit(4)
+        .all()
+    )
+    for contrato in retiradas:
+        cliente_nome = contrato.cliente.nome if contrato.cliente else "Cliente"
+        placa = contrato.veiculo.placa if contrato.veiculo else "Veiculo"
+        agenda.append(
+            {
+                "id": "retirada-{}".format(contrato.id),
+                "tipo": "Retirada",
+                "titulo": "Contrato {} inicia hoje".format(contrato.numero),
+                "descricao": "{} • {}".format(cliente_nome, placa),
+                "horario": contrato.data_inicio.isoformat() if contrato.data_inicio else None,
+                "urgencia": "info",
+                "rota": "/contratos",
+            }
+        )
+
+    devolucoes = (
+        db.query(Contrato)
+        .options(joinedload(Contrato.cliente), joinedload(Contrato.veiculo))
+        .filter(
+            Contrato.status == "ativo",
+            Contrato.data_fim >= inicio_dia,
+            Contrato.data_fim < fim_dia,
+        )
+        .order_by(Contrato.data_fim.asc())
+        .limit(4)
+        .all()
+    )
+    for contrato in devolucoes:
+        cliente_nome = contrato.cliente.nome if contrato.cliente else "Cliente"
+        placa = contrato.veiculo.placa if contrato.veiculo else "Veiculo"
+        agenda.append(
+            {
+                "id": "devolucao-{}".format(contrato.id),
+                "tipo": "Devolucao",
+                "titulo": "Contrato {} fecha hoje".format(contrato.numero),
+                "descricao": "{} • {}".format(cliente_nome, placa),
+                "horario": contrato.data_fim.isoformat() if contrato.data_fim else None,
+                "urgencia": "critica" if contrato.data_fim and contrato.data_fim <= now else "atencao",
+                "rota": "/contratos",
+            }
+        )
+
+    manutencoes = (
+        db.query(Manutencao)
+        .options(joinedload(Manutencao.veiculo))
+        .filter(
+            Manutencao.status.in_(["pendente", "agendada", "em_andamento"]),
+            Manutencao.data_proxima.isnot(None),
+            Manutencao.data_proxima >= inicio_dia.date(),
+            Manutencao.data_proxima < fim_dia.date(),
+        )
+        .order_by(Manutencao.data_proxima.asc())
+        .limit(3)
+        .all()
+    )
+    for manutencao in manutencoes:
+        placa = manutencao.veiculo.placa if manutencao.veiculo else "Veiculo"
+        horario = datetime.combine(manutencao.data_proxima, datetime.min.time())
+        agenda.append(
+            {
+                "id": "manutencao-hoje-{}".format(manutencao.id),
+                "tipo": "Manutencao",
+                "titulo": manutencao.descricao or "Manutencao agendada",
+                "descricao": "{} • {}".format(placa, manutencao.oficina or "Oficina a definir"),
+                "horario": horario.isoformat(),
+                "urgencia": "atencao",
+                "rota": "/manutencoes",
+            }
+        )
+
+    agenda.sort(key=lambda item: item["horario"] or "")
+    return agenda[:8]
+
+
 @router.get("/")
 def get_dashboard(
     db: Session = Depends(get_db),
@@ -289,11 +407,43 @@ def get_dashboard(
         .scalar()
         or 0
     )
+    veiculos_manutencao = (
+        db.query(sqlfunc.count(Veiculo.id))
+        .filter(Veiculo.ativo.is_(True), Veiculo.status == "manutencao")
+        .scalar()
+        or 0
+    )
     total_clientes = (
         db.query(sqlfunc.count(Cliente.id)).filter(Cliente.ativo.is_(True)).scalar() or 0
     )
     contratos_ativos = (
         db.query(sqlfunc.count(Contrato.id)).filter(Contrato.status == "ativo").scalar() or 0
+    )
+    reservas_pendentes = (
+        db.query(sqlfunc.count(Reserva.id)).filter(Reserva.status == "pendente").scalar() or 0
+    )
+    reservas_confirmadas = (
+        db.query(sqlfunc.count(Reserva.id)).filter(Reserva.status == "confirmada").scalar() or 0
+    )
+    manutencoes_abertas = (
+        db.query(sqlfunc.count(Manutencao.id))
+        .filter(Manutencao.status.in_(["pendente", "agendada", "em_andamento"]))
+        .scalar()
+        or 0
+    )
+    inicio_dia = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    fim_dia = inicio_dia + timedelta(days=1)
+    retiradas_hoje = (
+        db.query(sqlfunc.count(Contrato.id))
+        .filter(Contrato.data_inicio >= inicio_dia, Contrato.data_inicio < fim_dia)
+        .scalar()
+        or 0
+    )
+    devolucoes_hoje = (
+        db.query(sqlfunc.count(Contrato.id))
+        .filter(Contrato.status == "ativo", Contrato.data_fim >= inicio_dia, Contrato.data_fim < fim_dia)
+        .scalar()
+        or 0
     )
 
     contratos_mes = (
@@ -428,6 +578,7 @@ def get_dashboard(
     contratos_atrasados = [_serialize_contract(item) for item in contratos_atrasados_query]
 
     proximos_vencimentos = _build_proximos_vencimentos(db, now)
+    agenda_hoje = _build_agenda_hoje(db, now)
 
     alertas_rows = (
         db.query(AlertaHistorico)
@@ -453,8 +604,14 @@ def get_dashboard(
         "total_veiculos": int(total_veiculos),
         "veiculos_alugados": int(veiculos_alugados),
         "veiculos_disponiveis": int(veiculos_disponiveis),
+        "veiculos_manutencao": int(veiculos_manutencao),
         "total_clientes": int(total_clientes),
         "contratos_ativos": int(contratos_ativos),
+        "reservas_pendentes": int(reservas_pendentes),
+        "reservas_confirmadas": int(reservas_confirmadas),
+        "manutencoes_abertas": int(manutencoes_abertas),
+        "retiradas_hoje": int(retiradas_hoje),
+        "devolucoes_hoje": int(devolucoes_hoje),
         "receita_mensal": round(receita_mensal, 2),
         "taxa_ocupacao": taxa_ocupacao,
         "ticket_medio": ticket_medio,
@@ -472,6 +629,7 @@ def get_dashboard(
         "alertas": alertas,
         "contratos_atrasados": contratos_atrasados,
         "proximos_vencimentos": proximos_vencimentos,
+        "agenda_hoje": agenda_hoje,
     }
 
 

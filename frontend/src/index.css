@@ -467,3 +467,252 @@ h1, h2, h3, h4, h5, h6 {
 .empty-state-icon {
   @apply w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4;
 }
+
+/* === Dashboard Enhancements === */
+.dashboard-hero {
+  @apply relative overflow-hidden rounded-[28px] border p-6 md:p-8;
+  border-color: rgba(15, 23, 42, 0.1);
+  background:
+    radial-gradient(circle at top left, rgba(96, 165, 250, 0.28), transparent 38%),
+    linear-gradient(135deg, #082f49 0%, #0f172a 52%, #172554 100%);
+  box-shadow: 0 20px 55px rgba(15, 23, 42, 0.28);
+}
+
+.dashboard-hero-glow {
+  position: absolute;
+  inset: auto -8% -35% auto;
+  width: 320px;
+  height: 320px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.4), transparent 70%);
+  filter: blur(12px);
+  opacity: 0.8;
+  animation: dashboardGlow 7s ease-in-out infinite;
+}
+
+.dashboard-hero-pill {
+  @apply inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold text-white ring-1;
+  --tw-ring-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dashboard-hero-pill-muted {
+  color: rgba(219, 234, 254, 0.9);
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.dashboard-hero-chip {
+  @apply inline-flex flex-col gap-1 rounded-2xl px-4 py-3 text-white ring-1 backdrop-blur-sm;
+  --tw-ring-color: rgba(255, 255, 255, 0.1);
+  min-width: 132px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dashboard-hero-chip-red {
+  background: rgba(239, 68, 68, 0.18);
+}
+
+.dashboard-hero-chip-emerald {
+  background: rgba(16, 185, 129, 0.18);
+}
+
+.dashboard-hero-chip-amber {
+  background: rgba(245, 158, 11, 0.18);
+}
+
+.dashboard-action-card {
+  @apply rounded-2xl border p-4 transition-all duration-300;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+}
+
+.dashboard-action-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.16);
+}
+
+.dashboard-action-card-blue {
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.98), rgba(255, 255, 255, 0.96));
+}
+
+.dashboard-action-card-amber {
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(255, 255, 255, 0.96));
+}
+
+.dashboard-action-card-rose {
+  background: linear-gradient(180deg, rgba(255, 241, 242, 0.98), rgba(255, 255, 255, 0.96));
+}
+
+.dashboard-action-card-slate {
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(255, 255, 255, 0.96));
+}
+
+.dashboard-action-card-pulse {
+  animation: actionPulse 2.4s ease-in-out infinite;
+}
+
+.dashboard-action-icon {
+  @apply flex h-9 w-9 items-center justify-center rounded-xl bg-white text-slate-700 shadow-sm ring-1 ring-slate-200;
+}
+
+.dashboard-score-card {
+  @apply relative overflow-hidden rounded-[26px] border p-6;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, rgba(14, 23, 45, 0.28), rgba(30, 41, 59, 0.36));
+  backdrop-filter: blur(12px);
+}
+
+.dashboard-score-badge {
+  @apply rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide;
+}
+
+.dashboard-score-badge-emerald {
+  @apply text-emerald-100 ring-1;
+  background: rgba(52, 211, 153, 0.15);
+  --tw-ring-color: rgba(110, 231, 183, 0.3);
+}
+
+.dashboard-score-badge-amber {
+  @apply text-amber-100 ring-1;
+  background: rgba(251, 191, 36, 0.15);
+  --tw-ring-color: rgba(252, 211, 77, 0.3);
+}
+
+.dashboard-score-badge-red {
+  @apply text-red-100 ring-1;
+  background: rgba(248, 113, 113, 0.15);
+  --tw-ring-color: rgba(252, 165, 165, 0.3);
+}
+
+.dashboard-mini-card {
+  @apply rounded-2xl border p-4;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dashboard-insight-card {
+  @apply rounded-2xl border p-4;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dashboard-agenda-card {
+  @apply rounded-2xl border p-4 transition-all duration-300;
+}
+
+.dashboard-lift {
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.dashboard-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+}
+
+.metric-progress-track {
+  @apply h-2 w-full overflow-hidden rounded-full;
+  background: rgba(226, 232, 240, 0.9);
+}
+
+.metric-progress-fill {
+  @apply h-full rounded-full bg-slate-900;
+  animation: progressReveal 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.alert-stack > * {
+  animation: alertReveal 0.28s ease-out backwards;
+}
+
+.alert-stack > *:nth-child(1) { animation-delay: 0ms; }
+.alert-stack > *:nth-child(2) { animation-delay: 40ms; }
+.alert-stack > *:nth-child(3) { animation-delay: 80ms; }
+.alert-stack > *:nth-child(4) { animation-delay: 120ms; }
+.alert-stack > *:nth-child(5) { animation-delay: 160ms; }
+.alert-stack > *:nth-child(6) { animation-delay: 200ms; }
+
+.status-beacon {
+  width: 0.6rem;
+  height: 0.6rem;
+  margin-top: 0.35rem;
+  border-radius: 9999px;
+  background: #60a5fa;
+  box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.45);
+}
+
+.status-beacon-critical {
+  background: #ef4444;
+  animation: beaconPulse 1.8s ease-out infinite;
+}
+
+.alert-critical {
+  box-shadow: 0 12px 26px rgba(239, 68, 68, 0.08);
+}
+
+@keyframes progressReveal {
+  from {
+    width: 0;
+    opacity: 0.4;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes beaconPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+@keyframes actionPulse {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes dashboardGlow {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.72;
+  }
+  50% {
+    transform: translate3d(-10px, -8px, 0) scale(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes alertReveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-hero-glow,
+  .dashboard-action-card-pulse,
+  .metric-progress-fill,
+  .alert-stack > *,
+  .status-beacon-critical {
+    animation: none !important;
+  }
+
+  .dashboard-lift,
+  .dashboard-action-card {
+    transition: none !important;
+  }
+}

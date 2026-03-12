@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { startTransition, useDeferredValue, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   BarChart,
@@ -11,28 +12,94 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import {
-  Car,
   AlertCircle,
-  TrendingUp,
-  TrendingDown,
+  AlertTriangle,
+  ArrowRight,
+  Calendar,
+  Car,
+  CheckCircle2,
+  ChevronRight,
+  Clock,
   DollarSign,
   FileText,
-  Clock,
-  AlertTriangle,
-  CheckCircle2,
+  ShieldCheck,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
   Users,
+  Wrench,
   Zap,
-  Calendar,
 } from 'lucide-react'
 import api from '@/services/api'
 import AppLayout from '@/components/layout/AppLayout'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { DashboardStats } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
+
+const formatInteger = (value: number) =>
+  new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(Math.round(value))
+
+const formatPercent = (value: number) =>
+  new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: value % 1 === 0 ? 0 : 1,
+    maximumFractionDigits: 1,
+  }).format(value)
+
+const formatAgendaTime = (value?: string | null) => {
+  if (!value) return 'Hoje'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Hoje'
+  return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
+const CountUpValue: React.FC<{
+  value: number
+  formatter?: (value: number) => string
+  className?: string
+}> = ({ value, formatter = formatInteger, className }) => {
+  const [displayValue, setDisplayValue] = useState(value)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      setDisplayValue(value)
+      return
+    }
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (prefersReducedMotion) {
+      setDisplayValue(value)
+      return
+    }
+
+    const startValue = displayValue
+    const delta = value - startValue
+    const duration = 700
+    const startedAt = performance.now()
+    let frameId = 0
+
+    const step = (now: number) => {
+      const progress = clamp((now - startedAt) / duration, 0, 1)
+      const eased = 1 - (1 - progress) ** 3
+      setDisplayValue(startValue + delta * eased)
+
+      if (progress < 1) {
+        frameId = window.requestAnimationFrame(step)
+      }
+    }
+
+    frameId = window.requestAnimationFrame(step)
+    return () => window.cancelAnimationFrame(frameId)
+  }, [value])
+
+  return <span className={className}>{formatter(displayValue)}</span>
+}
+
 const Dashboard: React.FC = () => {
-  const { user } = useAuth()
+  const { user, canAccess } = useAuth()
   const [alertFilter, setAlertFilter] = useState<'critica' | 'atencao' | 'info'>('critica')
+  const deferredAlertFilter = useDeferredValue(alertFilter)
 
   const { data: stats, isLoading } = useQuery({
     queryKey: ['dashboard'],
@@ -41,6 +108,105 @@ const Dashboard: React.FC = () => {
       return data
     },
   })
+
+  const alerts = stats?.alertas || []
+  const alertCounts = {
+    critica: alerts.filter((alert) => alert.urgencia === 'critica').length,
+    atencao: alerts.filter((alert) => alert.urgencia === 'atencao').length,
+    info: alerts.filter((alert) => alert.urgencia === 'info').length,
+  }
+  const filteredAlerts = alerts.filter((alert) => alert.urgencia === deferredAlertFilter)
+  const agendaHoje = stats?.agenda_hoje || []
+  const criticalAlerts = alertCounts.critica
+
+  const operationScore = stats
+    ? clamp(
+        100
+          - criticalAlerts * 12
+          - (stats.contratos_atrasados.length * 10)
+          - (stats.veiculos_manutencao * 5)
+          - (stats.reservas_pendentes > 5 ? 6 : 0)
+          + (stats.taxa_ocupacao >= 55 && stats.taxa_ocupacao <= 88 ? 4 : 0),
+        34,
+        100,
+      )
+    : 0
+
+  const scoreLabel =
+    operationScore >= 85
+      ? 'Operacao saudavel'
+      : operationScore >= 68
+        ? 'Operacao sob observacao'
+        : 'Operacao pede acao imediata'
+
+  const scoreTone =
+    operationScore >= 85 ? 'emerald' : operationScore >= 68 ? 'amber' : 'red'
+
+  const actionCards = [
+    {
+      title: 'Reservas pendentes',
+      description: 'Confirmar ou converter antes da retirada.',
+      value: stats?.reservas_pendentes || 0,
+      href: '/reservas',
+      slug: 'reservas',
+      icon: Calendar,
+      tone: 'amber',
+      pulse: (stats?.reservas_pendentes || 0) > 0,
+      progress: Math.min((stats?.reservas_pendentes || 0) * 18, 100),
+    },
+    {
+      title: 'Retiradas de hoje',
+      description: 'Contratos com entrega para liberar ainda hoje.',
+      value: stats?.retiradas_hoje || 0,
+      href: '/contratos',
+      slug: 'contratos',
+      icon: FileText,
+      tone: 'blue',
+      pulse: (stats?.retiradas_hoje || 0) > 0,
+      progress: Math.min((stats?.retiradas_hoje || 0) * 28, 100),
+    },
+    {
+      title: 'Devolucoes de hoje',
+      description: 'Encerramentos e vistoria que precisam entrar na fila.',
+      value: stats?.devolucoes_hoje || 0,
+      href: '/contratos',
+      slug: 'contratos',
+      icon: Car,
+      tone: 'rose',
+      pulse: (stats?.devolucoes_hoje || 0) > 0,
+      progress: Math.min((stats?.devolucoes_hoje || 0) * 30, 100),
+    },
+    {
+      title: 'Frota em manutencao',
+      description: 'Carros parados e ordens abertas para acompanhar.',
+      value: stats?.veiculos_manutencao || 0,
+      extra: `${stats?.manutencoes_abertas || 0} ordem(ns)`,
+      href: '/manutencoes',
+      slug: 'manutencoes',
+      icon: Wrench,
+      tone: 'slate',
+      pulse: (stats?.veiculos_manutencao || 0) > 0,
+      progress: Math.min((stats?.veiculos_manutencao || 0) * 22, 100),
+    },
+  ].filter((item) => canAccess(item.slug))
+
+  const heroBadges = [
+    {
+      label: 'Ocupacao',
+      value: stats ? `${formatPercent(stats.taxa_ocupacao)}%` : '-',
+      tone: 'blue',
+    },
+    {
+      label: 'Alertas criticos',
+      value: isLoading ? '-' : String(criticalAlerts),
+      tone: criticalAlerts > 0 ? 'red' : 'emerald',
+    },
+    {
+      label: 'Agenda de hoje',
+      value: isLoading ? '-' : String(agendaHoje.length),
+      tone: 'amber',
+    },
+  ]
 
   const getAlertIcon = (urgencia: string) => {
     switch (urgencia) {
@@ -71,28 +237,43 @@ const Dashboard: React.FC = () => {
   const getAlertBorderClass = (urgencia: string) => {
     switch (urgencia) {
       case 'critica':
-        return 'border-l-red-500 bg-red-50/50'
+        return 'border-l-red-500 bg-red-50/70'
       case 'atencao':
-        return 'border-l-amber-500 bg-amber-50/50'
+        return 'border-l-amber-500 bg-amber-50/70'
       case 'info':
-        return 'border-l-blue-500 bg-blue-50/50'
+        return 'border-l-blue-500 bg-blue-50/70'
       default:
-        return 'border-l-slate-500 bg-slate-50/50'
+        return 'border-l-slate-400 bg-slate-50'
     }
   }
 
-  const KPICard = ({
+  const getAgendaCardClass = (urgencia: string) => {
+    switch (urgencia) {
+      case 'critica':
+        return 'border-red-200 bg-red-50/80'
+      case 'atencao':
+        return 'border-amber-200 bg-amber-50/80'
+      case 'info':
+        return 'border-blue-200 bg-blue-50/80'
+      default:
+        return 'border-slate-200 bg-slate-50'
+    }
+  }
+
+  const KPIBaseCard = ({
     icon: Icon,
     label,
     value,
     color,
     trend,
+    formatter = formatInteger,
   }: {
     icon: React.ElementType
     label: string
-    value: string | number
+    value: number
     color: 'blue' | 'green' | 'orange' | 'emerald'
     trend?: number
+    formatter?: (value: number) => string
   }) => {
     const colorClasses = {
       blue: 'bg-blue-100 text-blue-600',
@@ -102,8 +283,8 @@ const Dashboard: React.FC = () => {
     }
 
     return (
-      <div className="kpi-card group">
-        <div className={`kpi-icon ${colorClasses[color]}`}>
+      <div className="kpi-card group dashboard-lift">
+        <div className={cn('kpi-icon shadow-sm', colorClasses[color])}>
           {isLoading ? (
             <div className="w-6 h-6 bg-slate-300 rounded animate-pulse" />
           ) : (
@@ -115,21 +296,23 @@ const Dashboard: React.FC = () => {
           {isLoading ? (
             <div className="h-8 w-24 bg-slate-200 rounded animate-pulse mt-1" />
           ) : (
-            <h3 className="kpi-value">{value}</h3>
+            <CountUpValue value={value} formatter={formatter} className="kpi-value" />
           )}
           {trend !== undefined && !isLoading && (
             <div className="flex items-center gap-1 mt-2 text-xs">
               {trend > 0 ? (
                 <>
                   <TrendingUp size={14} className="text-emerald-600" />
-                  <span className="text-emerald-600 font-medium">+{trend}%</span>
+                  <span className="text-emerald-600 font-medium">+{formatPercent(trend)}%</span>
                 </>
               ) : trend < 0 ? (
                 <>
                   <TrendingDown size={14} className="text-red-600" />
-                  <span className="text-red-600 font-medium">{trend}%</span>
+                  <span className="text-red-600 font-medium">{formatPercent(trend)}%</span>
                 </>
-              ) : null}
+              ) : (
+                <span className="text-slate-500 font-medium">Sem variacao relevante</span>
+              )}
             </div>
           )}
         </div>
@@ -140,71 +323,371 @@ const Dashboard: React.FC = () => {
   return (
     <AppLayout>
       <div className="space-y-8 pb-8">
-        {/* Page Header */}
-        <div className="page-header">
-          <div>
-            <h1 className="page-title">Dashboard</h1>
-            <p className="page-subtitle">
-              Bem-vindo, {user?.nome || 'Usuário'}. Aqui está um resumo do seu negócio.
-            </p>
-          </div>
-        </div>
+        <section className="dashboard-hero animate-fade-in-up">
+          <div className="dashboard-hero-glow" />
+          <div className="relative grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.7fr)_360px]">
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="dashboard-hero-pill">
+                  <Sparkles size={14} />
+                  Radar da operacao
+                </span>
+                <span className="dashboard-hero-pill dashboard-hero-pill-muted">
+                  Atualizado com contratos, reservas, manutencoes e alertas
+                </span>
+              </div>
 
-        {/* KPI Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 stagger-children animate-fade-in-up">
-          <KPICard
+              <div>
+                <h1 className="page-title text-white">Dashboard</h1>
+                <p className="mt-2 max-w-2xl text-sm text-blue-100/90">
+                  Bem-vindo, {user?.nome || 'Usuario'}. Este painel agora mostra a fila operacional da locadora e ajuda a priorizar retirada, devolucao, reservas e manutencao sem sair da tela inicial.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                {heroBadges.map((badge) => (
+                  <div
+                    key={badge.label}
+                    className={cn(
+                      'dashboard-hero-chip',
+                      badge.tone === 'red' && 'dashboard-hero-chip-red',
+                      badge.tone === 'emerald' && 'dashboard-hero-chip-emerald',
+                      badge.tone === 'amber' && 'dashboard-hero-chip-amber',
+                    )}
+                  >
+                    <span className="text-xs uppercase tracking-[0.2em] text-current/70">{badge.label}</span>
+                    <strong className="text-sm font-semibold">{badge.value}</strong>
+                  </div>
+                ))}
+              </div>
+
+              {actionCards.length > 0 && (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {actionCards.map((item) => {
+                    const Icon = item.icon
+                    return (
+                      <Link
+                        key={item.title}
+                        to={item.href}
+                        className={cn(
+                          'dashboard-action-card',
+                          item.tone === 'amber' && 'dashboard-action-card-amber',
+                          item.tone === 'blue' && 'dashboard-action-card-blue',
+                          item.tone === 'rose' && 'dashboard-action-card-rose',
+                          item.tone === 'slate' && 'dashboard-action-card-slate',
+                          item.pulse && 'dashboard-action-card-pulse',
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <div className="dashboard-action-icon">
+                                <Icon size={18} />
+                              </div>
+                              <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+                            </div>
+                            <p className="text-xs text-slate-500">{item.description}</p>
+                          </div>
+                          <ChevronRight size={18} className="text-slate-400" />
+                        </div>
+
+                        <div className="mt-5 flex items-end justify-between gap-3">
+                          <div>
+                            <CountUpValue value={item.value} className="text-3xl font-display font-bold text-slate-950" />
+                            {item.extra && <p className="mt-1 text-xs font-medium text-slate-500">{item.extra}</p>}
+                          </div>
+                          <span className="badge badge-neutral bg-white/80 text-slate-700">
+                            abrir fila
+                            <ArrowRight size={12} className="ml-1" />
+                          </span>
+                        </div>
+
+                        <div className="metric-progress-track mt-4">
+                          <div
+                            className="metric-progress-fill"
+                            style={{ width: `${item.progress}%` }}
+                          />
+                        </div>
+                      </Link>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="dashboard-score-card">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-blue-200/70">Saude da operacao</p>
+                  <h2 className="mt-1 text-xl font-display font-bold text-white">{scoreLabel}</h2>
+                </div>
+                <ShieldCheck size={22} className="text-white/85" />
+              </div>
+
+              <div className="mt-6 flex items-end justify-between gap-4">
+                <div>
+                  <CountUpValue value={operationScore} className="text-5xl font-display font-bold text-white" />
+                  <p className="mt-2 text-sm text-blue-100/85">Score operacional calculado sobre alertas, atrasos, manutencoes e ocupacao.</p>
+                </div>
+                <div className={cn('dashboard-score-badge', `dashboard-score-badge-${scoreTone}`)}>
+                  {operationScore >= 85 ? 'Estavel' : operationScore >= 68 ? 'Atencao' : 'Critico'}
+                </div>
+              </div>
+
+              <div className="metric-progress-track mt-6 bg-white/10">
+                <div
+                  className={cn(
+                    'metric-progress-fill',
+                    scoreTone === 'emerald' && 'bg-emerald-400',
+                    scoreTone === 'amber' && 'bg-amber-400',
+                    scoreTone === 'red' && 'bg-red-400',
+                  )}
+                  style={{ width: `${operationScore}%` }}
+                />
+              </div>
+
+              <div className="mt-6 grid grid-cols-2 gap-3">
+                <div className="dashboard-mini-card">
+                  <span className="text-xs uppercase tracking-wide text-blue-200/70">Disponiveis</span>
+                  <CountUpValue value={stats?.veiculos_disponiveis || 0} className="mt-2 text-2xl font-display font-bold text-white" />
+                </div>
+                <div className="dashboard-mini-card">
+                  <span className="text-xs uppercase tracking-wide text-blue-200/70">Reservas confirmadas</span>
+                  <CountUpValue value={stats?.reservas_confirmadas || 0} className="mt-2 text-2xl font-display font-bold text-white" />
+                </div>
+                <div className="dashboard-mini-card">
+                  <span className="text-xs uppercase tracking-wide text-blue-200/70">Atrasos</span>
+                  <CountUpValue value={stats?.contratos_atrasados.length || 0} className="mt-2 text-2xl font-display font-bold text-white" />
+                </div>
+                <div className="dashboard-mini-card">
+                  <span className="text-xs uppercase tracking-wide text-blue-200/70">Ticket medio</span>
+                  <CountUpValue
+                    value={stats?.ticket_medio || 0}
+                    formatter={formatCurrency}
+                    className="mt-2 text-xl font-display font-bold text-white"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 stagger-children">
+          <KPIBaseCard
             icon={Car}
-            label="Total de Veículos"
-            value={isLoading ? '-' : stats?.total_veiculos || 0}
+            label="Total de Veiculos"
+            value={stats?.total_veiculos || 0}
             color="blue"
           />
-          <KPICard
+          <KPIBaseCard
             icon={Zap}
-            label="Veículos Alugados"
-            value={isLoading ? '-' : stats?.veiculos_alugados || 0}
+            label="Veiculos Alugados"
+            value={stats?.veiculos_alugados || 0}
             color="green"
           />
-          <KPICard
+          <KPIBaseCard
             icon={FileText}
             label="Contratos Ativos"
-            value={isLoading ? '-' : stats?.contratos_ativos || 0}
+            value={stats?.contratos_ativos || 0}
             color="orange"
           />
-          <KPICard
+          <KPIBaseCard
             icon={DollarSign}
-            label="Receita Mês"
-            value={isLoading ? '-' : formatCurrency(stats?.receita_mensal || 0)}
+            label="Receita Mes"
+            value={stats?.receita_mensal || 0}
             color="emerald"
             trend={stats?.variacao_receita_mensal}
+            formatter={formatCurrency}
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 animate-fade-in-up" style={{ animationDelay: '60ms' }}>
-          <div className="card bg-slate-50 border border-slate-200">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 animate-fade-in-up" style={{ animationDelay: '70ms' }}>
+          <div className="card bg-slate-50 border border-slate-200 dashboard-lift">
             <p className="text-xs uppercase tracking-wide text-slate-500">Veiculos Disponiveis</p>
-            <p className="text-2xl font-bold text-slate-900 mt-2">{isLoading ? '-' : stats?.veiculos_disponiveis || 0}</p>
+            {isLoading ? (
+              <div className="h-8 w-20 bg-slate-200 rounded animate-pulse mt-2" />
+            ) : (
+              <CountUpValue value={stats?.veiculos_disponiveis || 0} className="mt-2 text-2xl font-bold text-slate-900" />
+            )}
           </div>
-          <div className="card bg-slate-50 border border-slate-200">
+          <div className="card bg-slate-50 border border-slate-200 dashboard-lift">
             <p className="text-xs uppercase tracking-wide text-slate-500">Taxa de Ocupacao</p>
-            <p className="text-2xl font-bold text-slate-900 mt-2">{isLoading ? '-' : `${stats?.taxa_ocupacao || 0}%`}</p>
+            {isLoading ? (
+              <div className="h-8 w-24 bg-slate-200 rounded animate-pulse mt-2" />
+            ) : (
+              <>
+                <CountUpValue value={stats?.taxa_ocupacao || 0} formatter={(value) => `${formatPercent(value)}%`} className="mt-2 text-2xl font-bold text-slate-900" />
+                <div className="metric-progress-track mt-3">
+                  <div className="metric-progress-fill bg-blue-500" style={{ width: `${stats?.taxa_ocupacao || 0}%` }} />
+                </div>
+              </>
+            )}
           </div>
-          <div className="card bg-slate-50 border border-slate-200">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Ticket Medio</p>
-            <p className="text-2xl font-bold text-slate-900 mt-2">{isLoading ? '-' : formatCurrency(stats?.ticket_medio || 0)}</p>
+          <div className="card bg-slate-50 border border-slate-200 dashboard-lift">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Veiculos em Manutencao</p>
+            {isLoading ? (
+              <div className="h-8 w-20 bg-slate-200 rounded animate-pulse mt-2" />
+            ) : (
+              <>
+                <CountUpValue value={stats?.veiculos_manutencao || 0} className="mt-2 text-2xl font-bold text-slate-900" />
+                <p className="mt-2 text-xs text-slate-500">{stats?.manutencoes_abertas || 0} ordem(ns) aberta(s)</p>
+              </>
+            )}
           </div>
-          <div className="card bg-slate-50 border border-slate-200">
+          <div className="card bg-slate-50 border border-slate-200 dashboard-lift">
             <p className="text-xs uppercase tracking-wide text-slate-500">Clientes Ativos</p>
-            <p className="text-2xl font-bold text-slate-900 mt-2">{isLoading ? '-' : stats?.total_clientes || 0}</p>
+            {isLoading ? (
+              <div className="h-8 w-20 bg-slate-200 rounded animate-pulse mt-2" />
+            ) : (
+              <CountUpValue value={stats?.total_clientes || 0} className="mt-2 text-2xl font-bold text-slate-900" />
+            )}
           </div>
         </div>
 
-        {/* Revenue Chart and Alerts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in-up" style={{ animationDelay: '120ms' }}>
-          {/* Revenue Chart */}
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] animate-fade-in-up" style={{ animationDelay: '120ms' }}>
+          <div className="card">
+            <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h2 className="text-lg font-display font-bold text-slate-900 flex items-center gap-2">
+                  <Calendar size={20} className="text-blue-600" />
+                  Agenda da Operacao
+                </h2>
+                <p className="text-sm text-slate-500 mt-1">Retiradas, devolucoes, reservas e manutencoes previstas para hoje.</p>
+              </div>
+              <span className="badge badge-info">{agendaHoje.length} item(ns)</span>
+            </div>
+
+            {isLoading ? (
+              <div className="space-y-3">
+                {[...Array(4)].map((_, index) => (
+                  <div key={index} className="h-20 bg-slate-100 rounded-2xl animate-pulse" />
+                ))}
+              </div>
+            ) : agendaHoje.length > 0 ? (
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {agendaHoje.map((item) => (
+                  <Link
+                    key={item.id}
+                    to={item.rota}
+                    className={cn('dashboard-agenda-card dashboard-lift', getAgendaCardClass(item.urgencia))}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={cn('badge text-[11px]', getAlertBadgeClass(item.urgencia))}>{item.tipo}</span>
+                          <span className="text-xs font-medium text-slate-500">{formatAgendaTime(item.horario)}</span>
+                        </div>
+                        <p className="mt-3 font-semibold text-slate-900">{item.titulo}</p>
+                        <p className="mt-1 text-sm text-slate-600 line-clamp-2">{item.descricao}</p>
+                      </div>
+                      <ChevronRight size={18} className="text-slate-400 mt-1 flex-shrink-0" />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state py-10">
+                <div className="empty-state-icon">
+                  <CheckCircle2 size={24} className="text-emerald-600" />
+                </div>
+                <p className="text-slate-500 font-medium text-sm">Sem eventos criticos para hoje</p>
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="mb-5">
+              <h2 className="text-lg font-display font-bold text-slate-900 flex items-center gap-2">
+                <AlertCircle size={20} className="text-orange-600" />
+                Central de Alertas
+              </h2>
+              <p className="text-sm text-slate-500 mt-1">Use os filtros para focar no que precisa de acao imediata.</p>
+            </div>
+
+            <div className="flex gap-2 mb-4 pb-4 border-b border-slate-200 flex-wrap">
+              {(['critica', 'atencao', 'info'] as const).map((urgency) => {
+                const labels = {
+                  critica: 'Critica',
+                  atencao: 'Atencao',
+                  info: 'Info',
+                }
+                const isActive = alertFilter === urgency
+                return (
+                  <button
+                    key={urgency}
+                    onClick={() => startTransition(() => setAlertFilter(urgency))}
+                    className={`filter-tab ${isActive ? 'filter-tab-active' : 'filter-tab-inactive'}`}
+                  >
+                    {labels[urgency]}
+                    <span className="ml-2 rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                      {alertCounts[urgency]}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div key={deferredAlertFilter} className="space-y-3 max-h-[29rem] overflow-y-auto pr-1 alert-stack">
+              {isLoading ? (
+                <>
+                  <div className="h-16 bg-slate-100 rounded-lg animate-pulse" />
+                  <div className="h-16 bg-slate-100 rounded-lg animate-pulse" />
+                  <div className="h-16 bg-slate-100 rounded-lg animate-pulse" />
+                </>
+              ) : filteredAlerts.length > 0 ? (
+                filteredAlerts.map((alert) => {
+                  const AlertIcon = getAlertIcon(alert.urgencia)
+                  const badgeClass = getAlertBadgeClass(alert.urgencia)
+                  const borderClass = getAlertBorderClass(alert.urgencia)
+
+                  return (
+                    <div
+                      key={alert.id}
+                      className={cn(
+                        'p-4 rounded-lg border-l-4 transition-all duration-200 hover:shadow-sm',
+                        borderClass,
+                        alert.urgencia === 'critica' && 'alert-critical',
+                      )}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className={cn('status-beacon', alert.urgencia === 'critica' && 'status-beacon-critical')} />
+                        <AlertIcon size={16} className="mt-0.5 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-semibold text-sm text-slate-900">{alert.titulo}</p>
+                            <span className={`badge text-xs ${badgeClass}`}>
+                              {alert.urgencia === 'critica'
+                                ? 'Critica'
+                                : alert.urgencia === 'atencao'
+                                  ? 'Atencao'
+                                  : 'Info'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 mt-1 line-clamp-2">
+                            {alert.descricao}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })
+              ) : (
+                <div className="empty-state py-8">
+                  <div className="empty-state-icon">
+                    <CheckCircle2 size={24} className="text-emerald-600" />
+                  </div>
+                  <p className="text-slate-500 font-medium text-sm">Sem alertas nesse filtro</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
           <div className="lg:col-span-2 card">
             <div className="mb-6">
               <h2 className="text-lg font-display font-bold text-slate-900">Receita vs Despesas</h2>
-              <p className="text-sm text-slate-500 mt-1">Comparação mensal de receitas e despesas</p>
+              <p className="text-sm text-slate-500 mt-1">Comparacao mensal de receitas e despesas para acompanhar caixa e margem.</p>
             </div>
 
             {isLoading ? (
@@ -213,22 +696,23 @@ const Dashboard: React.FC = () => {
               <ResponsiveContainer width="100%" height={320}>
                 <BarChart
                   data={stats.receita_vs_despesas}
-                  margin={{ top: 20, right: 30, left: 0, bottom: 60 }}
+                  margin={{ top: 20, right: 30, left: 0, bottom: 40 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                   <XAxis dataKey="mes" stroke="#94a3b8" style={{ fontSize: '12px' }} />
                   <YAxis stroke="#94a3b8" style={{ fontSize: '12px' }} />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: '#1e293b',
+                      backgroundColor: '#0f172a',
                       border: 'none',
-                      borderRadius: '8px',
+                      borderRadius: '12px',
                       color: '#fff',
                     }}
-                    cursor={{ fill: 'rgba(37, 99, 235, 0.1)' }}
+                    formatter={(value: number) => formatCurrency(Number(value || 0))}
+                    cursor={{ fill: 'rgba(37, 99, 235, 0.08)' }}
                   />
                   <Legend
-                    wrapperStyle={{ paddingTop: '20px' }}
+                    wrapperStyle={{ paddingTop: '16px' }}
                     iconType="circle"
                     formatter={(value) => (
                       <span style={{ color: '#64748b', fontSize: '13px', fontWeight: '500' }}>
@@ -236,147 +720,81 @@ const Dashboard: React.FC = () => {
                       </span>
                     )}
                   />
-                  <Bar
-                    dataKey="receita"
-                    fill="#3b82f6"
-                    radius={[8, 8, 0, 0]}
-                    isAnimationActive={true}
-                  />
-                  <Bar
-                    dataKey="despesa"
-                    fill="#ef4444"
-                    radius={[8, 8, 0, 0]}
-                    isAnimationActive={true}
-                  />
+                  <Bar dataKey="receita" fill="#2563eb" radius={[10, 10, 0, 0]} isAnimationActive />
+                  <Bar dataKey="despesa" fill="#f97316" radius={[10, 10, 0, 0]} isAnimationActive />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
               <div className="empty-state min-h-80">
                 <div className="empty-state-icon">
-                  <BarChart size={32} className="text-slate-400" />
+                  <DollarSign size={32} className="text-slate-400" />
                 </div>
-                <p className="text-slate-500 font-medium">Sem dados disponíveis</p>
+                <p className="text-slate-500 font-medium">Sem dados disponiveis</p>
               </div>
             )}
           </div>
 
-          {/* Alerts Section */}
-          <div className="card">
-            <div className="mb-5">
-              <h2 className="text-lg font-display font-bold text-slate-900 flex items-center gap-2">
-                <AlertCircle size={20} className="text-orange-600" />
-                Alertas
-              </h2>
-              <p className="text-sm text-slate-500 mt-1">Ações requeridas</p>
-            </div>
+          <div className="card bg-slate-900 text-white overflow-hidden relative">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(59,130,246,0.26),_transparent_45%)]" />
+            <div className="relative">
+              <div className="mb-6">
+                <h2 className="text-lg font-display font-bold flex items-center gap-2">
+                  <Sparkles size={20} className="text-blue-300" />
+                  Leitura Rapida
+                </h2>
+                <p className="text-sm text-slate-300 mt-1">Resumo para decidir sua proxima acao em poucos segundos.</p>
+              </div>
 
-            {/* Alert Filter Tabs */}
-            <div className="flex gap-2 mb-4 pb-4 border-b border-slate-200">
-              {['critica', 'atencao', 'info'].map((urgency) => {
-                const isActive = alertFilter === urgency
-                const labels = {
-                  critica: 'Crítica',
-                  atencao: 'Atenção',
-                  info: 'Info',
-                }
-
-                return (
-                  <button
-                    key={urgency}
-                    onClick={() => setAlertFilter(urgency as any)}
-                    className={`filter-tab ${isActive ? 'filter-tab-active' : 'filter-tab-inactive'}`}
-                  >
-                    {labels[urgency as keyof typeof labels]}
-                  </button>
-                )
-              })}
-            </div>
-
-            {/* Alerts List */}
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {isLoading ? (
-                <>
-                  <div className="h-16 bg-slate-100 rounded-lg animate-pulse" />
-                  <div className="h-16 bg-slate-100 rounded-lg animate-pulse" />
-                  <div className="h-16 bg-slate-100 rounded-lg animate-pulse" />
-                </>
-              ) : stats?.alertas && stats.alertas.length > 0 ? (
-                stats.alertas
-                  .filter((a) => a.urgencia === alertFilter)
-                  .map((alert) => {
-                    const AlertIcon = getAlertIcon(alert.urgencia)
-                    const badgeClass = getAlertBadgeClass(alert.urgencia)
-                    const borderClass = getAlertBorderClass(alert.urgencia)
-
-                    return (
-                      <div
-                        key={alert.id}
-                        className={`p-4 rounded-lg border-l-4 transition-all duration-200 hover:shadow-sm ${borderClass}`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <AlertIcon size={16} className="mt-0.5 flex-shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className="font-semibold text-sm text-slate-900">{alert.titulo}</p>
-                              <span className={`badge text-xs ${badgeClass}`}>
-                                {alert.urgencia === 'critica'
-                                  ? 'Crítica'
-                                  : alert.urgencia === 'atencao'
-                                    ? 'Atenção'
-                                    : 'Info'}
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-600 mt-1 line-clamp-2">
-                              {alert.descricao}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })
-              ) : (
-                <div className="empty-state py-8">
-                  <div className="empty-state-icon">
-                    <CheckCircle2 size={24} className="text-emerald-600" />
-                  </div>
-                  <p className="text-slate-500 font-medium text-sm">Sem alertas</p>
+              <div className="space-y-4">
+                <div className="dashboard-insight-card">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Receita do mes</span>
+                  <CountUpValue value={stats?.receita_mensal || 0} formatter={formatCurrency} className="mt-2 block text-2xl font-display font-bold" />
+                  <p className="mt-2 text-xs text-slate-300">Variacao frente ao mes anterior: {stats ? `${formatPercent(stats.variacao_receita_mensal)}%` : '-'}</p>
                 </div>
-              )}
+                <div className="dashboard-insight-card">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Fila do dia</span>
+                  <p className="mt-2 text-2xl font-display font-bold">{(stats?.retiradas_hoje || 0) + (stats?.devolucoes_hoje || 0)}</p>
+                  <p className="mt-2 text-xs text-slate-300">Somando retiradas previstas, devolucoes e reservas que precisam de decisao.</p>
+                </div>
+                <div className="dashboard-insight-card">
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Atencao imediata</span>
+                  <p className="mt-2 text-2xl font-display font-bold">{criticalAlerts}</p>
+                  <p className="mt-2 text-xs text-slate-300">Alertas criticos ainda nao resolvidos no sistema.</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Top Clients and Vehicles */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in-up" style={{ animationDelay: '240ms' }}>
-          {/* Top Clients */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in-up" style={{ animationDelay: '260ms' }}>
           <div className="card">
             <div className="mb-6">
               <h2 className="text-lg font-display font-bold text-slate-900 flex items-center gap-2">
                 <Users size={20} className="text-blue-600" />
                 Top 5 Clientes
               </h2>
-              <p className="text-sm text-slate-500 mt-1">Clientes com maior volume de contrato</p>
+              <p className="text-sm text-slate-500 mt-1">Clientes com maior volume financeiro em contratos.</p>
             </div>
 
             {isLoading ? (
               <div className="space-y-3">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
+                {[...Array(5)].map((_, index) => (
+                  <div key={index} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
                 ))}
               </div>
             ) : stats?.top_clientes && stats.top_clientes.length > 0 ? (
               <div className="space-y-3">
-                {stats.top_clientes.map((cliente, idx) => {
+                {stats.top_clientes.map((cliente, index) => {
                   const initials = cliente.nome
                     .split(' ')
-                    .map((n) => n[0])
+                    .map((part) => part[0])
                     .join('')
                     .toUpperCase()
                     .slice(0, 2)
 
                   return (
                     <div
-                      key={idx}
+                      key={`${cliente.nome}-${index}`}
                       className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 transition-colors duration-200 group"
                     >
                       <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -407,27 +825,26 @@ const Dashboard: React.FC = () => {
             )}
           </div>
 
-          {/* Top Vehicles */}
           <div className="card">
             <div className="mb-6">
               <h2 className="text-lg font-display font-bold text-slate-900 flex items-center gap-2">
                 <Car size={20} className="text-orange-600" />
-                Top 5 Veículos
+                Top 5 Veiculos
               </h2>
-              <p className="text-sm text-slate-500 mt-1">Veículos mais alugados</p>
+              <p className="text-sm text-slate-500 mt-1">Veiculos mais usados para ajudar a enxergar giro de frota.</p>
             </div>
 
             {isLoading ? (
               <div className="space-y-3">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
+                {[...Array(5)].map((_, index) => (
+                  <div key={index} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
                 ))}
               </div>
             ) : stats?.top_veiculos && stats.top_veiculos.length > 0 ? (
               <div className="space-y-3">
-                {stats.top_veiculos.map((veiculo, idx) => (
+                {stats.top_veiculos.map((veiculo, index) => (
                   <div
-                    key={idx}
+                    key={`${veiculo.placa}-${index}`}
                     className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 transition-colors duration-200 group"
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -439,8 +856,11 @@ const Dashboard: React.FC = () => {
                         <p className="text-xs text-slate-500 mt-0.5 truncate">{veiculo.modelo}</p>
                       </div>
                     </div>
-                    <div className="badge badge-info flex-shrink-0 ml-3">
-                      {veiculo.alugadas}x
+                    <div className="text-right flex-shrink-0 ml-3">
+                      <div className="badge badge-info">{veiculo.alugadas}x</div>
+                      {veiculo.receita !== undefined && (
+                        <p className="mt-2 text-xs font-medium text-slate-500">{formatCurrency(veiculo.receita)}</p>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -456,22 +876,20 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Late Contracts and Upcoming Expirations */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in-up" style={{ animationDelay: '360ms' }}>
-          {/* Overdue Contracts */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in-up" style={{ animationDelay: '320ms' }}>
           <div className="card">
             <div className="mb-6">
               <h2 className="text-lg font-display font-bold text-slate-900 flex items-center gap-2">
                 <AlertTriangle size={20} className="text-red-600" />
                 Contratos em Atraso
               </h2>
-              <p className="text-sm text-slate-500 mt-1">Ação necessária imediata</p>
+              <p className="text-sm text-slate-500 mt-1">Casos que pedem contato ou fechamento imediato.</p>
             </div>
 
             {isLoading ? (
               <div className="space-y-3">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="h-16 bg-slate-100 rounded-lg animate-pulse" />
+                {[...Array(3)].map((_, index) => (
+                  <div key={index} className="h-16 bg-slate-100 rounded-lg animate-pulse" />
                 ))}
               </div>
             ) : stats?.contratos_atrasados && stats.contratos_atrasados.length > 0 ? (
@@ -479,13 +897,16 @@ const Dashboard: React.FC = () => {
                 {stats.contratos_atrasados.map((contrato) => (
                   <div
                     key={contrato.id}
-                    className="p-4 rounded-lg border-l-4 border-l-red-500 bg-red-50/50 hover:shadow-sm transition-all duration-200"
+                    className="p-4 rounded-lg border-l-4 border-l-red-500 bg-red-50/60 hover:shadow-sm transition-all duration-200"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-slate-900 text-sm">{contrato.numero}</p>
                         <p className="text-xs text-slate-600 mt-1">
-                          Vencimento: {formatDate(contrato.data_fim)}
+                          Cliente: {contrato.cliente?.nome || 'Nao informado'}
+                        </p>
+                        <p className="text-xs text-slate-600 mt-1">
+                          Vencimento: {formatDateTime(contrato.data_fim)}
                         </p>
                       </div>
                       <span className="badge badge-danger flex-shrink-0">Atraso</span>
@@ -503,45 +924,38 @@ const Dashboard: React.FC = () => {
             )}
           </div>
 
-          {/* Upcoming Expirations */}
           <div className="card">
             <div className="mb-6">
               <h2 className="text-lg font-display font-bold text-slate-900 flex items-center gap-2">
                 <Calendar size={20} className="text-amber-600" />
-                Próximos Vencimentos
+                Proximos Vencimentos
               </h2>
-              <p className="text-sm text-slate-500 mt-1">Próximos 30 dias</p>
+              <p className="text-sm text-slate-500 mt-1">Contratos, seguro, IPVA e manutencoes nos proximos 30 dias.</p>
             </div>
 
             {isLoading ? (
               <div className="space-y-3">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="h-16 bg-slate-100 rounded-lg animate-pulse" />
+                {[...Array(3)].map((_, index) => (
+                  <div key={index} className="h-16 bg-slate-100 rounded-lg animate-pulse" />
                 ))}
               </div>
             ) : stats?.proximos_vencimentos && stats.proximos_vencimentos.length > 0 ? (
               <div className="space-y-3">
-                {stats.proximos_vencimentos.map((item, idx) => (
+                {stats.proximos_vencimentos.map((item, index) => (
                   <div
                     key={item.id}
                     className="p-4 rounded-lg border-l-4 border-l-amber-500 bg-amber-50/50 hover:shadow-sm transition-all duration-200"
                   >
                     <div className="flex items-start gap-3">
                       <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0 text-amber-600 font-semibold text-sm">
-                        {idx + 1}
+                        {index + 1}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-slate-900 text-sm line-clamp-1">
-                          {item.titulo}
-                        </p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-xs text-slate-500">
-                            {item.tipo}
-                          </span>
+                        <p className="font-semibold text-slate-900 text-sm line-clamp-1">{item.titulo}</p>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <span className="text-xs text-slate-500">{item.tipo}</span>
                           <span className="text-xs text-slate-400">•</span>
-                          <span className="text-xs text-slate-500">
-                            {formatDate(item.data_vencimento)}
-                          </span>
+                          <span className="text-xs text-slate-500">{formatDate(item.data_vencimento)}</span>
                         </div>
                       </div>
                       <Clock size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />

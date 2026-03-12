@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.models import CheckinCheckout, Cliente, Contrato, Reserva, Veiculo
+from app.models import CheckinCheckout, Cliente, Contrato, Manutencao, Reserva, Veiculo
 
 
 def test_cliente_crud_with_legacy_aliases(client, admin_headers):
@@ -191,7 +191,7 @@ def test_dashboard_root_returns_operational_data(client, admin_headers, db_sessi
         telefone="11999990001",
         ativo=True,
     )
-    veiculo_ativo = Veiculo(
+    veiculo_atrasado = Veiculo(
         placa="XYZ9876",
         marca="VW",
         modelo="Gol",
@@ -207,15 +207,45 @@ def test_dashboard_root_returns_operational_data(client, admin_headers, db_sessi
         status="disponivel",
         ativo=True,
     )
-    db_session.add_all([cliente, veiculo_ativo, veiculo_livre])
+    veiculo_manutencao = Veiculo(
+        placa="MNT2026",
+        marca="Fiat",
+        modelo="Argo",
+        km_atual=12500,
+        status="manutencao",
+        ativo=True,
+    )
+    veiculo_retirada = Veiculo(
+        placa="RET2026",
+        marca="Hyundai",
+        modelo="HB20",
+        km_atual=17400,
+        status="alugado",
+        ativo=True,
+    )
+    veiculo_devolucao = Veiculo(
+        placa="DEV2026",
+        marca="Toyota",
+        modelo="Yaris",
+        km_atual=26100,
+        status="alugado",
+        ativo=True,
+    )
+    db_session.add_all(
+        [cliente, veiculo_atrasado, veiculo_livre, veiculo_manutencao, veiculo_retirada, veiculo_devolucao]
+    )
     db_session.commit()
     db_session.refresh(cliente)
-    db_session.refresh(veiculo_ativo)
+    db_session.refresh(veiculo_atrasado)
+    db_session.refresh(veiculo_livre)
+    db_session.refresh(veiculo_manutencao)
+    db_session.refresh(veiculo_retirada)
+    db_session.refresh(veiculo_devolucao)
 
-    contrato = Contrato(
+    contrato_atrasado = Contrato(
         numero="CTR-DASH-1",
         cliente_id=cliente.id,
-        veiculo_id=veiculo_ativo.id,
+        veiculo_id=veiculo_atrasado.id,
         data_inicio=datetime.now() - timedelta(days=5),
         data_fim=datetime.now() - timedelta(days=1),
         km_inicial=22000,
@@ -225,23 +255,73 @@ def test_dashboard_root_returns_operational_data(client, admin_headers, db_sessi
         qtd_diarias=5,
         tipo="cliente",
     )
-    db_session.add(contrato)
+    contrato_retirada = Contrato(
+        numero="CTR-DASH-2",
+        cliente_id=cliente.id,
+        veiculo_id=veiculo_retirada.id,
+        data_inicio=datetime.now() - timedelta(hours=2),
+        data_fim=datetime.now() + timedelta(days=2),
+        km_inicial=17400,
+        valor_diaria=180,
+        valor_total=540,
+        status="ativo",
+        qtd_diarias=3,
+        tipo="cliente",
+    )
+    contrato_devolucao = Contrato(
+        numero="CTR-DASH-3",
+        cliente_id=cliente.id,
+        veiculo_id=veiculo_devolucao.id,
+        data_inicio=datetime.now() - timedelta(days=3),
+        data_fim=datetime.now() + timedelta(hours=3),
+        km_inicial=26100,
+        valor_diaria=210,
+        valor_total=840,
+        status="ativo",
+        qtd_diarias=4,
+        tipo="cliente",
+    )
+    reserva = Reserva(
+        cliente_id=cliente.id,
+        veiculo_id=veiculo_livre.id,
+        data_inicio=datetime.now() + timedelta(hours=1),
+        data_fim=datetime.now() + timedelta(days=2),
+        status="pendente",
+        valor_estimado=390,
+    )
+    manutencao = Manutencao(
+        veiculo_id=veiculo_manutencao.id,
+        tipo="preventiva",
+        descricao="Troca de oleo",
+        data_proxima=datetime.now().date(),
+        custo=220,
+        oficina="Oficina Centro",
+        status="agendada",
+    )
+    db_session.add_all([contrato_atrasado, contrato_retirada, contrato_devolucao, reserva, manutencao])
     db_session.commit()
 
     response = client.get("/api/v1/dashboard/", headers=admin_headers)
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["total_veiculos"] == 2
-    assert body["veiculos_alugados"] == 1
+    assert body["total_veiculos"] == 5
+    assert body["veiculos_alugados"] == 3
     assert body["veiculos_disponiveis"] == 1
-    assert body["contratos_ativos"] == 1
+    assert body["veiculos_manutencao"] == 1
+    assert body["contratos_ativos"] == 3
     assert body["total_clientes"] == 1
+    assert body["reservas_pendentes"] == 1
+    assert body["manutencoes_abertas"] == 1
+    assert body["retiradas_hoje"] == 1
+    assert body["devolucoes_hoje"] == 1
     assert len(body["receita_vs_despesas"]) == 6
     assert body["top_clientes"][0]["nome"] == "Dashboard Cliente"
-    assert body["top_veiculos"][0]["placa"] == "XYZ9876"
+    assert {item["placa"] for item in body["top_veiculos"]} >= {"XYZ9876", "RET2026", "DEV2026"}
     assert len(body["contratos_atrasados"]) == 1
     assert len(body["alertas"]) >= 1
+    assert len(body["agenda_hoje"]) >= 3
+    assert {item["rota"] for item in body["agenda_hoje"]} >= {"/reservas", "/contratos", "/manutencoes"}
 
 
 def test_reserva_can_be_confirmed_and_converted_to_contract(client, admin_headers, db_session):
