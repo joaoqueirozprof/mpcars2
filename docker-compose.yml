@@ -34,9 +34,19 @@ services:
     ports:
       - "8002:8000"
     environment:
-      DATABASE_URL: postgresql://mpcars2:mpcars2pass@mpcars2-db:5432/mpcars2
-      REDIS_URL: redis://mpcars2-redis:6379/0
-      SECRET_KEY: mpcars2-secret-key-production-2024
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mpcars2:mpcars2pass@mpcars2-db:5432/mpcars2}
+      REDIS_URL: ${REDIS_URL:-redis://mpcars2-redis:6379/0}
+      SECRET_KEY: ${SECRET_KEY:-mpcars2-secret-key-production-2024}
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
+      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-false}
+      RUN_LEGACY_COLUMN_MIGRATIONS: ${RUN_LEGACY_COLUMN_MIGRATIONS:-false}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_DIRECTORY: ${BACKUP_DIRECTORY:-/backups}
+      BACKUP_STORAGE_LABEL: ${BACKUP_STORAGE_LABEL:-Drive dedicado da VPS}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://72.61.129.78:3002,http://localhost:3002,http://localhost:5173}
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-72.61.129.78,localhost,127.0.0.1}
     depends_on:
       mpcars2-db:
         condition: service_healthy
@@ -45,6 +55,7 @@ services:
     volumes:
       - uploads:/app/uploads
       - pdfs:/app/pdfs
+      - ./backups:${BACKUP_DIRECTORY:-/backups}
 
   mpcars2-celery:
     build:
@@ -54,13 +65,18 @@ services:
     restart: always
     command: celery -A app.celery_app worker -l info -B
     environment:
-      DATABASE_URL: postgresql://mpcars2:mpcars2pass@mpcars2-db:5432/mpcars2
-      REDIS_URL: redis://mpcars2-redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mpcars2:mpcars2pass@mpcars2-db:5432/mpcars2}
+      REDIS_URL: ${REDIS_URL:-redis://mpcars2-redis:6379/0}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_DIRECTORY: ${BACKUP_DIRECTORY:-/backups}
     depends_on:
       mpcars2-db:
         condition: service_healthy
       mpcars2-redis:
         condition: service_healthy
+    volumes:
+      - ./backups:${BACKUP_DIRECTORY:-/backups}
 
   mpcars2-web:
     build:
