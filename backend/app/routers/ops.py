@@ -4,9 +4,12 @@ import subprocess
 import tarfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
@@ -15,6 +18,13 @@ from app.core.database import get_db
 from app.core.deps import get_ops_user, get_platform_admin_user
 from app.core.security import verify_password
 from app.models.user import User
+from app.services.google_drive_backup import (
+    GoogleDriveBackupError,
+    get_google_drive_folder_url,
+    get_google_drive_service_account_email,
+    is_google_drive_configured,
+    sync_backup_directory,
+)
 
 
 router = APIRouter(prefix="/ops", tags=["Operacao"])
@@ -120,6 +130,55 @@ def _parse_manifest(manifest_path: Path) -> Dict[str, str]:
     return data
 
 
+def _manifest_path(backup_dir: Path) -> Path:
+    return backup_dir / "manifest.txt"
+
+
+def _serialize_manifest_value(value: Any) -> str:
+    return str(value if value is not None else "").replace("\n", " ").strip()
+
+
+def _write_manifest(manifest_path: Path, data: Dict[str, Any]) -> None:
+    lines = [
+        f"{key}={_serialize_manifest_value(value)}"
+        for key, value in data.items()
+        if value is not None
+    ]
+    manifest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _update_manifest(
+    backup_dir: Path,
+    updates: Dict[str, Any],
+    *,
+    remove_keys: Optional[List[str]] = None,
+) -> Dict[str, str]:
+    manifest = _parse_manifest(_manifest_path(backup_dir))
+    for key in remove_keys or []:
+        manifest.pop(key, None)
+
+    for key, value in updates.items():
+        if value is None:
+            manifest.pop(key, None)
+            continue
+        manifest[key] = _serialize_manifest_value(value)
+
+    _write_manifest(_manifest_path(backup_dir), manifest)
+    return manifest
+
+
+def _resolve_backup_directory(backup_id: str) -> Path:
+    normalized = (backup_id or "").strip()
+    if not normalized or normalized in {".", ".."} or "/" in normalized or "\\" in normalized:
+        raise HTTPException(status_code=400, detail="Identificador de backup invalido.")
+
+    backup_dir = _backup_root() / normalized
+    if not backup_dir.exists() or not backup_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Backup nao encontrado.")
+
+    return backup_dir
+
+
 def _format_file_size(total_bytes: int) -> str:
     units = ["B", "KB", "MB", "GB", "TB"]
     size = float(max(total_bytes, 0))
@@ -128,6 +187,82 @@ def _format_file_size(total_bytes: int) -> str:
             return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} {unit}"
         size /= 1024
     return f"{int(size)} B"
+
+
+def _backup_downloads(backup_id: str) -> Dict[str, str]:
+    return {
+        "bundle": f"/ops/backups/{backup_id}/download/bundle",
+        "database": f"/ops/backups/{backup_id}/download/database",
+        "assets": f"/ops/backups/{backup_id}/download/assets",
+        "manifest": f"/ops/backups/{backup_id}/download/manifest",
+    }
+
+
+def _google_drive_overview() -> Dict[str, Any]:
+    return {
+        "enabled": settings.GOOGLE_DRIVE_BACKUP_ENABLED,
+        "configured": is_google_drive_configured(),
+        "sync_on_backup": settings.GOOGLE_DRIVE_SYNC_ON_BACKUP,
+        "folder_id": settings.GOOGLE_DRIVE_FOLDER_ID,
+        "folder_url": get_google_drive_folder_url(),
+        "service_account_email": get_google_drive_service_account_email(),
+    }
+
+
+def _sync_backup_to_google_drive(
+    backup_dir: Path,
+    *,
+    raise_on_error: bool = False,
+) -> Optional[Dict[str, Any]]:
+    if not settings.GOOGLE_DRIVE_BACKUP_ENABLED:
+        return None
+
+    attempt_at = datetime.now(timezone.utc).isoformat()
+    _update_manifest(
+        backup_dir,
+        {
+            "google_drive_last_attempt_at": attempt_at,
+            "google_drive_status": "syncing",
+        },
+    )
+
+    try:
+        sync_result = sync_backup_directory(backup_dir)
+    except GoogleDriveBackupError as exc:
+        _update_manifest(
+            backup_dir,
+            {
+                "google_drive_status": "error",
+                "google_drive_last_attempt_at": attempt_at,
+                "google_drive_last_error": str(exc),
+            },
+        )
+        if raise_on_error:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {
+            "status": "error",
+            "message": str(exc),
+        }
+
+    synced_at = datetime.now(timezone.utc).isoformat()
+    _update_manifest(
+        backup_dir,
+        {
+            "google_drive_status": "synced",
+            "google_drive_last_attempt_at": attempt_at,
+            "google_drive_synced_at": synced_at,
+            "google_drive_root_folder_id": sync_result.get("root_folder_id"),
+            "google_drive_root_folder_url": sync_result.get("root_folder_url"),
+            "google_drive_backup_folder_id": sync_result.get("backup_folder_id"),
+            "google_drive_backup_folder_url": sync_result.get("backup_folder_url"),
+            "google_drive_service_account_email": sync_result.get("service_account_email"),
+            "google_drive_database_file_url": sync_result.get("files", {}).get("database.sql", {}).get("url"),
+            "google_drive_assets_file_url": sync_result.get("files", {}).get("assets.tar.gz", {}).get("url"),
+            "google_drive_manifest_file_url": sync_result.get("files", {}).get("manifest.txt", {}).get("url"),
+        },
+        remove_keys=["google_drive_last_error"],
+    )
+    return sync_result
 
 
 def _list_backups(limit: int = 10) -> List[Dict[str, Any]]:
@@ -159,6 +294,27 @@ def _list_backups(limit: int = 10) -> List[Dict[str, Any]]:
                 "size_bytes": total_bytes,
                 "size_human": _format_file_size(total_bytes),
                 "manifest": manifest,
+                "downloads": _backup_downloads(directory.name),
+                "google_drive": {
+                    "enabled": settings.GOOGLE_DRIVE_BACKUP_ENABLED,
+                    "status": manifest.get(
+                        "google_drive_status",
+                        "pending" if settings.GOOGLE_DRIVE_BACKUP_ENABLED else "disabled",
+                    ),
+                    "last_attempt_at": manifest.get("google_drive_last_attempt_at"),
+                    "synced_at": manifest.get("google_drive_synced_at"),
+                    "last_error": manifest.get("google_drive_last_error"),
+                    "root_folder_url": manifest.get("google_drive_root_folder_url")
+                    or get_google_drive_folder_url(),
+                    "folder_url": manifest.get("google_drive_backup_folder_url"),
+                    "service_account_email": manifest.get("google_drive_service_account_email")
+                    or get_google_drive_service_account_email(),
+                    "files": {
+                        "database": manifest.get("google_drive_database_file_url"),
+                        "assets": manifest.get("google_drive_assets_file_url"),
+                        "manifest": manifest.get("google_drive_manifest_file_url"),
+                    },
+                },
             }
         )
     return backups
@@ -324,11 +480,7 @@ def _run_native_backup() -> Dict[str, Any]:
         "retention_days": str(settings.BACKUP_RETENTION_DAYS),
         "removed_old_backups": str(removed_count),
     }
-    manifest_lines = [f"{key}={value}" for key, value in manifest.items()]
-    (target_dir / "manifest.txt").write_text(
-        "\n".join(manifest_lines) + "\n",
-        encoding="utf-8",
-    )
+    _write_manifest(_manifest_path(target_dir), manifest)
 
     return {
         "target_dir": target_dir,
@@ -521,6 +673,7 @@ def list_backups(
         "restore_script_exists": restore_path.exists(),
         "backup_script": str(script_path),
         "restore_script": str(restore_path),
+        "google_drive": _google_drive_overview(),
         "items": _list_backups(),
     }
 
@@ -537,6 +690,7 @@ def run_backup_now(
 
     script_path = _resolve_existing_path(settings.BACKUP_SCRIPT_PATH, "ops/backup_mpcars2.sh")
     output = ""
+    sync_result: Optional[Dict[str, Any]] = None
 
     if script_path.exists():
         result = _run_command(["bash", str(script_path)], _project_root())
@@ -551,11 +705,107 @@ def run_backup_now(
         output = native_result["output"]
 
     items = _list_backups(limit=1)
+    if (
+        items
+        and settings.GOOGLE_DRIVE_BACKUP_ENABLED
+        and settings.GOOGLE_DRIVE_SYNC_ON_BACKUP
+        and items[0].get("google_drive", {}).get("status") != "synced"
+    ):
+        sync_result = _sync_backup_to_google_drive(_resolve_backup_directory(items[0]["id"]))
+        if sync_result:
+            sync_message = (
+                f"Google Drive sincronizado: {sync_result.get('backup_folder_url')}"
+                if sync_result.get("status") != "error"
+                else f"Falha ao sincronizar no Google Drive: {sync_result.get('message')}"
+            )
+            output = "\n".join([part for part in [output, sync_message] if part])
+            items = _list_backups(limit=1)
+
     return {
         "status": "backup_executado",
         "message": "Backup solicitado com sucesso.",
         "output": output,
+        "google_drive": sync_result,
         "latest_backup": items[0] if items else None,
+    }
+
+
+def _cleanup_file(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+@router.get("/backups/{backup_id}/download/{artifact}")
+def download_backup_artifact(
+    backup_id: str,
+    artifact: str,
+    _: User = Depends(get_ops_user),
+):
+    backup_dir = _resolve_backup_directory(backup_id)
+    artifact_name = (artifact or "").strip().lower()
+
+    artifact_map = {
+        "database": ("database.sql", "application/sql"),
+        "assets": ("assets.tar.gz", "application/gzip"),
+        "manifest": ("manifest.txt", "text/plain; charset=utf-8"),
+    }
+
+    if artifact_name == "bundle":
+        temp_handle = NamedTemporaryFile(
+            prefix=f"mpcars2-backup-{backup_id}-",
+            suffix=".tar.gz",
+            delete=False,
+        )
+        temp_path = Path(temp_handle.name)
+        temp_handle.close()
+        with tarfile.open(temp_path, "w:gz") as archive:
+            archive.add(backup_dir, arcname=backup_dir.name)
+
+        return FileResponse(
+            temp_path,
+            media_type="application/gzip",
+            filename=f"backup-{backup_id}.tar.gz",
+            background=BackgroundTask(_cleanup_file, temp_path),
+        )
+
+    selected = artifact_map.get(artifact_name)
+    if not selected:
+        raise HTTPException(status_code=400, detail="Arquivo de backup invalido.")
+
+    filename, media_type = selected
+    file_path = backup_dir / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Arquivo nao encontrado neste backup.")
+
+    return FileResponse(
+        file_path,
+        media_type=media_type,
+        filename=f"{backup_id}-{filename}",
+    )
+
+
+@router.post("/backups/{backup_id}/sync-google-drive")
+def sync_backup_now(
+    backup_id: str,
+    _: User = Depends(get_ops_user),
+) -> Dict[str, Any]:
+    if not settings.GOOGLE_DRIVE_BACKUP_ENABLED:
+        raise HTTPException(
+            status_code=400,
+            detail="A sincronizacao com Google Drive esta desabilitada neste ambiente.",
+        )
+
+    backup_dir = _resolve_backup_directory(backup_id)
+    sync_result = _sync_backup_to_google_drive(backup_dir, raise_on_error=True)
+    latest = next((item for item in _list_backups(limit=30) if item["id"] == backup_id), None)
+
+    return {
+        "status": "sincronizado",
+        "message": "Backup sincronizado com o Google Drive.",
+        "google_drive": sync_result,
+        "backup": latest,
     }
 
 

@@ -17,6 +17,9 @@ DB_CONTAINER="${DB_CONTAINER_NAME:-mpcars2-db}"
 API_CONTAINER="${API_CONTAINER_NAME:-mpcars2-api}"
 POSTGRES_USER="${POSTGRES_USER:-mpcars2}"
 POSTGRES_DB="${POSTGRES_DB:-mpcars2}"
+CONTAINER_BACKUP_ROOT="${BACKUP_DIRECTORY_CONTAINER:-/backups}"
+GOOGLE_DRIVE_BACKUP_ENABLED="${GOOGLE_DRIVE_BACKUP_ENABLED:-false}"
+GOOGLE_DRIVE_SYNC_ON_BACKUP="${GOOGLE_DRIVE_SYNC_ON_BACKUP:-true}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 TARGET_DIR="$BACKUP_ROOT/$TIMESTAMP"
 
@@ -39,6 +42,11 @@ postgres_db=$POSTGRES_DB
 postgres_user=$POSTGRES_USER
 backup_directory=$TARGET_DIR
 EOF
+
+if [[ "$GOOGLE_DRIVE_BACKUP_ENABLED" == "true" && "$GOOGLE_DRIVE_SYNC_ON_BACKUP" == "true" ]]; then
+  echo "[3.5/4] Sincronizando com Google Drive..."
+  docker exec "$API_CONTAINER" sh -lc "PYTHONPATH=/app python -m app.scripts.sync_backup_to_google_drive '$CONTAINER_BACKUP_ROOT/$TIMESTAMP'" || true
+fi
 
 echo "[4/4] Limpando backups antigos..."
 find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +"$RETENTION_DAYS" -exec rm -rf {} +

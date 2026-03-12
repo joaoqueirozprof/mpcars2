@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_admin_user, get_current_user, is_platform_admin_email
+from app.core.deps import get_admin_user, get_current_user
 from app.core.security import get_password_hash, validate_password_strength
 from app.models.user import (
     ASSIGNABLE_PAGES,
@@ -105,17 +105,13 @@ def _build_password_reset_url(token: str) -> str:
 
 
 def _serialize_user(user: User) -> dict:
-    effective_pages = get_profile_pages(user.perfil, user.permitted_pages)
-    if user.perfil == "admin" and not is_platform_admin_email(user.email):
-        effective_pages = [page for page in effective_pages if page != "governanca"]
-
     return {
         "id": user.id,
         "email": user.email,
         "nome": user.nome,
         "perfil": user.perfil,
         "ativo": user.ativo,
-        "permitted_pages": effective_pages,
+        "permitted_pages": get_profile_pages(user.perfil, user.permitted_pages),
         "data_cadastro": user.data_cadastro,
     }
 
@@ -150,15 +146,15 @@ def _access_catalog() -> Dict[str, Any]:
             {
                 "id": "admin",
                 "label": "Administrador",
-                "description": "Acesso total a operacao e usuarios. Governanca de producao fica reservada ao admin principal da plataforma.",
-                "fixed_pages": [page for page in get_profile_pages("admin") if page != "governanca"],
+                "description": "Acesso total a operacao, usuarios e backups. Checklist sensivel de producao e versoes continuam reservados ao admin principal da plataforma.",
+                "fixed_pages": get_profile_pages("admin"),
                 "manual_selection": False,
             },
             {
                 "id": "gerente",
                 "label": "Gerente",
-                "description": "Pode cuidar da operacao e do financeiro, sem acessar usuarios e governanca.",
-                "fixed_pages": DEFAULT_PAGES_BY_PROFILE["gerente"],
+                "description": "Cuida da operacao, financeiro e tambem acompanha backups e restauracao basica.",
+                "fixed_pages": get_profile_pages("gerente"),
                 "manual_selection": True,
             },
             {
@@ -171,8 +167,8 @@ def _access_catalog() -> Dict[str, Any]:
             {
                 "id": "owner",
                 "label": "Dono da empresa",
-                "description": "Acesso apenas ao painel de backups. Nao enxerga clientes, contratos nem financeiro.",
-                "fixed_pages": ["governanca"],
+                "description": "Acesso completo da locadora, inclusive usuarios e backups. Itens sensiveis de prontidao e versoes seguem reservados ao admin principal da plataforma.",
+                "fixed_pages": get_profile_pages("owner"),
                 "manual_selection": False,
             },
         ],

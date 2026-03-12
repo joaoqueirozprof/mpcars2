@@ -360,7 +360,7 @@ const Usuarios: React.FC = () => {
                 Usuarios e permissoes do sistema
               </h1>
               <p className="mt-3 text-sm text-slate-600">
-                Perfis mais simples para evitar erro: administrador, gerente, operador e dono da empresa. O dono enxerga apenas backups. A redefinicao de senha agora acontece por link temporario, sem o admin conhecer a senha final.
+                Perfis mais simples para evitar erro: administrador, gerente, operador e dono da empresa. O gerente acompanha backups, e o dono da empresa pode operar o sistema inteiro sem enxergar a parte sensivel de governanca da plataforma. A redefinicao de senha acontece por link temporario, sem o admin conhecer a senha final.
               </p>
             </div>
 
@@ -447,7 +447,7 @@ const Usuarios: React.FC = () => {
                               {user.perfil === 'admin'
                                 ? 'acesso total'
                                 : user.perfil === 'owner'
-                                  ? 'somente backups'
+                                  ? 'acesso completo da locadora'
                                   : `${user.permitted_pages.length} pagina(s) liberada(s)`}
                             </span>
                           </div>

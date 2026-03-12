@@ -459,7 +459,7 @@ const Dashboard: React.FC = () => {
                   <span className="text-xs uppercase tracking-wide text-slate-500">Atrasos</span>
                   <CountUpValue value={stats?.contratos_atrasados.length || 0} className="mt-2 text-2xl font-display font-bold text-slate-950" />
                 </div>
-                <div className="dashboard-mini-card col-span-2 flex min-w-0 items-end justify-between gap-3">
+                <div className="dashboard-mini-card col-span-2 min-w-0">
                   <div className="min-w-0">
                     <span className="text-xs uppercase tracking-wide text-slate-500">Ticket medio</span>
                     <p className="mt-2 text-xs text-slate-500">Media por contrato encerrado</p>
@@ -467,7 +467,7 @@ const Dashboard: React.FC = () => {
                   <CountUpValue
                     value={stats?.ticket_medio || 0}
                     formatter={formatCurrency}
-                    className="block max-w-full text-right text-[clamp(1.05rem,1.35vw,1.5rem)] font-display font-bold leading-tight tracking-[-0.02em] text-slate-950"
+                    className="mt-3 block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-left text-[clamp(1rem,1.1vw,1.35rem)] font-display font-bold leading-tight tracking-[-0.02em] text-slate-950"
                   />
                 </div>
               </div>

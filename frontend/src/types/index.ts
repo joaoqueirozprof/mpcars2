@@ -292,6 +292,27 @@ export interface BackupHistoryItem {
   size_bytes: number;
   size_human: string;
   manifest: Record<string, string>;
+  downloads: {
+    bundle: string;
+    database: string;
+    assets: string;
+    manifest: string;
+  };
+  google_drive: {
+    enabled: boolean;
+    status: 'disabled' | 'pending' | 'syncing' | 'synced' | 'error';
+    last_attempt_at?: string | null;
+    synced_at?: string | null;
+    last_error?: string | null;
+    root_folder_url?: string | null;
+    folder_url?: string | null;
+    service_account_email?: string | null;
+    files: {
+      database?: string | null;
+      assets?: string | null;
+      manifest?: string | null;
+    };
+  };
 }
 
 export interface BackupOverview {
@@ -303,6 +324,14 @@ export interface BackupOverview {
   restore_script_exists: boolean;
   backup_script: string;
   restore_script: string;
+  google_drive: {
+    enabled: boolean;
+    configured: boolean;
+    sync_on_backup: boolean;
+    folder_id?: string | null;
+    folder_url?: string | null;
+    service_account_email?: string | null;
+  };
   items: BackupHistoryItem[];
 }
 
@@ -310,6 +339,12 @@ export interface BackupRunResponse {
   status: string;
   message: string;
   output?: string;
+  google_drive?: {
+    status?: string;
+    message?: string;
+    backup_folder_url?: string;
+    root_folder_url?: string;
+  } | null;
   latest_backup?: BackupHistoryItem | null;
 }
 

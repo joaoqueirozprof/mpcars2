@@ -18,3 +18,5 @@ httpx==0.28.1
 aiofiles==24.1.0
 Pillow==11.0.0
 pytest==8.3.4
+google-auth==2.39.0
+requests==2.32.3

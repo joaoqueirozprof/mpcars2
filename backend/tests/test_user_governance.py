@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-def test_admin_can_create_owner_with_governance_only(client, admin_headers):
+def test_admin_can_create_owner_with_full_operational_access(client, admin_headers):
     response = client.post(
         "/api/v1/usuarios/",
         headers=admin_headers,
@@ -17,31 +17,59 @@ def test_admin_can_create_owner_with_governance_only(client, admin_headers):
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["perfil"] == "owner"
-    assert body["permitted_pages"] == ["governanca"]
+    assert "dashboard" in body["permitted_pages"]
+    assert "clientes" in body["permitted_pages"]
+    assert "usuarios" in body["permitted_pages"]
+    assert "governanca" in body["permitted_pages"]
 
 
-def test_owner_can_access_backups_but_not_clientes(client, user_factory, login_as):
+def test_owner_can_access_operational_areas_and_backups_but_not_platform_readiness(
+    client,
+    user_factory,
+    login_as,
+):
     owner = user_factory(
         email="owner-backup@example.org",
         password="OwnerSeguro123",
         perfil="owner",
-        permitted_pages=["governanca"],
     )
     headers = login_as(owner.email, "OwnerSeguro123")
 
     backups_response = client.get("/api/v1/ops/backups", headers=headers)
     clientes_response = client.get("/api/v1/clientes/", headers=headers)
+    usuarios_response = client.get("/api/v1/usuarios/", headers=headers)
+    readiness_response = client.get("/api/v1/ops/readiness", headers=headers)
 
     assert backups_response.status_code == 200, backups_response.text
-    assert clientes_response.status_code == 403, clientes_response.text
+    assert clientes_response.status_code == 200, clientes_response.text
+    assert usuarios_response.status_code == 200, usuarios_response.text
+    assert readiness_response.status_code == 403, readiness_response.text
 
 
-def test_generic_admin_cannot_access_governance_panels(client, admin_headers):
+def test_gerente_can_access_backups_but_not_platform_panels(client, user_factory, login_as):
+    gerente = user_factory(
+        email="gerente-backup@example.org",
+        password="GerenteSeguro123",
+        perfil="gerente",
+        permitted_pages=["dashboard", "clientes", "governanca"],
+    )
+    headers = login_as(gerente.email, "GerenteSeguro123")
+
+    backups_response = client.get("/api/v1/ops/backups", headers=headers)
+    readiness_response = client.get("/api/v1/ops/readiness", headers=headers)
+
+    assert backups_response.status_code == 200, backups_response.text
+    assert readiness_response.status_code == 403, readiness_response.text
+
+
+def test_generic_admin_can_access_backups_but_not_platform_governance_panels(client, admin_headers):
     backups_response = client.get("/api/v1/ops/backups", headers=admin_headers)
     readiness_response = client.get("/api/v1/ops/readiness", headers=admin_headers)
+    version_response = client.get("/api/v1/ops/version", headers=admin_headers)
 
-    assert backups_response.status_code == 403, backups_response.text
+    assert backups_response.status_code == 200, backups_response.text
     assert readiness_response.status_code == 403, readiness_response.text
+    assert version_response.status_code == 403, version_response.text
 
 
 def test_platform_admin_can_run_backup_without_shell_script(

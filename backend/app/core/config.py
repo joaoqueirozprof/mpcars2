@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     BACKUP_SCRIPT_PATH: str = "ops/backup_mpcars2.sh"
     RESTORE_SCRIPT_PATH: str = "ops/restore_mpcars2.sh"
     BACKUP_COMMAND_TIMEOUT_SECONDS: int = 300
+    GOOGLE_DRIVE_BACKUP_ENABLED: bool = False
+    GOOGLE_DRIVE_SYNC_ON_BACKUP: bool = True
+    GOOGLE_DRIVE_FOLDER_ID: Optional[str] = None
+    GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: Optional[str] = None
+    GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE: Optional[str] = None
     GIT_REPOSITORY_PATH: Optional[str] = None
     PASSWORD_RESET_BASE_URL: Optional[str] = None
     PASSWORD_RESET_TOKEN_TTL_MINUTES: int = 30
@@ -89,6 +94,16 @@ class Settings(BaseSettings):
 
         if self.ENVIRONMENT == "production" and len(self.SECRET_KEY or "") < 32:
             raise ValueError("SECRET_KEY deve ter ao menos 32 caracteres em producao")
+
+        if self.GOOGLE_DRIVE_BACKUP_ENABLED and not self.GOOGLE_DRIVE_FOLDER_ID:
+            raise ValueError("GOOGLE_DRIVE_FOLDER_ID deve ser informado quando o sync do Google Drive estiver ativo")
+
+        if self.GOOGLE_DRIVE_BACKUP_ENABLED and not (
+            self.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON or self.GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE
+        ):
+            raise ValueError(
+                "Informe GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON ou GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE para usar backup no Google Drive"
+            )
 
         return self
 

@@ -34,6 +34,7 @@ DEFAULT_PAGES_BY_PROFILE = {
         "reservas",
         "despesas-loja",
         "relatorios",
+        "governanca",
     ],
     "operador": [
         "dashboard",
@@ -66,7 +67,7 @@ def get_profile_pages(perfil: str, custom_pages: Optional[Iterable[str]] = None)
         return list(ALL_PAGES)
 
     if normalized_profile == "owner":
-        return ["governanca"]
+        return list(ALL_PAGES)
 
     source_pages = (
         normalize_assignable_pages(custom_pages)
@@ -74,7 +75,11 @@ def get_profile_pages(perfil: str, custom_pages: Optional[Iterable[str]] = None)
         else DEFAULT_PAGES_BY_PROFILE.get(normalized_profile, [])
     )
 
-    return normalize_assignable_pages(source_pages)
+    normalized_pages = normalize_assignable_pages(source_pages)
+    if normalized_profile == "gerente" and "governanca" not in normalized_pages:
+        normalized_pages.append("governanca")
+
+    return normalized_pages
 
 
 class User(Base):

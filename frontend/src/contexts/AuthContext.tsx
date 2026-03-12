@@ -83,25 +83,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null)
   }
 
-  const isAdmin = user?.perfil === 'admin'
+  const isAdmin = user?.perfil === 'admin' || user?.perfil === 'owner'
   const isPlatformAdmin =
     user?.perfil === 'admin' && user?.email?.toLowerCase() === PLATFORM_ADMIN_EMAIL
-  const isBackupOperator = isPlatformAdmin || user?.perfil === 'owner'
+  const isBackupOperator =
+    !!user && (user.perfil === 'admin' || user.perfil === 'owner' || user.perfil === 'gerente')
 
   const canAccess = useCallback((page: string): boolean => {
     if (!user) return false
-    if (user.perfil === 'owner') return page === 'governanca'
-    if (user.perfil === 'admin') {
-      if (page === 'governanca') return isPlatformAdmin
-      return true
-    }
+    if (user.perfil === 'admin') return true
     const pages = user.permitted_pages || []
     return pages.includes(page)
-  }, [isPlatformAdmin, user])
+  }, [user])
 
   const getHomeRoute = useCallback(() => {
     if (!user) return '/login'
-    if (user.perfil === 'owner') return '/backups'
     if (canAccess('dashboard')) return '/dashboard'
 
     const fallbackPages = [

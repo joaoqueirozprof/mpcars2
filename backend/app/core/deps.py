@@ -62,11 +62,11 @@ def get_current_user(
 def get_admin_user(
     current_user=Depends(get_current_user),
 ):
-    """Require admin user. Returns 403 if user is not admin."""
-    if current_user.perfil != "admin":
+    """Require an operations manager with elevated access."""
+    if current_user.perfil not in {"admin", "owner"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso restrito a administradores",
+            detail="Acesso restrito a administradores e donos da empresa",
         )
     return current_user
 
@@ -74,11 +74,11 @@ def get_admin_user(
 def get_ops_user(
     current_user=Depends(get_current_user),
 ):
-    """Allow platform admin or backup owner to access governance tools."""
-    if not (is_platform_admin_user(current_user) or current_user.perfil == "owner"):
+    """Allow operations staff with backup access to use backup tools."""
+    if current_user.perfil not in {"admin", "owner", "gerente"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso restrito a administradores da plataforma",
+            detail="Acesso restrito a usuarios com permissao de backup",
         )
     return current_user
 
