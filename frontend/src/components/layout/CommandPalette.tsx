@@ -224,13 +224,13 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
 
         <div className="command-palette-hero">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-200/90">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">
               Central de comandos
             </p>
-            <h2 className="mt-2 text-2xl font-display font-bold text-white">
+            <h2 className="mt-2 text-2xl font-display font-bold text-slate-950">
               Navegue e crie sem perder contexto
             </h2>
-            <p className="mt-2 max-w-2xl text-sm text-blue-100/85">
+            <p className="mt-2 max-w-2xl text-sm text-slate-600">
               Va para qualquer modulo, abra um cadastro novo ou continue de onde voce parou em poucos segundos.
             </p>
           </div>

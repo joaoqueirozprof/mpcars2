@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_page_access
 from app.models.user import User
@@ -38,6 +38,40 @@ router = APIRouter(
     tags=["Relatorios"],
     dependencies=[Depends(require_page_access("relatorios"))],
 )
+
+
+def _parse_optional_export_dates(
+    data_inicio: Optional[str],
+    data_fim: Optional[str],
+) -> tuple[Optional[date], Optional[date]]:
+    parsed_start = None
+    parsed_end = None
+
+    if data_inicio:
+        try:
+            parsed_start = datetime.strptime(data_inicio, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="data_inicio invalida. Use o formato YYYY-MM-DD.",
+            ) from exc
+
+    if data_fim:
+        try:
+            parsed_end = datetime.strptime(data_fim, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="data_fim invalida. Use o formato YYYY-MM-DD.",
+            ) from exc
+
+    if parsed_start and parsed_end and parsed_start > parsed_end:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="data_inicio deve ser menor ou igual a data_fim.",
+        )
+
+    return parsed_start, parsed_end
 
 
 # ============================================================
@@ -233,8 +267,10 @@ def exportar_clientes(
     if formato not in ("csv", "xlsx"):
         formato = "xlsx"
 
+    parsed_start, parsed_end = _parse_optional_export_dates(data_inicio, data_fim)
+
     try:
-        buffer = ExportacaoService.export_clientes(db, formato, data_inicio, data_fim)
+        buffer = ExportacaoService.export_clientes(db, formato, parsed_start, parsed_end)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Erro ao exportar clientes: {}".format(str(e)))
 
@@ -289,8 +325,10 @@ def exportar_contratos(
     if formato not in ("csv", "xlsx"):
         formato = "xlsx"
 
+    parsed_start, parsed_end = _parse_optional_export_dates(data_inicio, data_fim)
+
     try:
-        buffer = ExportacaoService.export_contratos(db, formato, data_inicio, data_fim, status_filter)
+        buffer = ExportacaoService.export_contratos(db, formato, parsed_start, parsed_end, status_filter)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Erro ao exportar contratos: {}".format(str(e)))
 
@@ -318,8 +356,10 @@ def exportar_financeiro(
     if formato not in ("csv", "xlsx"):
         formato = "xlsx"
 
+    parsed_start, parsed_end = _parse_optional_export_dates(data_inicio, data_fim)
+
     try:
-        buffer = ExportacaoService.export_financeiro(db, formato, data_inicio, data_fim)
+        buffer = ExportacaoService.export_financeiro(db, formato, parsed_start, parsed_end)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Erro ao exportar financeiro: {}".format(str(e)))
 

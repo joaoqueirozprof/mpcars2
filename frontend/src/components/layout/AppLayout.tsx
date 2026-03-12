@@ -63,8 +63,8 @@ const LayoutContent: React.FC<AppLayoutProps> = ({ children }) => {
   }
 
   return (
-    <div className="relative flex h-screen overflow-hidden bg-slate-100">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.08),transparent_26%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.07),transparent_24%),linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)]" />
+    <div className="relative flex h-screen overflow-hidden bg-slate-50">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.12),transparent_24%),radial-gradient(circle_at_top_right,rgba(125,211,252,0.12),transparent_26%),linear-gradient(180deg,#f7fbff_0%,#eef6ff_100%)]" />
       <Sidebar onOpenCommandPalette={() => setIsCommandPaletteOpen(true)} />
 
       {/* Main content area - shifts based on sidebar */}
@@ -78,7 +78,7 @@ const LayoutContent: React.FC<AppLayoutProps> = ({ children }) => {
           onOpenGuide={() => setIsGuideOpen(true)}
         />
         <main className="relative flex-1 overflow-y-auto">
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.10),transparent_55%)]" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.14),transparent_55%)]" />
           <div className="relative p-4 md:p-6 lg:p-8">
             <ContextualTipsBanner onOpenGuide={() => setIsGuideOpen(true)} />
             {children}

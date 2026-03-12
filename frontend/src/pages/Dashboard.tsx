@@ -338,8 +338,8 @@ const Dashboard: React.FC = () => {
               </div>
 
               <div>
-                <h1 className="page-title text-white">Dashboard</h1>
-                <p className="mt-2 max-w-2xl text-sm text-blue-100/90">
+                <h1 className="page-title text-slate-950">Dashboard</h1>
+                <p className="mt-2 max-w-2xl text-sm text-slate-600">
                   Bem-vindo, {user?.nome || 'Usuario'}. Este painel agora mostra a fila operacional da locadora e ajuda a priorizar retirada, devolucao, reservas e manutencao sem sair da tela inicial.
                 </p>
               </div>
@@ -418,23 +418,23 @@ const Dashboard: React.FC = () => {
             <div className="dashboard-score-card">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.22em] text-blue-200/70">Saude da operacao</p>
-                  <h2 className="mt-1 text-xl font-display font-bold text-white">{scoreLabel}</h2>
+                  <p className="text-xs uppercase tracking-[0.22em] text-sky-700/70">Saude da operacao</p>
+                  <h2 className="mt-1 text-xl font-display font-bold text-slate-950">{scoreLabel}</h2>
                 </div>
-                <ShieldCheck size={22} className="text-white/85" />
+                <ShieldCheck size={22} className="text-sky-600" />
               </div>
 
               <div className="mt-6 flex items-end justify-between gap-4">
                 <div>
-                  <CountUpValue value={operationScore} className="text-5xl font-display font-bold text-white" />
-                  <p className="mt-2 text-sm text-blue-100/85">Score operacional calculado sobre alertas, atrasos, manutencoes e ocupacao.</p>
+                  <CountUpValue value={operationScore} className="text-5xl font-display font-bold text-slate-950" />
+                  <p className="mt-2 text-sm text-slate-600">Score operacional calculado sobre alertas, atrasos, manutencoes e ocupacao.</p>
                 </div>
                 <div className={cn('dashboard-score-badge', `dashboard-score-badge-${scoreTone}`)}>
                   {operationScore >= 85 ? 'Estavel' : operationScore >= 68 ? 'Atencao' : 'Critico'}
                 </div>
               </div>
 
-              <div className="metric-progress-track mt-6 bg-white/10">
+              <div className="metric-progress-track mt-6 bg-sky-100">
                 <div
                   className={cn(
                     'metric-progress-fill',
@@ -448,23 +448,23 @@ const Dashboard: React.FC = () => {
 
               <div className="mt-6 grid grid-cols-2 gap-3">
                 <div className="dashboard-mini-card">
-                  <span className="text-xs uppercase tracking-wide text-blue-200/70">Disponiveis</span>
-                  <CountUpValue value={stats?.veiculos_disponiveis || 0} className="mt-2 text-2xl font-display font-bold text-white" />
+                  <span className="text-xs uppercase tracking-wide text-slate-500">Disponiveis</span>
+                  <CountUpValue value={stats?.veiculos_disponiveis || 0} className="mt-2 text-2xl font-display font-bold text-slate-950" />
                 </div>
                 <div className="dashboard-mini-card">
-                  <span className="text-xs uppercase tracking-wide text-blue-200/70">Reservas confirmadas</span>
-                  <CountUpValue value={stats?.reservas_confirmadas || 0} className="mt-2 text-2xl font-display font-bold text-white" />
+                  <span className="text-xs uppercase tracking-wide text-slate-500">Reservas confirmadas</span>
+                  <CountUpValue value={stats?.reservas_confirmadas || 0} className="mt-2 text-2xl font-display font-bold text-slate-950" />
                 </div>
                 <div className="dashboard-mini-card">
-                  <span className="text-xs uppercase tracking-wide text-blue-200/70">Atrasos</span>
-                  <CountUpValue value={stats?.contratos_atrasados.length || 0} className="mt-2 text-2xl font-display font-bold text-white" />
+                  <span className="text-xs uppercase tracking-wide text-slate-500">Atrasos</span>
+                  <CountUpValue value={stats?.contratos_atrasados.length || 0} className="mt-2 text-2xl font-display font-bold text-slate-950" />
                 </div>
                 <div className="dashboard-mini-card">
-                  <span className="text-xs uppercase tracking-wide text-blue-200/70">Ticket medio</span>
+                  <span className="text-xs uppercase tracking-wide text-slate-500">Ticket medio</span>
                   <CountUpValue
                     value={stats?.ticket_medio || 0}
                     formatter={formatCurrency}
-                    className="mt-2 text-xl font-display font-bold text-white"
+                    className="mt-2 text-xl font-display font-bold text-slate-950"
                   />
                 </div>
               </div>
@@ -703,10 +703,11 @@ const Dashboard: React.FC = () => {
                   <YAxis stroke="#94a3b8" style={{ fontSize: '12px' }} />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: '#0f172a',
-                      border: 'none',
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #dbeafe',
                       borderRadius: '12px',
-                      color: '#fff',
+                      color: '#0f172a',
+                      boxShadow: '0 18px 44px rgba(15, 23, 42, 0.12)',
                     }}
                     formatter={(value: number) => formatCurrency(Number(value || 0))}
                     cursor={{ fill: 'rgba(37, 99, 235, 0.08)' }}
@@ -734,32 +735,32 @@ const Dashboard: React.FC = () => {
             )}
           </div>
 
-          <div className="card bg-slate-900 text-white overflow-hidden relative">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(59,130,246,0.26),_transparent_45%)]" />
+          <div className="card overflow-hidden relative border-sky-100 bg-[linear-gradient(180deg,rgba(240,249,255,0.98),rgba(255,255,255,0.98))]">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(56,189,248,0.22),_transparent_45%)]" />
             <div className="relative">
               <div className="mb-6">
                 <h2 className="text-lg font-display font-bold flex items-center gap-2">
-                  <Sparkles size={20} className="text-blue-300" />
+                  <Sparkles size={20} className="text-sky-600" />
                   Leitura Rapida
                 </h2>
-                <p className="text-sm text-slate-300 mt-1">Resumo para decidir sua proxima acao em poucos segundos.</p>
+                <p className="mt-1 text-sm text-slate-600">Resumo para decidir sua proxima acao em poucos segundos.</p>
               </div>
 
               <div className="space-y-4">
                 <div className="dashboard-insight-card">
-                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Receita do mes</span>
-                  <CountUpValue value={stats?.receita_mensal || 0} formatter={formatCurrency} className="mt-2 block text-2xl font-display font-bold" />
-                  <p className="mt-2 text-xs text-slate-300">Variacao frente ao mes anterior: {stats ? `${formatPercent(stats.variacao_receita_mensal)}%` : '-'}</p>
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Receita do mes</span>
+                  <CountUpValue value={stats?.receita_mensal || 0} formatter={formatCurrency} className="mt-2 block text-2xl font-display font-bold text-slate-950" />
+                  <p className="mt-2 text-xs text-slate-600">Variacao frente ao mes anterior: {stats ? `${formatPercent(stats.variacao_receita_mensal)}%` : '-'}</p>
                 </div>
                 <div className="dashboard-insight-card">
-                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Fila do dia</span>
-                  <p className="mt-2 text-2xl font-display font-bold">{(stats?.retiradas_hoje || 0) + (stats?.devolucoes_hoje || 0)}</p>
-                  <p className="mt-2 text-xs text-slate-300">Somando retiradas previstas, devolucoes e reservas que precisam de decisao.</p>
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Fila do dia</span>
+                  <p className="mt-2 text-2xl font-display font-bold text-slate-950">{(stats?.retiradas_hoje || 0) + (stats?.devolucoes_hoje || 0)}</p>
+                  <p className="mt-2 text-xs text-slate-600">Somando retiradas previstas, devolucoes e reservas que precisam de decisao.</p>
                 </div>
                 <div className="dashboard-insight-card">
-                  <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Atencao imediata</span>
-                  <p className="mt-2 text-2xl font-display font-bold">{criticalAlerts}</p>
-                  <p className="mt-2 text-xs text-slate-300">Alertas criticos ainda nao resolvidos no sistema.</p>
+                  <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Atencao imediata</span>
+                  <p className="mt-2 text-2xl font-display font-bold text-slate-950">{criticalAlerts}</p>
+                  <p className="mt-2 text-xs text-slate-600">Alertas criticos ainda nao resolvidos no sistema.</p>
                 </div>
               </div>
             </div>

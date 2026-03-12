@@ -7,6 +7,7 @@ from io import BytesIO
 from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional, List, Tuple
+import re
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -23,6 +24,7 @@ from app.models import (
     ParcelaSeguro,
     IpvaRegistro,
     Multa,
+    LancamentoFinanceiro,
 )
 
 
@@ -33,6 +35,70 @@ class ExportacaoService:
     HEADER_FILL = PatternFill(start_color="3B5998", end_color="3B5998", fill_type="solid")
     HEADER_FONT = Font(bold=True, color="FFFFFF")
     HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    @staticmethod
+    def _normalize_sheet_name(value: str) -> str:
+        """Mantém nomes de abas compatíveis com Excel/openpyxl."""
+        sanitized = re.sub(r"[\\/*?:\[\]]", "-", (value or "").strip()) or "Relatorio"
+        return sanitized[:31]
+
+    @staticmethod
+    def _coerce_to_date(value: Optional[object]) -> Optional[date]:
+        """Converte strings, datetime e date para date de forma segura."""
+        if value in (None, ""):
+            return None
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, str):
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+                try:
+                    return datetime.strptime(value, fmt).date()
+                except ValueError:
+                    continue
+        return None
+
+    @staticmethod
+    def _extract_month_bucket(value: Optional[object]) -> Optional[str]:
+        normalized = ExportacaoService._coerce_to_date(value)
+        if not normalized:
+            return None
+        return normalized.strftime("%m/%Y")
+
+    @staticmethod
+    def _resolve_despesa_loja_date(despesa: DespesaLoja) -> Optional[date]:
+        """
+        Resolve a data de referência da despesa da loja.
+
+        Existem registros legados que usam apenas `data`, enquanto outros
+        guardam `mes` e `ano`. O export precisa aceitar ambos.
+        """
+        mes = getattr(despesa, "mes", None)
+        ano = getattr(despesa, "ano", None)
+
+        if isinstance(mes, int) and isinstance(ano, int):
+            try:
+                return date(ano, mes, 1)
+            except ValueError:
+                pass
+
+        data_referencia = ExportacaoService._coerce_to_date(getattr(despesa, "data", None))
+        if data_referencia:
+            return data_referencia.replace(day=1)
+
+        return None
+
+    @staticmethod
+    def _safe_float(value: Optional[object]) -> float:
+        if value in (None, ""):
+            return 0.0
+        if isinstance(value, Decimal):
+            return float(value)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
 
     @staticmethod
     def _format_date(value: Optional[date]) -> str:
@@ -91,7 +157,7 @@ class ExportacaoService:
         """Cria workbook XLSX com formatação padrão."""
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = sheet_name
+        ws.title = ExportacaoService._normalize_sheet_name(sheet_name)
 
         # Cabeçalhos
         for col_num, header in enumerate(headers, 1):
@@ -124,7 +190,7 @@ class ExportacaoService:
             wb.remove(wb.active)
 
         for sheet_name, headers, rows in sheets_data:
-            ws = wb.create_sheet(sheet_name)
+            ws = wb.create_sheet(ExportacaoService._normalize_sheet_name(sheet_name))
 
             # Cabeçalhos
             for col_num, header in enumerate(headers, 1):
@@ -144,7 +210,12 @@ class ExportacaoService:
             # Auto-width
             for col_num, header in enumerate(headers, 1):
                 col_letter = openpyxl.utils.get_column_letter(col_num)
-                ws.column_dimensions[col_letter].width = max(len(str(header)) + 2, 12)
+                max_value_length = max(
+                    [len(str(header))]
+                    + [len(str(row[col_num - 1])) for row in rows if len(row) >= col_num],
+                    default=len(str(header)),
+                )
+                ws.column_dimensions[col_letter].width = min(max(max_value_length + 2, 12), 48)
 
         # Salva em BytesIO
         output = BytesIO()
@@ -520,6 +591,11 @@ class ExportacaoService:
         multas_rows = ExportacaoService._generate_multas(db, data_inicio, data_fim)
         sheets_data.append(("Multas", multas_headers, multas_rows))
 
+        # ========== ABA 8: LANCAMENTOS ==========
+        lancamentos_headers = ["Data", "Tipo", "Categoria", "Descrição", "Status", "Valor"]
+        lancamentos_rows = ExportacaoService._generate_lancamentos_manuais(db, data_inicio, data_fim)
+        sheets_data.append(("Lançamentos", lancamentos_headers, lancamentos_rows))
+
         if formato.lower() == "csv":
             # Para CSV, combina todas as abas com separadores
             content = "\ufeff"  # BOM UTF-8
@@ -588,12 +664,39 @@ class ExportacaoService:
 
         despesas_loja = db.query(DespesaLoja)
         for despesa in despesas_loja.all():
-            # DespesaLoja usa mes/ano como integers
-            if hasattr(despesa, "mes") and hasattr(despesa, "ano"):
-                chave_mes = f"{despesa.mes:02d}/{despesa.ano}"
-                if chave_mes not in meses:
-                    meses[chave_mes] = {"receita": 0, "despesa": 0}
-                meses[chave_mes]["despesa"] += float(despesa.valor or 0)
+            referencia = ExportacaoService._resolve_despesa_loja_date(despesa)
+            if not referencia:
+                continue
+            if data_inicio and referencia < data_inicio:
+                continue
+            if data_fim and referencia > data_fim:
+                continue
+
+            chave_mes = ExportacaoService._extract_month_bucket(referencia)
+            if not chave_mes:
+                continue
+            if chave_mes not in meses:
+                meses[chave_mes] = {"receita": 0, "despesa": 0}
+            meses[chave_mes]["despesa"] += ExportacaoService._safe_float(despesa.valor)
+
+        lancamentos = db.query(LancamentoFinanceiro)
+        if data_inicio:
+            lancamentos = lancamentos.filter(LancamentoFinanceiro.data >= data_inicio)
+        if data_fim:
+            lancamentos = lancamentos.filter(LancamentoFinanceiro.data <= data_fim)
+
+        for lancamento in lancamentos.all():
+            chave_mes = ExportacaoService._extract_month_bucket(lancamento.data)
+            if not chave_mes:
+                continue
+            if chave_mes not in meses:
+                meses[chave_mes] = {"receita": 0, "despesa": 0}
+
+            tipo = (lancamento.tipo or "").lower()
+            if tipo == "receita":
+                meses[chave_mes]["receita"] += ExportacaoService._safe_float(lancamento.valor)
+            else:
+                meses[chave_mes]["despesa"] += ExportacaoService._safe_float(lancamento.valor)
 
         # Ordena por mês
         for chave_mes in sorted(meses.keys()):
@@ -715,19 +818,13 @@ class ExportacaoService:
 
         rows = []
         for despesa in despesas:
-            # Filtro manual por mes/ano se data_inicio/data_fim fornecidos
-            if data_inicio or data_fim:
-                if hasattr(despesa, "mes") and hasattr(despesa, "ano"):
-                    despesa_date = date(despesa.ano, despesa.mes, 1)
-                    if data_inicio and despesa_date < data_inicio:
-                        continue
-                    if data_fim and despesa_date > data_fim:
-                        continue
+            referencia = ExportacaoService._resolve_despesa_loja_date(despesa)
+            if data_inicio and referencia and referencia < data_inicio:
+                continue
+            if data_fim and referencia and referencia > data_fim:
+                continue
 
-            # Monta data a partir de mes/ano
-            data_str = ""
-            if hasattr(despesa, "mes") and hasattr(despesa, "ano"):
-                data_str = f"{despesa.mes:02d}/{despesa.ano}"
+            data_str = referencia.strftime("%m/%Y") if referencia else ""
 
             row = [
                 despesa.categoria or "",
@@ -736,6 +833,33 @@ class ExportacaoService:
                 ExportacaoService._format_currency(despesa.valor or 0),
             ]
             rows.append(row)
+
+        return rows
+
+    @staticmethod
+    def _generate_lancamentos_manuais(
+        db: Session,
+        data_inicio: Optional[date],
+        data_fim: Optional[date],
+    ) -> List[List]:
+        """Gera dados de lançamentos financeiros manuais."""
+        query = db.query(LancamentoFinanceiro)
+
+        if data_inicio:
+            query = query.filter(LancamentoFinanceiro.data >= data_inicio)
+        if data_fim:
+            query = query.filter(LancamentoFinanceiro.data <= data_fim)
+
+        rows = []
+        for lancamento in query.order_by(LancamentoFinanceiro.data.desc(), LancamentoFinanceiro.id.desc()).all():
+            rows.append([
+                ExportacaoService._format_date(lancamento.data),
+                (lancamento.tipo or "").capitalize(),
+                lancamento.categoria or "",
+                lancamento.descricao or "",
+                (lancamento.status or "").capitalize(),
+                ExportacaoService._format_currency(lancamento.valor or 0),
+            ])
 
         return rows
 

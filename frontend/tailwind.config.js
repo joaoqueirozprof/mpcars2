@@ -8,13 +8,13 @@ export default {
         body: ['Inter', 'sans-serif'],
       },
       colors: {
-        primary: { DEFAULT: '#4DA3FF', light: '#7CC0FF', dark: '#2F7FE8', 50: '#F0F8FF', 100: '#D9EEFF', 200: '#B8E0FF' },
-        accent: { DEFAULT: '#0EA5E9', light: '#38BDF8', dark: '#0284C7' },
-        sidebar: '#1E4F8C',
+        primary: { DEFAULT: '#3B9DFF', light: '#78C2FF', dark: '#1D77D9', 50: '#F2F8FF', 100: '#E1F0FF', 200: '#C5E3FF' },
+        accent: { DEFAULT: '#38BDF8', light: '#7DD3FC', dark: '#0EA5E9' },
+        sidebar: '#EEF6FF',
         success: { DEFAULT: '#10B981', light: '#D1FAE5', dark: '#059669' },
         danger: { DEFAULT: '#EF4444', light: '#FEE2E2', dark: '#DC2626' },
         warning: { DEFAULT: '#F59E0B', light: '#FEF3C7', dark: '#D97706' },
-        surface: '#F8FAFC',
+        surface: '#F6FAFF',
       },
       animation: {
         'fade-in': 'fadeIn 0.3s ease-out',

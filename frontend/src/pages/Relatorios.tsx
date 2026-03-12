@@ -75,6 +75,34 @@ const exportCards = [
   },
 ] as const
 
+const extractErrorMessage = async (error: any, fallback: string) => {
+  const detail = error?.response?.data?.detail
+  if (typeof detail === 'string' && detail.trim()) {
+    return detail
+  }
+
+  const blob = error?.response?.data
+  if (blob instanceof Blob) {
+    try {
+      const text = await blob.text()
+      if (!text) return fallback
+
+      try {
+        const parsed = JSON.parse(text)
+        if (typeof parsed?.detail === 'string' && parsed.detail.trim()) {
+          return parsed.detail
+        }
+      } catch {
+        return text
+      }
+    } catch {
+      return fallback
+    }
+  }
+
+  return fallback
+}
+
 const Relatorios: React.FC = () => {
   const [loading, setLoading] = useState<string | null>(null)
   const [contratoId, setContratoId] = useState('')
@@ -168,7 +196,7 @@ const Relatorios: React.FC = () => {
       toast.success('PDF do contrato gerado!')
     } catch (error: any) {
       toast.dismiss(tid)
-      toast.error(error?.response?.status === 404 ? 'Contrato nao encontrado' : 'Erro ao gerar PDF')
+      toast.error(error?.response?.status === 404 ? 'Contrato nao encontrado' : await extractErrorMessage(error, 'Erro ao gerar PDF'))
     } finally {
       setLoading(null)
     }
@@ -191,7 +219,7 @@ const Relatorios: React.FC = () => {
       toast.success('Relatorio financeiro gerado!')
     } catch (error: any) {
       toast.dismiss(tid)
-      toast.error(error?.response?.data?.detail || 'Erro ao gerar relatorio financeiro')
+      toast.error(await extractErrorMessage(error, 'Erro ao gerar relatorio financeiro'))
     } finally {
       setLoading(null)
     }
@@ -217,7 +245,7 @@ const Relatorios: React.FC = () => {
       toast.success(`NF gerada para ${uso.placa}!`)
     } catch (error: any) {
       toast.dismiss(tid)
-      toast.error(error?.response?.data?.detail || 'Erro ao gerar NF')
+      toast.error(await extractErrorMessage(error, 'Erro ao gerar NF'))
     } finally {
       setLoading(null)
     }
@@ -261,7 +289,7 @@ const Relatorios: React.FC = () => {
       toast.success('NF consolidada gerada com sucesso!')
     } catch (error: any) {
       toast.dismiss(tid)
-      toast.error(error?.response?.data?.detail || 'Erro ao gerar NF consolidada')
+      toast.error(await extractErrorMessage(error, 'Erro ao gerar NF consolidada'))
     } finally {
       setLoading(null)
     }
@@ -286,7 +314,7 @@ const Relatorios: React.FC = () => {
       toast.success(`${entity} exportado!`)
     } catch (error: any) {
       toast.dismiss(tid)
-      toast.error(error?.response?.data?.detail || `Erro ao exportar ${entity}`)
+      toast.error(await extractErrorMessage(error, `Erro ao exportar ${entity}`))
     } finally {
       setLoading(null)
     }
@@ -374,23 +402,23 @@ const Relatorios: React.FC = () => {
               <Sparkles size={14} />
               Central de relatorios
             </div>
-            <h1 className="mt-5 text-3xl font-display font-bold text-white md:text-4xl">
+            <h1 className="mt-5 text-3xl font-display font-bold text-slate-950 md:text-4xl">
               Gere PDFs, NFs e exportacoes sem perder contexto
             </h1>
-            <p className="mt-3 max-w-2xl text-sm text-blue-100/90 md:text-base">
+            <p className="mt-3 max-w-2xl text-sm text-slate-600 md:text-base">
               A area de relatorios agora organiza emissao de documentos, exportacao e fechamento por empresa em um fluxo mais claro para a equipe.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <div className="dashboard-hero-chip dashboard-hero-chip-emerald">
-                <span className="text-xs uppercase tracking-wide text-emerald-100/80">PDFs</span>
+                <span className="text-xs uppercase tracking-wide text-emerald-700/80">PDFs</span>
                 <strong className="text-2xl">{contratos.length > 0 ? 'Prontos' : 'Aguardando'}</strong>
               </div>
               <div className="dashboard-hero-chip dashboard-hero-chip-amber">
-                <span className="text-xs uppercase tracking-wide text-amber-100/80">NFs selecionadas</span>
+                <span className="text-xs uppercase tracking-wide text-amber-700/80">NFs selecionadas</span>
                 <strong className="text-2xl">{selectedCount}</strong>
               </div>
               <div className="dashboard-hero-chip">
-                <span className="text-xs uppercase tracking-wide text-blue-100/80">Potencial extra</span>
+                <span className="text-xs uppercase tracking-wide text-sky-700/80">Potencial extra</span>
                 <strong className="text-2xl">{formatCurrency(nfSummary.valorExtra)}</strong>
               </div>
             </div>
