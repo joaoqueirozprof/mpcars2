@@ -8,9 +8,9 @@ export default {
         body: ['Inter', 'sans-serif'],
       },
       colors: {
-        primary: { DEFAULT: '#43A3FF', light: '#8CCEFF', dark: '#2285F5', 50: '#F3F9FF', 100: '#E4F2FF', 200: '#CCE7FF' },
+        primary: { DEFAULT: '#4AA8FF', light: '#9FD4FF', dark: '#2892F5', 50: '#F4FAFF', 100: '#E6F3FF', 200: '#CDE7FF' },
         accent: { DEFAULT: '#38BDF8', light: '#7DD3FC', dark: '#0EA5E9' },
-        sidebar: '#F4FAFF',
+        sidebar: '#F5FAFF',
         success: { DEFAULT: '#10B981', light: '#D1FAE5', dark: '#059669' },
         danger: { DEFAULT: '#EF4444', light: '#FEE2E2', dark: '#DC2626' },
         warning: { DEFAULT: '#F59E0B', light: '#FEF3C7', dark: '#D97706' },

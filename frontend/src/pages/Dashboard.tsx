@@ -325,7 +325,7 @@ const Dashboard: React.FC = () => {
       <div className="space-y-8 pb-8">
         <section className="dashboard-hero animate-fade-in-up">
           <div className="dashboard-hero-glow" />
-          <div className="relative grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.7fr)_360px]">
+          <div className="relative grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.62fr)_420px]">
             <div className="space-y-5">
               <div className="flex flex-wrap items-center gap-3">
                 <span className="dashboard-hero-pill">
@@ -459,12 +459,15 @@ const Dashboard: React.FC = () => {
                   <span className="text-xs uppercase tracking-wide text-slate-500">Atrasos</span>
                   <CountUpValue value={stats?.contratos_atrasados.length || 0} className="mt-2 text-2xl font-display font-bold text-slate-950" />
                 </div>
-                <div className="dashboard-mini-card flex min-w-0 flex-col gap-2">
-                  <span className="text-xs uppercase tracking-wide text-slate-500">Ticket medio</span>
+                <div className="dashboard-mini-card col-span-2 flex min-w-0 items-end justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="text-xs uppercase tracking-wide text-slate-500">Ticket medio</span>
+                    <p className="mt-2 text-xs text-slate-500">Media por contrato encerrado</p>
+                  </div>
                   <CountUpValue
                     value={stats?.ticket_medio || 0}
                     formatter={formatCurrency}
-                    className="mt-2 block max-w-full text-[clamp(1rem,1.3vw,1.4rem)] font-display font-bold leading-tight tracking-[-0.02em] text-slate-950"
+                    className="block max-w-full text-right text-[clamp(1.05rem,1.35vw,1.5rem)] font-display font-bold leading-tight tracking-[-0.02em] text-slate-950"
                   />
                 </div>
               </div>
@@ -735,8 +738,8 @@ const Dashboard: React.FC = () => {
             )}
           </div>
 
-          <div className="card overflow-hidden relative border-primary-100 bg-[linear-gradient(180deg,rgba(240,248,255,0.98),rgba(255,255,255,0.98))]">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(67,163,255,0.16),_transparent_45%)]" />
+          <div className="card overflow-hidden relative border-primary-200/80 bg-[linear-gradient(180deg,#edf7ff_0%,#ffffff_42%,#ffffff_100%)] shadow-[0_18px_36px_rgba(74,168,255,0.08)]">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(74,168,255,0.12),_transparent_48%)]" />
             <div className="relative">
               <div className="mb-6">
                 <h2 className="text-lg font-display font-bold flex items-center gap-2">

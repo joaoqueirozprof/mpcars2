@@ -35,7 +35,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onOpenCommandPalette }) => {
         isCollapsed ? 'md:w-24' : 'md:w-[292px]'
       )}
     >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(67,163,255,0.2),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(67,163,255,0.1),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.98),rgba(244,250,255,0.98))]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(74,168,255,0.18),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(74,168,255,0.08),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.98),rgba(245,250,255,0.98))]" />
 
       <div
         className={cn(
@@ -58,7 +58,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onOpenCommandPalette }) => {
         <button
           onClick={onOpenCommandPalette}
           className={cn(
-            'flex w-full items-center rounded-2xl border border-primary-200 bg-white/92 text-left transition-all duration-200 shadow-[0_10px_22px_rgba(67,163,255,0.08)] hover:border-primary/40 hover:bg-white',
+            'flex w-full items-center rounded-2xl border border-primary-200 bg-white/92 text-left transition-all duration-200 shadow-[0_10px_22px_rgba(74,168,255,0.08)] hover:border-primary/40 hover:bg-white',
             isCollapsed ? 'justify-center px-3 py-3' : 'gap-3 px-4 py-3.5'
           )}
           title={isCollapsed ? 'Busca rapida' : undefined}
@@ -96,7 +96,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onOpenCommandPalette }) => {
                           'group relative flex rounded-2xl transition-all duration-200',
                           isCollapsed ? 'justify-center px-2 py-3' : 'items-center gap-3 px-3.5 py-3',
                           active
-                          ? 'bg-primary text-white shadow-[0_16px_34px_rgba(67,163,255,0.24)]'
+                          ? 'bg-primary text-white shadow-[0_16px_34px_rgba(74,168,255,0.24)]'
                           : 'text-slate-700 hover:bg-white/80 hover:text-slate-950'
                       )}
                     >
@@ -167,7 +167,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onOpenCommandPalette }) => {
           isMobileOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(67,163,255,0.2),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(67,163,255,0.1),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.98),rgba(244,250,255,0.98))]" />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(74,168,255,0.18),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(74,168,255,0.08),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.98),rgba(245,250,255,0.98))]" />
 
         <div className="relative border-b border-primary-200/80 px-5 py-5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-primary-dark">MPCARS</p>
@@ -181,7 +181,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onOpenCommandPalette }) => {
               closeMobile()
               onOpenCommandPalette()
             }}
-            className="flex w-full items-center gap-3 rounded-2xl border border-primary-200 bg-white/92 px-4 py-3.5 text-left shadow-[0_10px_22px_rgba(67,163,255,0.08)] transition-colors hover:border-primary/40 hover:bg-white"
+            className="flex w-full items-center gap-3 rounded-2xl border border-primary-200 bg-white/92 px-4 py-3.5 text-left shadow-[0_10px_22px_rgba(74,168,255,0.08)] transition-colors hover:border-primary/40 hover:bg-white"
           >
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-100 text-primary-dark">
               <Search size={18} />
@@ -211,7 +211,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onOpenCommandPalette }) => {
                         className={cn(
                           'flex items-center gap-3 rounded-2xl px-3.5 py-3 transition-colors',
                           active
-                            ? 'bg-primary text-white shadow-[0_12px_28px_rgba(67,163,255,0.24)]'
+                            ? 'bg-primary text-white shadow-[0_12px_28px_rgba(74,168,255,0.24)]'
                             : 'text-slate-700 hover:bg-white/80 hover:text-slate-950'
                         )}
                       >

@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import {
   ArrowRight,
   CalendarClock,
@@ -17,8 +16,6 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
-import api from '@/services/api'
-import { OpsReadiness } from '@/types'
 
 interface ContextualTipsBannerProps {
   onOpenGuide: () => void
@@ -319,7 +316,7 @@ const tipDefinitions: TipDefinition[] = [
 const toneStyles = {
   blue: {
     shell: 'from-primary-50 via-white to-cyan-50 border-primary-100',
-    icon: 'bg-primary text-white shadow-[0_16px_34px_rgba(67,163,255,0.22)]',
+    icon: 'bg-primary text-white shadow-[0_16px_34px_rgba(74,168,255,0.22)]',
     chip: 'bg-primary-50 text-primary-dark ring-primary-100',
   },
   emerald: {
@@ -334,7 +331,7 @@ const toneStyles = {
   },
   slate: {
     shell: 'from-slate-100 via-white to-primary-50 border-slate-200',
-    icon: 'bg-primary text-white shadow-[0_16px_34px_rgba(67,163,255,0.18)]',
+    icon: 'bg-primary text-white shadow-[0_16px_34px_rgba(74,168,255,0.18)]',
     chip: 'bg-slate-100 text-slate-700 ring-slate-200',
   },
 }
@@ -342,7 +339,7 @@ const toneStyles = {
 const ContextualTipsBanner: React.FC<ContextualTipsBannerProps> = ({ onOpenGuide }) => {
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, isPlatformAdmin } = useAuth()
+  const { user } = useAuth()
   const [isTipDismissed, setIsTipDismissed] = useState(false)
 
   const currentTip = useMemo(
@@ -368,25 +365,6 @@ const ContextualTipsBanner: React.FC<ContextualTipsBannerProps> = ({ onOpenGuide
     setIsTipDismissed(window.sessionStorage.getItem(dismissKey) === '1')
   }, [currentTip, dismissKey])
 
-  const { data: opsReadiness } = useQuery({
-    queryKey: ['ops-readiness-banner'],
-    queryFn: async () => {
-      const { data } = await api.get<OpsReadiness>('/ops/readiness')
-      return data
-    },
-    enabled:
-      isPlatformAdmin &&
-      location.pathname.startsWith('/dashboard'),
-    retry: false,
-    staleTime: 60_000,
-  })
-
-  const hasProductionIssues = Boolean(
-    location.pathname.startsWith('/dashboard') &&
-      opsReadiness &&
-      !opsReadiness.ready_for_production,
-  )
-
   const handleDismiss = () => {
     if (typeof window !== 'undefined' && dismissKey) {
       window.sessionStorage.setItem(dismissKey, '1')
@@ -405,72 +383,12 @@ const ContextualTipsBanner: React.FC<ContextualTipsBannerProps> = ({ onOpenGuide
     }
   }
 
-  if (!currentTip && !hasProductionIssues) {
+  if (!currentTip) {
     return null
   }
 
   return (
     <div className="mb-6 space-y-4">
-      {hasProductionIssues && opsReadiness && (
-        <section className="animate-fade-in-up overflow-hidden rounded-[28px] border border-red-100 bg-[linear-gradient(135deg,#fff1f2_0%,#ffffff_52%,#f8fafc_100%)] shadow-[0_18px_48px_rgba(239,68,68,0.08)]">
-          <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1.4fr)_320px] lg:p-6">
-            <div className="space-y-4">
-              <div className="inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-red-700 ring-1 ring-red-100">
-                <ShieldAlert size={13} />
-                Producao ainda bloqueada
-              </div>
-              <div>
-                <h2 className="text-xl font-display font-bold text-slate-950">
-                  O sistema ainda nao esta pronto para operar com dados reais
-                </h2>
-                <p className="mt-2 text-sm text-slate-600">
-                  A checagem automatica encontrou pontos de seguranca e operacao que precisam ser resolvidos antes do go-live.
-                </p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-red-100 bg-white p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Criticos</p>
-                  <strong className="mt-2 block text-2xl font-display font-bold text-red-600">
-                    {opsReadiness.summary.critical}
-                  </strong>
-                </div>
-                <div className="rounded-2xl border border-amber-100 bg-white p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Avisos</p>
-                  <strong className="mt-2 block text-2xl font-display font-bold text-amber-600">
-                    {opsReadiness.summary.warning}
-                  </strong>
-                </div>
-                <div className="rounded-2xl border border-emerald-100 bg-white p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Checks OK</p>
-                  <strong className="mt-2 block text-2xl font-display font-bold text-emerald-600">
-                    {opsReadiness.summary.ok}
-                  </strong>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-[24px] border border-white/70 bg-white/90 p-5 shadow-sm">
-              <p className="text-sm font-semibold text-slate-900">Proximos passos mais urgentes</p>
-              <div className="mt-4 space-y-3">
-                {opsReadiness.next_steps.slice(0, 3).map((step) => (
-                  <div key={step} className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
-                    <div className="mt-1 h-2.5 w-2.5 rounded-full bg-red-500" />
-                    <p className="text-sm text-slate-600">{step}</p>
-                  </div>
-                ))}
-              </div>
-              <button
-                onClick={() => navigate('/backups')}
-                className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-red-700 transition-colors hover:text-red-800"
-              >
-                Abrir painel de governanca
-                <ArrowRight size={15} />
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
-
       {currentTip && !isTipDismissed && (
         <section
           className={cn(
