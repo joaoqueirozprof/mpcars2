@@ -46,7 +46,6 @@ def test_can_sync_existing_backup_to_google_drive(client, admin_headers, monkeyp
     monkeypatch.setattr(settings, "BACKUP_DIRECTORY", str(backup_root))
     monkeypatch.setattr(settings, "GOOGLE_DRIVE_BACKUP_ENABLED", True)
     monkeypatch.setattr(ops, "is_google_drive_enabled", lambda db=None: True)
-    monkeypatch.setattr(ops, "get_google_drive_service_account_email", lambda: "service-account@test")
     monkeypatch.setattr(
         ops,
         "get_google_drive_overview",
