@@ -1,5 +1,6 @@
-import React, { useState, useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import {
   Plus,
   Edit2,
@@ -44,6 +45,7 @@ const Veiculos: React.FC = () => {
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [viewingPhoto, setViewingPhoto] = useState<{ isOpen: boolean; url?: string; placa?: string }>({ isOpen: false })
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
     placa: '',
     marca: '',
@@ -286,6 +288,15 @@ const Veiculos: React.FC = () => {
     }
     setIsModalOpen(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('quick') !== 'create') return
+
+    handleOpenModal()
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('quick')
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()

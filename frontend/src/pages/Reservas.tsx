@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Calendar, CheckCircle2, Edit, FilePlus2, Plus, Trash2, X } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
 import AppLayout from '@/components/layout/AppLayout'
@@ -90,6 +91,7 @@ const Reservas: React.FC = () => {
   const [editingReservation, setEditingReservation] = useState<Reserva | null>(null)
   const [convertReservation, setConvertReservation] = useState<Reserva | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
+  const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState<ReservationForm>(buildForm())
   const [convertForm, setConvertForm] = useState<ConvertReservationForm>(buildConvertForm())
 
@@ -238,6 +240,15 @@ const Reservas: React.FC = () => {
     }
     setIsModalOpen(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('quick') !== 'create') return
+
+    handleOpenModal()
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('quick')
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const handleOpenConvertModal = (reservation: Reserva) => {
     const veiculo = (veiculos || []).find((item) => String(item.id) === String(reservation.veiculo_id))

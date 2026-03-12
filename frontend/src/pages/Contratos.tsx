@@ -14,6 +14,8 @@ import {
   X,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import AppLayout from '@/components/layout/AppLayout'
 import { useConfig } from '@/contexts/ConfigContext'
@@ -217,6 +219,7 @@ const Contratos: React.FC = () => {
   const [editingContract, setEditingContract] = useState<Contrato | null>(null)
   const [closingContract, setClosingContract] = useState<Contrato | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
+  const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState<ContractForm>(buildForm())
   const [closeoutData, setCloseoutData] = useState<CloseoutForm>({
     km_atual_veiculo: 0,
@@ -370,6 +373,15 @@ const Contratos: React.FC = () => {
     setFormData(buildForm())
     setIsModalOpen(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('quick') !== 'create') return
+
+    openCreate()
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('quick')
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const openEdit = (contrato: Contrato) => {
     setEditingContract(contrato)

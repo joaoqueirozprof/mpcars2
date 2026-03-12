@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import {
   Plus,
   Edit,
@@ -34,6 +35,7 @@ const Clientes: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ClientType>('todos')
   const [searchQuery, setSearchQuery] = useState('')
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
     nome: '',
     email: '',
@@ -138,6 +140,15 @@ const Clientes: React.FC = () => {
     setFormErrors({})
     setIsModalOpen(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('quick') !== 'create') return
+
+    handleOpenModal()
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('quick')
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {}

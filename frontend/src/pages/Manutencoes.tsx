@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, CalendarClock, CheckCircle2, Edit, Gauge, Plus, Sparkles, Trash2, Wrench, X } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import api from '@/services/api'
 import toast from 'react-hot-toast'
@@ -227,6 +228,7 @@ const Manutencoes: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('todos')
   const [typeFilter, setTypeFilter] = useState<string>('todos')
   const [search, setSearch] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState<any>(defaultFormData)
 
   const { data, isLoading } = useQuery({
@@ -462,6 +464,15 @@ const Manutencoes: React.FC = () => {
     }
     setIsModalOpen(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('quick') !== 'create') return
+
+    handleOpenModal()
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('quick')
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()

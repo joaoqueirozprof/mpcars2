@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Store, Plus, Pencil, Trash2, Search, X, DollarSign, TrendingDown } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import AppLayout from '@/components/layout/AppLayout'
 import toast from 'react-hot-toast'
@@ -64,6 +65,7 @@ const DespesasLoja: React.FC = () => {
   // Modal
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
     categoria: 'Outros',
     descricao: '',
@@ -184,6 +186,15 @@ const DespesasLoja: React.FC = () => {
     resetForm()
     setShowModal(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('quick') !== 'create') return
+
+    openNew()
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('quick')
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const formatCurrency = (v: number) =>
     `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`

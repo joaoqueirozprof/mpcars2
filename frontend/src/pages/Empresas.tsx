@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Edit, Trash2, Building2, X } from 'lucide-react'
+import { useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import api from '@/services/api'
 import toast from 'react-hot-toast'
@@ -18,6 +20,7 @@ const Empresas: React.FC = () => {
   const [editingCompany, setEditingCompany] = useState<Empresa | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
   const [searchTerm, setSearchTerm] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
     nome: '',
     cnpj: '',
@@ -106,6 +109,15 @@ const Empresas: React.FC = () => {
     }
     setIsModalOpen(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('quick') !== 'create') return
+
+    handleOpenModal()
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('quick')
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()

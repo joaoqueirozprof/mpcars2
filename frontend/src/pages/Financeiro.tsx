@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus,
@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import api from '@/services/api'
 import AppLayout from '@/components/layout/AppLayout'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -71,6 +72,7 @@ const FinanceiroPage: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<'todos' | 'receita' | 'despesa'>('todos')
   const [statusFilter, setStatusFilter] = useState<'todos' | 'pendente' | 'pago' | 'cancelado'>('todos')
   const [searchTerm, setSearchTerm] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
     tipo: 'receita' as 'receita' | 'despesa',
     categoria: '',
@@ -212,6 +214,15 @@ const FinanceiroPage: React.FC = () => {
     }
     setIsModalOpen(true)
   }
+
+  useEffect(() => {
+    if (searchParams.get('quick') !== 'create') return
+
+    handleOpenModal()
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('quick')
+    setSearchParams(nextParams, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
