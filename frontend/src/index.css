@@ -455,6 +455,50 @@ h1, h2, h3, h4, h5, h6 {
   @apply inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700;
 }
 
+/* === Route Loader === */
+.route-loader-bar {
+  width: 46%;
+  animation: routeLoaderPulse 1.1s ease-in-out infinite alternate;
+}
+
+.route-loader-card {
+  @apply h-16 rounded-2xl bg-slate-100;
+  animation: routeLoaderFloat 1.2s ease-in-out infinite;
+}
+
+.route-loader-card-delay {
+  animation-delay: 0.16s;
+}
+
+.route-loader-card-delay-2 {
+  animation-delay: 0.3s;
+}
+
+/* === Reports === */
+.reports-hero {
+  @apply relative overflow-hidden rounded-[30px] border p-6 md:p-8;
+  border-color: rgba(15, 23, 42, 0.08);
+  background:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.36), transparent 30%),
+    linear-gradient(135deg, #0f172a 0%, #1d4ed8 44%, #0f766e 100%);
+  box-shadow: 0 24px 68px rgba(15, 23, 42, 0.18);
+}
+
+.report-panel {
+  @apply rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.06)];
+}
+
+.report-kpi-card {
+  @apply rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm;
+}
+
+.report-skeleton-card {
+  @apply h-52 rounded-[28px];
+  background: linear-gradient(120deg, #e2e8f0 18%, #f8fafc 40%, #e2e8f0 62%);
+  background-size: 220% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
 /* === Table === */
 .table-header {
   @apply bg-slate-50/80 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider;
@@ -777,12 +821,35 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+@keyframes routeLoaderPulse {
+  from {
+    width: 34%;
+    opacity: 0.84;
+  }
+  to {
+    width: 88%;
+    opacity: 1;
+  }
+}
+
+@keyframes routeLoaderFloat {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dashboard-hero-glow,
   .dashboard-action-card-pulse,
   .metric-progress-fill,
   .alert-stack > *,
-  .status-beacon-critical {
+  .status-beacon-critical,
+  .route-loader-bar,
+  .route-loader-card,
+  .report-skeleton-card {
     animation: none !important;
   }
 

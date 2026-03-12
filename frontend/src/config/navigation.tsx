@@ -281,6 +281,16 @@ export const quickActions: QuickAction[] = [
     keywords: ['caixa', 'receita', 'despesa', 'lancamento'],
   },
   {
+    id: 'quick-multa',
+    label: 'Nova multa',
+    description: 'Registrar uma infracao ou pendencia de transito.',
+    href: '/multas',
+    search: '?quick=create',
+    icon: PlusCircle,
+    slug: 'multas',
+    keywords: ['multa', 'infracao', 'transito', 'pendencia'],
+  },
+  {
     id: 'quick-empresa',
     label: 'Nova empresa',
     description: 'Cadastrar uma nova empresa ou filial.',
