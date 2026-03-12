@@ -11,7 +11,9 @@
    - `SEED_ON_STARTUP=false`
    - `RUN_LEGACY_COLUMN_MIGRATIONS=false`
    - `BACKUP_ENABLED=true`
-   - `BACKUP_DIRECTORY` apontando para um drive dedicado da VPS
+   - `BACKUP_DIRECTORY` apontando para o caminho interno do container (por exemplo `/backups`)
+   - `BACKUP_DIRECTORY_HOST` apontando para o caminho real da VPS (por exemplo `/docker/mpcars2/backups`)
+   - se o `BACKUP_STORAGE_LABEL` tiver espacos, deixe o valor entre aspas simples
 5. Suba a producao com:
 
 ```bash
