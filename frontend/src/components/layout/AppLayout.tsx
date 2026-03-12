@@ -5,6 +5,7 @@ import CommandPalette from './CommandPalette'
 import { SidebarProvider, useSidebar } from '@/contexts/SidebarContext'
 import { useAuth } from '@/contexts/AuthContext'
 import FirstUseGuide from '@/components/onboarding/FirstUseGuide'
+import ContextualTipsBanner from '@/components/onboarding/ContextualTipsBanner'
 
 interface AppLayoutProps {
   children: React.ReactNode
@@ -78,6 +79,7 @@ const LayoutContent: React.FC<AppLayoutProps> = ({ children }) => {
         <main className="relative flex-1 overflow-y-auto">
           <div className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.10),transparent_55%)]" />
           <div className="relative p-4 md:p-6 lg:p-8">
+            <ContextualTipsBanner onOpenGuide={() => setIsGuideOpen(true)} />
             {children}
           </div>
         </main>

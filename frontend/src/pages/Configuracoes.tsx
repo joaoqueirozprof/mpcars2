@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import AppLayout from '@/components/layout/AppLayout'
@@ -7,10 +8,13 @@ import toast from 'react-hot-toast'
 import { Settings, Building2, User, Sliders, ShieldCheck, Database, TriangleAlert } from 'lucide-react'
 import { OpsReadiness } from '@/types'
 
+type ConfigTab = 'empresa' | 'usuario' | 'sistema' | 'operacao'
+
 const Configuracoes: React.FC = () => {
   const { user, setUser } = useAuth()
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'empresa' | 'usuario' | 'sistema' | 'operacao'>('empresa')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [activeTab, setActiveTab] = useState<ConfigTab>('empresa')
   const [isSaving, setIsSaving] = useState(false)
 
   const { data: configs } = useQuery({
@@ -169,6 +173,32 @@ const Configuracoes: React.FC = () => {
     { id: 'operacao', label: 'Operacao', icon: ShieldCheck, adminOnly: true },
   ].filter((tab) => !tab.adminOnly || user?.perfil === 'admin')
 
+  useEffect(() => {
+    const requestedTab = searchParams.get('tab') as ConfigTab | null
+    const allowedTabs = new Set<ConfigTab>(
+      user?.perfil === 'admin'
+        ? ['empresa', 'usuario', 'sistema', 'operacao']
+        : ['empresa', 'usuario', 'sistema'],
+    )
+
+    if (requestedTab && allowedTabs.has(requestedTab)) {
+      setActiveTab(requestedTab)
+    }
+  }, [searchParams, user?.perfil])
+
+  const handleChangeTab = (tabId: ConfigTab) => {
+    setActiveTab(tabId)
+
+    const nextParams = new URLSearchParams(searchParams)
+    if (tabId === 'empresa') {
+      nextParams.delete('tab')
+    } else {
+      nextParams.set('tab', tabId)
+    }
+
+    setSearchParams(nextParams, { replace: true })
+  }
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -187,7 +217,7 @@ const Configuracoes: React.FC = () => {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => handleChangeTab(tab.id as ConfigTab)}
                 className={`px-6 py-3 font-medium transition-colors border-b-2 flex items-center gap-2 whitespace-nowrap ${
                   isActive ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-600 hover:text-slate-900'
                 }`}
