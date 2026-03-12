@@ -137,7 +137,7 @@ def test_admin_can_delete_regular_user(client, admin_headers, user_factory):
     assert all(item["id"] != user.id for item in list_response.json())
 
 
-def test_admin_cannot_delete_last_active_admin(client, platform_admin_headers):
+def test_admin_cannot_delete_own_account(client, platform_admin_headers):
     delete_response = client.delete("/api/v1/usuarios/1", headers=platform_admin_headers)
     assert delete_response.status_code == 400, delete_response.text
-    assert "ultimo administrador ativo" in delete_response.json()["detail"]
+    assert "propria conta" in delete_response.json()["detail"]
