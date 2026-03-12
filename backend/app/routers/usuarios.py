@@ -349,6 +349,44 @@ def toggle_usuario(
     return _serialize_user(user)
 
 
+@router.delete("/{usuario_id}", status_code=status.HTTP_204_NO_CONTENT)
+def excluir_usuario(
+    usuario_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_admin_user),
+):
+    user = db.query(User).filter(User.id == usuario_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario nao encontrado")
+
+    if user.id == admin.id:
+        raise HTTPException(status_code=400, detail="Nao e possivel excluir a propria conta")
+
+    if user.perfil == "admin" and user.ativo and _active_admin_count(db) <= 1:
+        raise HTTPException(status_code=400, detail="Nao e possivel excluir o ultimo administrador ativo")
+
+    deleted_id = user.id
+    deleted_name = user.nome
+    deleted_email = user.email
+    deleted_profile = user.perfil
+
+    db.delete(user)
+    db.commit()
+
+    log_activity(
+        db,
+        admin,
+        "EXCLUIR",
+        "usuarios",
+        f"Excluiu usuario: {deleted_name} ({deleted_email}) [{deleted_profile}]",
+        deleted_id,
+        request,
+    )
+
+    return None
+
+
 @router.post("/{usuario_id}/reset-senha")
 def reset_senha(
     usuario_id: int,

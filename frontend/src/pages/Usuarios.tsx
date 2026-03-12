@@ -11,6 +11,7 @@ import {
   Plus,
   Search,
   ShieldCheck,
+  Trash2,
   UserCheck,
   UserCog,
   UserX,
@@ -19,7 +20,8 @@ import {
 import toast from 'react-hot-toast'
 
 import AppLayout from '@/components/layout/AppLayout'
-import { cn } from '@/lib/utils'
+import ConfirmDialog from '@/components/shared/ConfirmDialog'
+import { cn, validateEmail } from '@/lib/utils'
 import api from '@/services/api'
 import { AccessCatalog } from '@/types'
 
@@ -50,11 +52,33 @@ interface ActivityLogType {
   timestamp: string | null
 }
 
+const getApiErrorMessage = (error: any, fallback: string) => {
+  const detail = error?.response?.data?.detail ?? error?.response?.data?.message
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (typeof item?.msg === 'string') return item.msg
+        if (typeof item?.message === 'string') return item.message
+        return null
+      })
+      .filter(Boolean)
+
+    return messages[0] || fallback
+  }
+
+  if (typeof detail === 'string') return detail
+  if (detail && typeof detail === 'object' && typeof detail.message === 'string') return detail.message
+  return fallback
+}
+
 const Usuarios: React.FC = () => {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<'usuarios' | 'logs'>('usuarios')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<UsuarioType | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<UsuarioType | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [generatedReset, setGeneratedReset] = useState<ResetLinkResponse | null>(null)
   const [resetTarget, setResetTarget] = useState<UsuarioType | null>(null)
@@ -106,10 +130,11 @@ const Usuarios: React.FC = () => {
     onSuccess: () => {
       toast.success('Usuario criado com sucesso!')
       queryClient.invalidateQueries({ queryKey: ['usuarios'] })
+      queryClient.invalidateQueries({ queryKey: ['usuarios-logs'] })
       closeModal()
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.detail || 'Nao foi possivel criar o usuario.')
+      toast.error(getApiErrorMessage(error, 'Nao foi possivel criar o usuario.'))
     },
   })
 
@@ -121,10 +146,11 @@ const Usuarios: React.FC = () => {
     onSuccess: () => {
       toast.success('Usuario atualizado com sucesso!')
       queryClient.invalidateQueries({ queryKey: ['usuarios'] })
+      queryClient.invalidateQueries({ queryKey: ['usuarios-logs'] })
       closeModal()
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.detail || 'Nao foi possivel atualizar o usuario.')
+      toast.error(getApiErrorMessage(error, 'Nao foi possivel atualizar o usuario.'))
     },
   })
 
@@ -136,9 +162,26 @@ const Usuarios: React.FC = () => {
     onSuccess: () => {
       toast.success('Status atualizado com sucesso!')
       queryClient.invalidateQueries({ queryKey: ['usuarios'] })
+      queryClient.invalidateQueries({ queryKey: ['usuarios-logs'] })
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.detail || 'Nao foi possivel alterar o status.')
+      toast.error(getApiErrorMessage(error, 'Nao foi possivel alterar o status.'))
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (user: UsuarioType) => {
+      await api.delete(`/usuarios/${user.id}`)
+      return user
+    },
+    onSuccess: (user) => {
+      toast.success(`Usuario ${user.nome} excluido com sucesso!`)
+      queryClient.invalidateQueries({ queryKey: ['usuarios'] })
+      queryClient.invalidateQueries({ queryKey: ['usuarios-logs'] })
+      setDeleteTarget(null)
+    },
+    onError: (error: any) => {
+      toast.error(getApiErrorMessage(error, 'Nao foi possivel excluir o usuario.'))
     },
   })
 
@@ -151,9 +194,10 @@ const Usuarios: React.FC = () => {
       setResetTarget(target)
       setGeneratedReset(data)
       toast.success('Link de redefinicao gerado com sucesso!')
+      queryClient.invalidateQueries({ queryKey: ['usuarios-logs'] })
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.detail || 'Nao foi possivel gerar o link de redefinicao.')
+      toast.error(getApiErrorMessage(error, 'Nao foi possivel gerar o link de redefinicao.'))
     },
   })
 
@@ -227,13 +271,27 @@ const Usuarios: React.FC = () => {
     }))
   }
 
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault()
+  const handleSubmit = (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault()
+
+    const nome = formData.nome.trim()
+    const email = formData.email.trim().toLowerCase()
+    const password = formData.password.trim()
+
+    if (!nome) {
+      toast.error('Informe o nome completo do usuario.')
+      return
+    }
+
+    if (!validateEmail(email)) {
+      toast.error('Informe um email valido.')
+      return
+    }
 
     const payload = {
-      nome: formData.nome,
-      email: formData.email,
-      password: formData.password,
+      nome,
+      email,
+      password,
       perfil: formData.perfil,
       permitted_pages: selectedProfile?.manual_selection ? formData.permitted_pages : selectedProfile?.fixed_pages || [],
     }
@@ -253,6 +311,16 @@ const Usuarios: React.FC = () => {
 
     if (!payload.password) {
       toast.error('Defina uma senha inicial para o usuario.')
+      return
+    }
+
+    if (payload.password.length < 8) {
+      toast.error('A senha inicial precisa ter pelo menos 8 caracteres.')
+      return
+    }
+
+    if (!/[A-Za-z]/.test(payload.password) || !/\d/.test(payload.password)) {
+      toast.error('A senha inicial precisa ter pelo menos uma letra e um numero.')
       return
     }
 
@@ -412,6 +480,13 @@ const Usuarios: React.FC = () => {
                             {user.ativo ? <UserX size={16} /> : <UserCheck size={16} />}
                             {user.ativo ? 'Desativar' : 'Ativar'}
                           </button>
+                          <button
+                            onClick={() => setDeleteTarget(user)}
+                            className="inline-flex items-center gap-2 rounded-2xl bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100"
+                          >
+                            <Trash2 size={16} />
+                            Excluir
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -530,7 +605,7 @@ const Usuarios: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="modal-scroll-body space-y-6">
+            <form id="usuario-form" onSubmit={handleSubmit} className="modal-scroll-body space-y-6">
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <label className="input-label">Nome</label>
@@ -562,8 +637,11 @@ const Usuarios: React.FC = () => {
                     value={formData.password}
                     onChange={(event) => setFormData((current) => ({ ...current, password: event.target.value }))}
                     className="input-field"
-                    placeholder="O usuario podera trocá-la depois"
+                    placeholder="Ex.: Gerente2026"
                   />
+                  <p className="mt-2 text-xs text-slate-500">
+                    Use pelo menos 8 caracteres, com letra e numero.
+                  </p>
                 </div>
               )}
 
@@ -641,8 +719,8 @@ const Usuarios: React.FC = () => {
                 Cancelar
               </button>
               <button
-                type="button"
-                onClick={handleSubmit}
+                type="submit"
+                form="usuario-form"
                 disabled={createMutation.isPending || updateMutation.isPending}
                 className="btn-primary inline-flex items-center gap-2 disabled:opacity-60"
               >
@@ -657,6 +735,30 @@ const Usuarios: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={Boolean(deleteTarget)}
+        title="Excluir usuario"
+        message={
+          deleteTarget
+            ? `Tem certeza que deseja excluir o usuario ${deleteTarget.nome}? Esta acao remove o acesso definitivamente.`
+            : ''
+        }
+        confirmText="Excluir"
+        cancelText="Cancelar"
+        isDanger
+        isLoading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deleteTarget) {
+            deleteMutation.mutate(deleteTarget)
+          }
+        }}
+        onCancel={() => {
+          if (!deleteMutation.isPending) {
+            setDeleteTarget(null)
+          }
+        }}
+      />
 
       {generatedReset && resetTarget && (
         <div

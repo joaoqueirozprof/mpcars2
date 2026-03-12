@@ -119,3 +119,25 @@ def test_admin_generates_recovery_link_and_user_completes_reset(
         json={"email": user.email, "password": "NovaSenha123"},
     )
     assert login_response.status_code == 200, login_response.text
+
+
+def test_admin_can_delete_regular_user(client, admin_headers, user_factory):
+    user = user_factory(
+        email="operador-excluir@example.org",
+        password="OperadorSeguro123",
+        perfil="operador",
+        permitted_pages=["dashboard", "clientes"],
+    )
+
+    delete_response = client.delete(f"/api/v1/usuarios/{user.id}", headers=admin_headers)
+    assert delete_response.status_code == 204, delete_response.text
+
+    list_response = client.get("/api/v1/usuarios/", headers=admin_headers)
+    assert list_response.status_code == 200, list_response.text
+    assert all(item["id"] != user.id for item in list_response.json())
+
+
+def test_admin_cannot_delete_last_active_admin(client, platform_admin_headers):
+    delete_response = client.delete("/api/v1/usuarios/1", headers=platform_admin_headers)
+    assert delete_response.status_code == 400, delete_response.text
+    assert "ultimo administrador ativo" in delete_response.json()["detail"]
