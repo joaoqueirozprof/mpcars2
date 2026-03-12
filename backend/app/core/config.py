@@ -2,10 +2,16 @@ import json
 from typing import List, Optional
 
 from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        enable_decoding=False,
+    )
+
     PROJECT_NAME: str = "MPCARS"
     API_V1_PREFIX: str = "/api/v1"
     ENVIRONMENT: str = "development"
@@ -91,10 +97,5 @@ class Settings(BaseSettings):
         if self.TESTING and self.TEST_DATABASE_URL:
             return self.TEST_DATABASE_URL
         return self.DATABASE_URL
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-
 
 settings = Settings()
