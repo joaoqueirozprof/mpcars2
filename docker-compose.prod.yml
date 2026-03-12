@@ -1,0 +1,57 @@
+services:
+  mpcars2-db:
+    env_file:
+      - .env.production
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+  mpcars2-api:
+    env_file:
+      - .env.production
+    ports:
+      - "${API_PUBLIC_PORT:-8002}:8000"
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
+      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-false}
+      RUN_LEGACY_COLUMN_MIGRATIONS: ${RUN_LEGACY_COLUMN_MIGRATIONS:-false}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_DIRECTORY: ${BACKUP_DIRECTORY:-/backups}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS}
+    volumes:
+      - uploads:/app/uploads
+      - pdfs:/app/pdfs
+      - ./backups:${BACKUP_DIRECTORY:-/backups}
+
+  mpcars2-celery:
+    env_file:
+      - .env.production
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_DIRECTORY: ${BACKUP_DIRECTORY:-/backups}
+    volumes:
+      - ./backups:${BACKUP_DIRECTORY:-/backups}
+
+  mpcars2-web:
+    ports:
+      - "${WEB_PUBLIC_PORT:-3002}:80"
+
+  mpcars2-proxy:
+    ports:
+      - "${PROXY_PUBLIC_PORT:-8091}:80"
+
+  mpcars2-pgadmin:
+    profiles: ["admin"]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}

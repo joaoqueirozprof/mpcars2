@@ -253,6 +253,36 @@ export interface DashboardStats {
   }>;
 }
 
+export interface OpsReadinessCheck {
+  id: string;
+  title: string;
+  status: 'ok' | 'warning' | 'critical';
+  severity: 'warning' | 'critical';
+  details: string;
+  action: string;
+}
+
+export interface OpsReadiness {
+  environment: string;
+  ready_for_production: boolean;
+  summary: {
+    ok: number;
+    warning: number;
+    critical: number;
+  };
+  checks: OpsReadinessCheck[];
+  backup: {
+    enabled: boolean;
+    directory: string;
+    retention_days: number;
+    scripts: {
+      backup: string;
+      restore: string;
+    };
+  };
+  next_steps: string[];
+}
+
 export interface PaginationParams {
   page: number;
   limit: number;

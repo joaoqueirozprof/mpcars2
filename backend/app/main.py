@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.core.config import settings
 from app.core.database import Base, engine
@@ -48,6 +49,7 @@ from app.routers import (
     ipva,
     manutencoes,
     multas,
+    ops,
     relatorios,
     reservas,
     seguros,
@@ -130,7 +132,13 @@ app = FastAPI(
     version="2.0.0",
     description="MPCARS - Sistema de Gerenciamento de Aluguel de Veiculos",
     lifespan=lifespan,
+    docs_url="/docs" if settings.ENABLE_API_DOCS else None,
+    redoc_url="/redoc" if settings.ENABLE_API_DOCS else None,
+    openapi_url="/openapi.json" if settings.ENABLE_API_DOCS else None,
 )
+
+if settings.TRUSTED_HOSTS:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.TRUSTED_HOSTS)
 
 app.add_middleware(
     CORSMiddleware,
@@ -139,6 +147,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+
+    if settings.SECURITY_HEADERS_ENABLED:
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+
+        forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        if forwarded_proto == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    return response
 
 
 @app.get("/health")
@@ -169,6 +194,7 @@ app.include_router(
     despesas_loja.router, prefix=settings.API_V1_PREFIX, tags=["Despesas Loja"]
 )
 app.include_router(usuarios.router, prefix=settings.API_V1_PREFIX, tags=["Usuarios"])
+app.include_router(ops.router, prefix=settings.API_V1_PREFIX, tags=["Operacao"])
 
 
 if __name__ == "__main__":

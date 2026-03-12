@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Bell, CheckCheck, ChevronDown, Command, Menu, Search, Sparkles, X } from 'lucide-react'
+import { Bell, CheckCheck, ChevronDown, Command, LifeBuoy, Menu, Search, Sparkles, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { findNavigationItem, inferAlertRoute } from '@/config/navigation'
@@ -12,6 +12,7 @@ import { DashboardStats } from '@/types'
 
 interface HeaderProps {
   onOpenCommandPalette: () => void
+  onOpenGuide: () => void
 }
 
 interface HeaderNotification {
@@ -23,7 +24,7 @@ interface HeaderNotification {
   scope: 'alerta' | 'agenda'
 }
 
-const Header: React.FC<HeaderProps> = ({ onOpenCommandPalette }) => {
+const Header: React.FC<HeaderProps> = ({ onOpenCommandPalette, onOpenGuide }) => {
   const { user, logout } = useAuth()
   const { toggleMobile, isMobileOpen } = useSidebar()
   const navigate = useNavigate()
@@ -173,6 +174,14 @@ const Header: React.FC<HeaderProps> = ({ onOpenCommandPalette }) => {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={onOpenGuide}
+            className="rounded-2xl border border-slate-200 bg-white p-2.5 text-slate-600 transition-colors hover:border-primary/30 hover:text-primary"
+            title="Guia rapido"
+          >
+            <LifeBuoy size={20} />
+          </button>
+
           <div ref={notifRef} className="relative">
             <button
               onClick={() => {
@@ -310,6 +319,15 @@ const Header: React.FC<HeaderProps> = ({ onOpenCommandPalette }) => {
                   className="w-full px-4 py-2.5 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
                 >
                   Abrir central de comandos
+                </button>
+                <button
+                  onClick={() => {
+                    setShowUserMenu(false)
+                    onOpenGuide()
+                  }}
+                  className="w-full px-4 py-2.5 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                >
+                  Guia rapido de uso
                 </button>
                 <hr className="my-1 border-slate-100" />
                 <button
