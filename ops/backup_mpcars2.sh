@@ -18,8 +18,6 @@ API_CONTAINER="${API_CONTAINER_NAME:-mpcars2-api}"
 POSTGRES_USER="${POSTGRES_USER:-mpcars2}"
 POSTGRES_DB="${POSTGRES_DB:-mpcars2}"
 CONTAINER_BACKUP_ROOT="${BACKUP_DIRECTORY_CONTAINER:-${BACKUP_DIRECTORY:-/backups}}"
-GOOGLE_DRIVE_BACKUP_ENABLED="${GOOGLE_DRIVE_BACKUP_ENABLED:-false}"
-GOOGLE_DRIVE_SYNC_ON_BACKUP="${GOOGLE_DRIVE_SYNC_ON_BACKUP:-true}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 TARGET_DIR="$BACKUP_ROOT/$TIMESTAMP"
 
@@ -43,7 +41,14 @@ postgres_user=$POSTGRES_USER
 backup_directory=$TARGET_DIR
 EOF
 
-if [[ "$GOOGLE_DRIVE_BACKUP_ENABLED" == "true" && "$GOOGLE_DRIVE_SYNC_ON_BACKUP" == "true" ]]; then
+SHOULD_SYNC_GOOGLE_DRIVE="$(
+  docker exec "$API_CONTAINER" sh -lc "PYTHONPATH=/app python - <<'PY'
+from app.services.google_drive_backup import is_google_drive_enabled, is_google_drive_sync_on_backup
+print('true' if is_google_drive_enabled() and is_google_drive_sync_on_backup() else 'false')
+PY" 2>/dev/null || echo false
+)"
+
+if [[ "$SHOULD_SYNC_GOOGLE_DRIVE" == "true" ]]; then
   echo "[3.5/4] Sincronizando com Google Drive..."
   docker exec "$API_CONTAINER" sh -lc "PYTHONPATH=/app python -m app.scripts.sync_backup_to_google_drive '$CONTAINER_BACKUP_ROOT/$TIMESTAMP'" || true
 fi

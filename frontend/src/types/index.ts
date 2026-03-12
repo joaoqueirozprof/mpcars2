@@ -306,6 +306,7 @@ export interface BackupHistoryItem {
     last_error?: string | null;
     root_folder_url?: string | null;
     folder_url?: string | null;
+    account_email?: string | null;
     service_account_email?: string | null;
     files: {
       database?: string | null;
@@ -328,9 +329,20 @@ export interface BackupOverview {
     enabled: boolean;
     configured: boolean;
     sync_on_backup: boolean;
+    auth_mode: 'none' | 'service_account' | 'oauth';
     folder_id?: string | null;
     folder_url?: string | null;
+    folder_name?: string | null;
+    account_email?: string | null;
     service_account_email?: string | null;
+    client_id_configured?: boolean;
+    pending_authorization?: {
+      pending: boolean;
+      user_code?: string | null;
+      verification_url?: string | null;
+      expires_at?: string | null;
+      interval_seconds?: number | null;
+    };
   };
   items: BackupHistoryItem[];
 }
@@ -346,6 +358,38 @@ export interface BackupRunResponse {
     root_folder_url?: string;
   } | null;
   latest_backup?: BackupHistoryItem | null;
+}
+
+export interface GoogleDriveOAuthStartResponse {
+  status: string;
+  message: string;
+  user_code: string;
+  verification_url: string;
+  expires_at: string;
+  interval_seconds: number;
+  folder_name: string;
+}
+
+export interface GoogleDriveOAuthPollResponse {
+  status: 'authorization_pending' | 'connected';
+  message: string;
+  pending_authorization?: {
+    pending: boolean;
+    user_code?: string | null;
+    verification_url?: string | null;
+    expires_at?: string | null;
+    interval_seconds?: number | null;
+  };
+  account_email?: string | null;
+  folder_id?: string | null;
+  folder_url?: string | null;
+  connected_at?: string | null;
+  auth_mode?: 'oauth';
+}
+
+export interface GoogleDriveOAuthDisconnectResponse {
+  status: string;
+  message: string;
 }
 
 export interface VersionStatus {

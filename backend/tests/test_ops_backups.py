@@ -45,8 +45,25 @@ def test_can_sync_existing_backup_to_google_drive(client, admin_headers, monkeyp
 
     monkeypatch.setattr(settings, "BACKUP_DIRECTORY", str(backup_root))
     monkeypatch.setattr(settings, "GOOGLE_DRIVE_BACKUP_ENABLED", True)
+    monkeypatch.setattr(ops, "is_google_drive_enabled", lambda db=None: True)
     monkeypatch.setattr(ops, "get_google_drive_service_account_email", lambda: "service-account@test")
-    monkeypatch.setattr(ops, "get_google_drive_folder_url", lambda folder_id=None: "https://drive.google.com/drive/folders/root-folder")
+    monkeypatch.setattr(
+        ops,
+        "get_google_drive_overview",
+        lambda db=None: {
+            "enabled": True,
+            "configured": True,
+            "sync_on_backup": True,
+            "auth_mode": "service_account",
+            "folder_id": "root-folder",
+            "folder_url": "https://drive.google.com/drive/folders/root-folder",
+            "folder_name": "Backups",
+            "account_email": "service-account@test",
+            "service_account_email": "service-account@test",
+            "client_id_configured": False,
+            "pending_authorization": {"pending": False},
+        },
+    )
     monkeypatch.setattr(
         ops,
         "sync_backup_directory",
@@ -56,6 +73,7 @@ def test_can_sync_existing_backup_to_google_drive(client, admin_headers, monkeyp
             "root_folder_url": "https://drive.google.com/drive/folders/root-folder",
             "backup_folder_id": "backup-folder",
             "backup_folder_url": "https://drive.google.com/drive/folders/backup-folder",
+            "account_email": "service-account@test",
             "service_account_email": "service-account@test",
             "files": {
                 "database.sql": {"url": "https://drive.google.com/file/d/database/view"},
@@ -77,3 +95,64 @@ def test_can_sync_existing_backup_to_google_drive(client, admin_headers, monkeyp
 
     manifest = (backup_dir / "manifest.txt").read_text(encoding="utf-8")
     assert "google_drive_backup_folder_url=https://drive.google.com/drive/folders/backup-folder" in manifest
+
+
+def test_can_start_google_drive_oauth_device_flow(client, admin_headers, monkeypatch):
+    from app.routers import ops
+
+    monkeypatch.setattr(
+        ops,
+        "start_google_drive_device_authorization",
+        lambda client_id, client_secret, folder_name=None, db=None: {
+            "status": "authorization_pending",
+            "message": "Abra o Google e informe o codigo.",
+            "user_code": "ABCD-EFGH",
+            "verification_url": "https://www.google.com/device",
+            "expires_at": "2026-03-12T19:30:00+00:00",
+            "interval_seconds": 5,
+            "folder_name": folder_name or "MPCARS Backups",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/ops/google-drive/oauth/device/start",
+        headers=admin_headers,
+        json={
+            "client_id": "client-id.apps.googleusercontent.com",
+            "client_secret": "client-secret",
+            "folder_name": "Backups MPCARS",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "authorization_pending"
+    assert body["user_code"] == "ABCD-EFGH"
+
+
+def test_can_poll_google_drive_oauth_device_flow(client, admin_headers, monkeypatch):
+    from app.routers import ops
+
+    monkeypatch.setattr(
+        ops,
+        "poll_google_drive_device_authorization",
+        lambda db=None: {
+            "status": "connected",
+            "message": "Google Drive conectado com sucesso.",
+            "account_email": "cliente@gmail.com",
+            "folder_id": "root-folder",
+            "folder_url": "https://drive.google.com/drive/folders/root-folder",
+            "connected_at": "2026-03-12T19:35:00+00:00",
+            "auth_mode": "oauth",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/ops/google-drive/oauth/device/poll",
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "connected"
+    assert body["account_email"] == "cliente@gmail.com"

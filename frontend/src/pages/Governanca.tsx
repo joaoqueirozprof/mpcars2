@@ -1,8 +1,9 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   CheckCircle2,
+  Copy,
   Clock3,
   Database,
   Download,
@@ -10,10 +11,12 @@ import {
   FolderArchive,
   GitCommitHorizontal,
   HardDriveDownload,
+  KeyRound,
   Loader2,
   RefreshCw,
   RotateCw,
   ShieldCheck,
+  Unplug,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -21,7 +24,16 @@ import AppLayout from '@/components/layout/AppLayout'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 import api from '@/services/api'
-import { BackupHistoryItem, BackupOverview, BackupRunResponse, OpsReadiness, VersionStatus } from '@/types'
+import {
+  BackupHistoryItem,
+  BackupOverview,
+  BackupRunResponse,
+  GoogleDriveOAuthDisconnectResponse,
+  GoogleDriveOAuthPollResponse,
+  GoogleDriveOAuthStartResponse,
+  OpsReadiness,
+  VersionStatus,
+} from '@/types'
 
 const getApiErrorMessage = (error: any, fallback: string) => {
   const detail = error?.response?.data?.detail ?? error?.response?.data?.message
@@ -75,6 +87,9 @@ const getDriveStatusTone = (status?: string) => {
 const Governanca: React.FC = () => {
   const queryClient = useQueryClient()
   const { isPlatformAdmin } = useAuth()
+  const [oauthClientId, setOauthClientId] = useState('')
+  const [oauthClientSecret, setOauthClientSecret] = useState('')
+  const [oauthFolderName, setOauthFolderName] = useState('MPCARS Backups')
 
   const backupsQuery = useQuery({
     queryKey: ['ops-backups'],
@@ -141,6 +156,56 @@ const Governanca: React.FC = () => {
     },
   })
 
+  const startOAuthMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<GoogleDriveOAuthStartResponse>('/ops/google-drive/oauth/device/start', {
+        client_id: oauthClientId,
+        client_secret: oauthClientSecret,
+        folder_name: oauthFolderName,
+      })
+      return data
+    },
+    onSuccess: (data) => {
+      toast.success(data.message || 'Codigo de conexao gerado com sucesso.')
+      queryClient.invalidateQueries({ queryKey: ['ops-backups'] })
+    },
+    onError: (error: any) => {
+      toast.error(getApiErrorMessage(error, 'Nao foi possivel gerar o codigo de conexao do Google Drive.'))
+    },
+  })
+
+  const pollOAuthMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<GoogleDriveOAuthPollResponse>('/ops/google-drive/oauth/device/poll')
+      return data
+    },
+    onSuccess: (data) => {
+      if (data.status === 'connected') {
+        toast.success(data.message || 'Google Drive conectado com sucesso.')
+      } else {
+        toast(data.message || 'Ainda aguardando a autorizacao no Google.')
+      }
+      queryClient.invalidateQueries({ queryKey: ['ops-backups'] })
+    },
+    onError: (error: any) => {
+      toast.error(getApiErrorMessage(error, 'Nao foi possivel concluir a conexao do Google Drive.'))
+    },
+  })
+
+  const disconnectOAuthMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<GoogleDriveOAuthDisconnectResponse>('/ops/google-drive/oauth/disconnect')
+      return data
+    },
+    onSuccess: (data) => {
+      toast.success(data.message || 'Conexao do Google Drive removida.')
+      queryClient.invalidateQueries({ queryKey: ['ops-backups'] })
+    },
+    onError: (error: any) => {
+      toast.error(getApiErrorMessage(error, 'Nao foi possivel remover a conexao do Google Drive.'))
+    },
+  })
+
   const handleRefresh = async () => {
     const result = await backupsQuery.refetch()
     if (result.error) {
@@ -169,6 +234,18 @@ const Governanca: React.FC = () => {
   const loadingBackups = backupsQuery.isLoading
   const refreshingBackups = backupsQuery.isFetching && !backupsQuery.isLoading
   const latestBackup = backups?.items?.[0]
+  const pendingOAuth = backups?.google_drive?.pending_authorization
+  const googleDriveAccount = backups?.google_drive?.account_email || backups?.google_drive?.service_account_email
+
+  const copyUserCode = async () => {
+    if (!pendingOAuth?.user_code) return
+    try {
+      await navigator.clipboard.writeText(pendingOAuth.user_code)
+      toast.success('Codigo copiado.')
+    } catch {
+      toast.error('Nao foi possivel copiar o codigo agora.')
+    }
+  }
 
   return (
     <AppLayout>
@@ -184,7 +261,7 @@ const Governanca: React.FC = () => {
                 Backups, versoes e seguranca operacional
               </h1>
               <p className="mt-3 max-w-3xl text-sm text-slate-600">
-                Aqui voce acompanha onde os backups estao salvos, baixa o pacote completo quando precisar e monitora a sincronizacao automatica com o Google Drive do cliente. Checklist de producao e versoes continuam visiveis apenas para o admin principal admin@mpcars.com.
+                Aqui voce acompanha onde os backups estao salvos, baixa o pacote completo quando precisar e monitora a sincronizacao automatica com o Google Drive do cliente. Para contas Gmail comuns, use o modo OAuth logo abaixo. Checklist de producao e versoes continuam visiveis apenas para o admin principal admin@mpcars.com.
               </p>
 
               <div className="mt-5 flex flex-wrap gap-3">
@@ -232,17 +309,179 @@ const Governanca: React.FC = () => {
                 <div className="rounded-[24px] border border-white bg-white/90 p-5 shadow-sm">
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Google Drive</p>
                   <p className="mt-3 text-lg font-display font-bold text-slate-950">
-                    {backups?.google_drive?.configured ? 'Conectado e pronto' : 'Aguardando configuracao'}
+                    {backups?.google_drive?.configured
+                      ? backups.google_drive.auth_mode === 'oauth'
+                        ? 'Conta pessoal conectada'
+                        : 'Conectado e pronto'
+                      : pendingOAuth?.pending
+                        ? 'Aguardando autorizacao'
+                        : 'Aguardando configuracao'}
                   </p>
                   <p className="mt-2 text-sm text-slate-500">
                     {backups?.google_drive?.configured
                       ? `Sync automatico ${backups.google_drive.sync_on_backup ? 'ativo' : 'desativado'}`
-                      : 'Compartilhe a pasta do cliente com a conta de servico para ativar o sync automatico.'}
+                      : pendingOAuth?.pending
+                        ? 'Abra o Google, informe o codigo e depois clique em concluir conexao.'
+                        : 'Para Gmail comum, conecte com Client ID, Client Secret e o codigo do Google.'}
                   </p>
                   <p className="mt-3 break-all text-xs text-slate-500">
-                    {backups?.google_drive?.service_account_email || 'Conta de servico ainda nao configurada.'}
+                    {googleDriveAccount || 'Nenhuma conta conectada ainda.'}
                   </p>
                 </div>
+              </div>
+
+              <div className="mt-4 rounded-[24px] border border-sky-100 bg-white/90 p-5 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-700 ring-1 ring-sky-100">
+                      <KeyRound size={13} />
+                      Google pessoal
+                    </div>
+                    <h3 className="mt-3 text-lg font-display font-bold text-slate-950">
+                      Conectar Google Drive com OAuth
+                    </h3>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Esse fluxo funciona melhor para Gmail comum. Voce informa o Client ID e Client Secret do Google, gera um codigo, autoriza a conta e o sistema passa a salvar em uma pasta propria do MPCARS no seu Drive.
+                    </p>
+                  </div>
+
+                  {backups?.google_drive?.configured && backups.google_drive.auth_mode === 'oauth' && (
+                    <button
+                      onClick={() => disconnectOAuthMutation.mutate()}
+                      disabled={disconnectOAuthMutation.isPending}
+                      className="btn-secondary inline-flex items-center gap-2"
+                    >
+                      {disconnectOAuthMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Unplug size={16} />}
+                      Remover conexao
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                  <label className="space-y-2">
+                    <span className="text-sm font-medium text-slate-700">Client ID</span>
+                    <input
+                      value={oauthClientId}
+                      onChange={(event) => setOauthClientId(event.target.value)}
+                      placeholder="Cole aqui o Client ID do Google OAuth"
+                      className="input w-full"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-medium text-slate-700">Client Secret</span>
+                    <input
+                      value={oauthClientSecret}
+                      onChange={(event) => setOauthClientSecret(event.target.value)}
+                      placeholder="Cole aqui o Client Secret"
+                      className="input w-full"
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                  <label className="space-y-2">
+                    <span className="text-sm font-medium text-slate-700">Nome da pasta no Drive</span>
+                    <input
+                      value={oauthFolderName}
+                      onChange={(event) => setOauthFolderName(event.target.value)}
+                      placeholder="MPCARS Backups"
+                      className="input w-full"
+                    />
+                  </label>
+                  <button
+                    onClick={() => startOAuthMutation.mutate()}
+                    disabled={startOAuthMutation.isPending}
+                    className="btn-primary inline-flex items-center justify-center gap-2"
+                  >
+                    {startOAuthMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
+                    Gerar codigo
+                  </button>
+                </div>
+
+                {pendingOAuth?.pending && (
+                  <div className="mt-5 rounded-[22px] border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
+                      Autorizacao pendente
+                    </p>
+                    <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                      <div>
+                        <p className="text-sm text-slate-700">
+                          1. Abra o Google no botao abaixo. 2. Digite este codigo. 3. Volte e clique em <strong>Concluir conexao</strong>.
+                        </p>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <div className="rounded-2xl border border-amber-200 bg-white px-4 py-3 text-lg font-bold tracking-[0.18em] text-slate-950">
+                            {pendingOAuth.user_code}
+                          </div>
+                          <button
+                            onClick={copyUserCode}
+                            className="btn-secondary inline-flex items-center gap-2"
+                          >
+                            <Copy size={14} />
+                            Copiar codigo
+                          </button>
+                        </div>
+                        <p className="mt-3 text-xs text-slate-500">
+                          Validade ate {pendingOAuth.expires_at || 'alguns minutos'}.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        {pendingOAuth.verification_url && (
+                          <a
+                            href={pendingOAuth.verification_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn-secondary inline-flex items-center gap-2"
+                          >
+                            <ExternalLink size={15} />
+                            Abrir Google
+                          </a>
+                        )}
+                        <button
+                          onClick={() => pollOAuthMutation.mutate()}
+                          disabled={pollOAuthMutation.isPending}
+                          className="btn-primary inline-flex items-center gap-2"
+                        >
+                          {pollOAuthMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                          Concluir conexao
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {backups?.google_drive?.configured && backups.google_drive.auth_mode === 'oauth' && (
+                  <div className="mt-5 rounded-[22px] border border-emerald-200 bg-emerald-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                      Conta conectada
+                    </p>
+                    <p className="mt-2 text-sm text-slate-700">
+                      {backups.google_drive.account_email || 'Conta Google conectada'} salva na pasta{' '}
+                      <strong>{backups.google_drive.folder_name || 'MPCARS Backups'}</strong>.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {backups.google_drive.folder_url && (
+                        <a
+                          href={backups.google_drive.folder_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn-secondary inline-flex items-center gap-2"
+                        >
+                          <ExternalLink size={14} />
+                          Abrir pasta conectada
+                        </a>
+                      )}
+                      <button
+                        onClick={() => pollOAuthMutation.mutate()}
+                        disabled={pollOAuthMutation.isPending}
+                        className="btn-secondary inline-flex items-center gap-2"
+                      >
+                        {pollOAuthMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                        Validar conexao
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -416,12 +655,12 @@ const Governanca: React.FC = () => {
                           )}
                         </div>
 
-                        {(item.google_drive?.last_error || item.google_drive?.service_account_email || item.google_drive?.synced_at) && (
+                        {(item.google_drive?.last_error || item.google_drive?.account_email || item.google_drive?.service_account_email || item.google_drive?.synced_at) && (
                           <div className="mt-4 grid gap-3 md:grid-cols-2">
                             <div className="rounded-[20px] border border-white bg-white p-4 shadow-sm">
-                              <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Conta do conector</p>
+                              <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Conta conectada</p>
                               <p className="mt-2 break-all text-sm font-medium text-slate-900">
-                                {item.google_drive?.service_account_email || backups?.google_drive?.service_account_email || 'Nao configurada'}
+                                {item.google_drive?.account_email || item.google_drive?.service_account_email || backups?.google_drive?.account_email || backups?.google_drive?.service_account_email || 'Nao configurada'}
                               </p>
                             </div>
                             <div className="rounded-[20px] border border-white bg-white p-4 shadow-sm">

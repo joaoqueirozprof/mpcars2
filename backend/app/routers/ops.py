@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
@@ -20,14 +21,26 @@ from app.core.security import verify_password
 from app.models.user import User
 from app.services.google_drive_backup import (
     GoogleDriveBackupError,
+    disconnect_google_drive_oauth,
+    get_google_drive_account_email,
     get_google_drive_folder_url,
-    get_google_drive_service_account_email,
+    get_google_drive_overview,
     is_google_drive_configured,
+    is_google_drive_enabled,
+    is_google_drive_sync_on_backup,
+    poll_google_drive_device_authorization,
+    start_google_drive_device_authorization,
     sync_backup_directory,
 )
 
 
 router = APIRouter(prefix="/ops", tags=["Operacao"])
+
+
+class GoogleDriveOAuthStartRequest(BaseModel):
+    client_id: str
+    client_secret: str
+    folder_name: Optional[str] = None
 
 DEFAULT_SECRET_MARKERS = {
     "change-in-production",
@@ -198,23 +211,17 @@ def _backup_downloads(backup_id: str) -> Dict[str, str]:
     }
 
 
-def _google_drive_overview() -> Dict[str, Any]:
-    return {
-        "enabled": settings.GOOGLE_DRIVE_BACKUP_ENABLED,
-        "configured": is_google_drive_configured(),
-        "sync_on_backup": settings.GOOGLE_DRIVE_SYNC_ON_BACKUP,
-        "folder_id": settings.GOOGLE_DRIVE_FOLDER_ID,
-        "folder_url": get_google_drive_folder_url(),
-        "service_account_email": get_google_drive_service_account_email(),
-    }
+def _google_drive_overview(db: Session) -> Dict[str, Any]:
+    return get_google_drive_overview(db)
 
 
 def _sync_backup_to_google_drive(
     backup_dir: Path,
     *,
+    db: Optional[Session] = None,
     raise_on_error: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    if not settings.GOOGLE_DRIVE_BACKUP_ENABLED:
+    if not is_google_drive_enabled(db):
         return None
 
     attempt_at = datetime.now(timezone.utc).isoformat()
@@ -227,7 +234,7 @@ def _sync_backup_to_google_drive(
     )
 
     try:
-        sync_result = sync_backup_directory(backup_dir)
+        sync_result = sync_backup_directory(backup_dir, db=db)
     except GoogleDriveBackupError as exc:
         _update_manifest(
             backup_dir,
@@ -255,6 +262,7 @@ def _sync_backup_to_google_drive(
             "google_drive_root_folder_url": sync_result.get("root_folder_url"),
             "google_drive_backup_folder_id": sync_result.get("backup_folder_id"),
             "google_drive_backup_folder_url": sync_result.get("backup_folder_url"),
+            "google_drive_account_email": sync_result.get("account_email"),
             "google_drive_service_account_email": sync_result.get("service_account_email"),
             "google_drive_database_file_url": sync_result.get("files", {}).get("database.sql", {}).get("url"),
             "google_drive_assets_file_url": sync_result.get("files", {}).get("assets.tar.gz", {}).get("url"),
@@ -265,11 +273,12 @@ def _sync_backup_to_google_drive(
     return sync_result
 
 
-def _list_backups(limit: int = 10) -> List[Dict[str, Any]]:
+def _list_backups(limit: int = 10, db: Optional[Session] = None) -> List[Dict[str, Any]]:
     backup_root = _backup_root()
     if not backup_root.exists() or not backup_root.is_dir():
         return []
 
+    google_drive_overview = get_google_drive_overview(db)
     backups: List[Dict[str, Any]] = []
     for directory in sorted(
         [item for item in backup_root.iterdir() if item.is_dir()],
@@ -296,19 +305,22 @@ def _list_backups(limit: int = 10) -> List[Dict[str, Any]]:
                 "manifest": manifest,
                 "downloads": _backup_downloads(directory.name),
                 "google_drive": {
-                    "enabled": settings.GOOGLE_DRIVE_BACKUP_ENABLED,
+                    "enabled": google_drive_overview["enabled"],
                     "status": manifest.get(
                         "google_drive_status",
-                        "pending" if settings.GOOGLE_DRIVE_BACKUP_ENABLED else "disabled",
+                        "pending" if google_drive_overview["enabled"] else "disabled",
                     ),
                     "last_attempt_at": manifest.get("google_drive_last_attempt_at"),
                     "synced_at": manifest.get("google_drive_synced_at"),
                     "last_error": manifest.get("google_drive_last_error"),
                     "root_folder_url": manifest.get("google_drive_root_folder_url")
+                    or google_drive_overview.get("folder_url")
                     or get_google_drive_folder_url(),
                     "folder_url": manifest.get("google_drive_backup_folder_url"),
-                    "service_account_email": manifest.get("google_drive_service_account_email")
-                    or get_google_drive_service_account_email(),
+                    "account_email": manifest.get("google_drive_account_email")
+                    or manifest.get("google_drive_service_account_email")
+                    or get_google_drive_account_email(db),
+                    "service_account_email": manifest.get("google_drive_service_account_email"),
                     "files": {
                         "database": manifest.get("google_drive_database_file_url"),
                         "assets": manifest.get("google_drive_assets_file_url"),
@@ -659,6 +671,7 @@ def get_readiness(
 
 @router.get("/backups")
 def list_backups(
+    db: Session = Depends(get_db),
     _: User = Depends(get_ops_user),
 ) -> Dict[str, Any]:
     script_path = _resolve_existing_path(settings.BACKUP_SCRIPT_PATH, "ops/backup_mpcars2.sh")
@@ -673,13 +686,14 @@ def list_backups(
         "restore_script_exists": restore_path.exists(),
         "backup_script": str(script_path),
         "restore_script": str(restore_path),
-        "google_drive": _google_drive_overview(),
-        "items": _list_backups(),
+        "google_drive": _google_drive_overview(db),
+        "items": _list_backups(db=db),
     }
 
 
 @router.post("/backups/run")
 def run_backup_now(
+    db: Session = Depends(get_db),
     _: User = Depends(get_ops_user),
 ) -> Dict[str, Any]:
     if not settings.BACKUP_ENABLED:
@@ -704,14 +718,14 @@ def run_backup_now(
         native_result = _run_native_backup()
         output = native_result["output"]
 
-    items = _list_backups(limit=1)
+    items = _list_backups(limit=1, db=db)
     if (
         items
-        and settings.GOOGLE_DRIVE_BACKUP_ENABLED
-        and settings.GOOGLE_DRIVE_SYNC_ON_BACKUP
+        and is_google_drive_enabled(db)
+        and is_google_drive_sync_on_backup(db)
         and items[0].get("google_drive", {}).get("status") != "synced"
     ):
-        sync_result = _sync_backup_to_google_drive(_resolve_backup_directory(items[0]["id"]))
+        sync_result = _sync_backup_to_google_drive(_resolve_backup_directory(items[0]["id"]), db=db)
         if sync_result:
             sync_message = (
                 f"Google Drive sincronizado: {sync_result.get('backup_folder_url')}"
@@ -719,7 +733,7 @@ def run_backup_now(
                 else f"Falha ao sincronizar no Google Drive: {sync_result.get('message')}"
             )
             output = "\n".join([part for part in [output, sync_message] if part])
-            items = _list_backups(limit=1)
+            items = _list_backups(limit=1, db=db)
 
     return {
         "status": "backup_executado",
@@ -735,6 +749,45 @@ def _cleanup_file(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+@router.post("/google-drive/oauth/device/start")
+def start_google_drive_oauth_device_flow(
+    payload: GoogleDriveOAuthStartRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_ops_user),
+) -> Dict[str, Any]:
+    try:
+        return start_google_drive_device_authorization(
+            payload.client_id,
+            payload.client_secret,
+            folder_name=payload.folder_name,
+            db=db,
+        )
+    except GoogleDriveBackupError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/google-drive/oauth/device/poll")
+def poll_google_drive_oauth_device_flow(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_ops_user),
+) -> Dict[str, Any]:
+    try:
+        return poll_google_drive_device_authorization(db=db)
+    except GoogleDriveBackupError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/google-drive/oauth/disconnect")
+def disconnect_google_drive_oauth_flow(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_ops_user),
+) -> Dict[str, Any]:
+    try:
+        return disconnect_google_drive_oauth(db=db)
+    except GoogleDriveBackupError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/backups/{backup_id}/download/{artifact}")
@@ -789,17 +842,18 @@ def download_backup_artifact(
 @router.post("/backups/{backup_id}/sync-google-drive")
 def sync_backup_now(
     backup_id: str,
+    db: Session = Depends(get_db),
     _: User = Depends(get_ops_user),
 ) -> Dict[str, Any]:
-    if not settings.GOOGLE_DRIVE_BACKUP_ENABLED:
+    if not is_google_drive_enabled(db):
         raise HTTPException(
             status_code=400,
             detail="A sincronizacao com Google Drive esta desabilitada neste ambiente.",
         )
 
     backup_dir = _resolve_backup_directory(backup_id)
-    sync_result = _sync_backup_to_google_drive(backup_dir, raise_on_error=True)
-    latest = next((item for item in _list_backups(limit=30) if item["id"] == backup_id), None)
+    sync_result = _sync_backup_to_google_drive(backup_dir, db=db, raise_on_error=True)
+    latest = next((item for item in _list_backups(limit=30, db=db) if item["id"] == backup_id), None)
 
     return {
         "status": "sincronizado",
