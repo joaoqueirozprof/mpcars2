@@ -17,6 +17,7 @@ os.environ["RUN_LEGACY_COLUMN_MIGRATIONS"] = "false"
 os.environ["ALLOW_PUBLIC_REGISTRATION"] = "false"
 os.environ["SECRET_KEY"] = "test-secret-key-with-at-least-32-chars"
 os.environ["TEST_DATABASE_URL"] = "sqlite://"
+os.environ["TRUSTED_HOSTS"] = "testserver,localhost,127.0.0.1"
 
 from app.core.database import Base, SessionLocal, engine  # noqa: E402
 from app.core.security import get_password_hash  # noqa: E402
