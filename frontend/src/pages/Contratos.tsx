@@ -52,8 +52,15 @@ type CloseoutForm = {
   valor_franquia_seguro: number
   taxa_administrativa: number
   desconto: number
+  status_pagamento: PaymentStatus
+  forma_pagamento: string
+  data_vencimento_pagamento: string
+  data_pagamento: string
+  valor_recebido: number
   observacoes: string
 }
+
+type PaymentStatus = 'pendente' | 'pago' | 'cancelado'
 
 type CloseoutChecklistKey =
   | 'macaco'
@@ -79,6 +86,12 @@ type CloseoutFeeFieldKey =
   | 'taxa_administrativa'
 
 const fuelOptions = ['1/4', '1/2', '3/4', 'Cheio']
+const paymentStatusOptions: Array<{ value: PaymentStatus; label: string }> = [
+  { value: 'pago', label: 'Pago agora' },
+  { value: 'pendente', label: 'Ficou pendente' },
+  { value: 'cancelado', label: 'Cancelado' },
+]
+const paymentMethodOptions = ['Pix', 'Cartao', 'Dinheiro', 'Transferencia', 'Boleto', 'Faturado']
 
 const closeoutChecklistFields: Array<{ key: CloseoutChecklistKey; label: string; hint: string }> = [
   { key: 'macaco', label: 'Macaco', hint: 'Equipamento presente no carro' },
@@ -128,6 +141,20 @@ const statusClass = (status: string) =>
     cancelado: 'badge-danger',
     atraso: 'badge-warning',
   }[status] || 'badge-info')
+
+const paymentStatusLabel = (status?: string) =>
+  ({
+    pago: 'Pago',
+    pendente: 'Pendente',
+    cancelado: 'Cancelado',
+  }[status || 'pendente'] || 'Pendente')
+
+const paymentStatusClass = (status?: string) =>
+  ({
+    pago: 'badge-success',
+    pendente: 'badge-warning',
+    cancelado: 'badge-danger',
+  }[status || 'pendente'] || 'badge-warning')
 
 const toDateInput = (value?: string) => (value ? value.slice(0, 10) : '')
 
@@ -204,6 +231,11 @@ const Contratos: React.FC = () => {
     valor_franquia_seguro: 0,
     taxa_administrativa: 0,
     desconto: 0,
+    status_pagamento: 'pago',
+    forma_pagamento: '',
+    data_vencimento_pagamento: '',
+    data_pagamento: new Date().toISOString().split('T')[0],
+    valor_recebido: 0,
     observacoes: '',
   })
 
@@ -374,6 +406,11 @@ const Contratos: React.FC = () => {
       valor_franquia_seguro: contrato.valor_franquia_seguro || 0,
       taxa_administrativa: contrato.taxa_administrativa || 0,
       desconto: contrato.desconto || 0,
+      status_pagamento: contrato.status_pagamento || 'pago',
+      forma_pagamento: contrato.forma_pagamento || '',
+      data_vencimento_pagamento: contrato.data_vencimento_pagamento ? contrato.data_vencimento_pagamento.slice(0, 10) : new Date().toISOString().split('T')[0],
+      data_pagamento: contrato.data_pagamento ? contrato.data_pagamento.slice(0, 10) : new Date().toISOString().split('T')[0],
+      valor_recebido: contrato.valor_recebido || contrato.valor_total || 0,
       observacoes: '',
     })
   }
@@ -435,6 +472,7 @@ const Contratos: React.FC = () => {
       ativos: list.filter((contrato) => displayStatus(contrato) === 'ativo').length,
       atrasados: list.filter((contrato) => displayStatus(contrato) === 'atraso').length,
       valor: list.reduce((total, contrato) => total + (contrato.valor_total || 0), 0),
+      pendentesFinanceiro: list.filter((contrato) => (contrato.status_pagamento || 'pendente') === 'pendente').length,
     }
   }, [contratos])
 
@@ -468,7 +506,20 @@ const Contratos: React.FC = () => {
       toast.error('O KM atual nao pode ser menor que o KM de retirada.')
       return
     }
-    closeMutation.mutate(closeoutData)
+    const payload = {
+      ...closeoutData,
+      data_pagamento:
+        closeoutData.status_pagamento === 'pago'
+          ? closeoutData.data_pagamento
+          : '',
+      valor_recebido:
+        closeoutData.status_pagamento === 'pago' && closeoutData.valor_recebido <= 0
+          ? closeoutEstimativa
+          : closeoutData.status_pagamento === 'cancelado'
+            ? 0
+            : closeoutData.valor_recebido,
+    }
+    closeMutation.mutate(payload)
   }
 
   return (
@@ -485,10 +536,11 @@ const Contratos: React.FC = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <div className="kpi-card"><p className="kpi-label">Total</p><p className="kpi-value">{summary.total}</p></div>
           <div className="kpi-card"><p className="kpi-label">Ativos</p><p className="kpi-value text-green-600">{summary.ativos}</p></div>
           <div className="kpi-card"><p className="kpi-label">Atrasados</p><p className="kpi-value text-red-600">{summary.atrasados}</p></div>
+          <div className="kpi-card"><p className="kpi-label">Financeiro Pendente</p><p className="kpi-value text-amber-600">{summary.pendentesFinanceiro}</p></div>
           <div className="kpi-card"><p className="kpi-label">Valor em Tela</p><p className="kpi-value text-purple-600">{formatCurrency(summary.valor)}</p></div>
         </div>
 
@@ -553,9 +605,19 @@ const Contratos: React.FC = () => {
                         <td className="table-cell text-slate-600 text-sm">
                           {formatDate(contrato.data_inicio)} a {formatDate(contrato.data_fim)}
                         </td>
-                        <td className="table-cell text-right font-semibold text-slate-900">{formatCurrency(contrato.valor_total)}</td>
+                        <td className="table-cell text-right font-semibold text-slate-900">
+                          <div>{formatCurrency(contrato.valor_total)}</div>
+                          <div className="mt-1 text-xs font-medium text-slate-500">
+                            Recebido: {formatCurrency(contrato.valor_recebido || 0)}
+                          </div>
+                        </td>
                         <td className="table-cell text-center">
-                          <span className={`inline-block ${statusClass(status)}`}>{statusLabel(status)}</span>
+                          <div className="flex flex-col items-center gap-2">
+                            <span className={`inline-block ${statusClass(status)}`}>{statusLabel(status)}</span>
+                            <span className={`inline-block ${paymentStatusClass(contrato.status_pagamento)}`}>
+                              {paymentStatusLabel(contrato.status_pagamento)}
+                            </span>
+                          </div>
                         </td>
                         <td className="table-cell text-center">
                           <div className="flex items-center justify-center gap-1">
@@ -798,6 +860,98 @@ const Contratos: React.FC = () => {
                       </div>
                     </div>
 
+                    <div className="space-y-3">
+                      <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+                        <div>
+                          <h4 className="text-base font-semibold text-slate-900">Recebimento financeiro</h4>
+                          <p className="text-sm text-slate-500">Defina se este encerramento foi pago agora ou vai para contas a receber.</p>
+                        </div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Financeiro integrado ao contrato</p>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="input-label">Status do recebimento</label>
+                          <select
+                            value={closeoutData.status_pagamento}
+                            onChange={(event) =>
+                              setCloseoutData({
+                                ...closeoutData,
+                                status_pagamento: event.target.value as PaymentStatus,
+                                valor_recebido:
+                                  event.target.value === 'pago' && closeoutData.valor_recebido <= 0
+                                    ? closeoutEstimativa
+                                    : event.target.value === 'cancelado'
+                                      ? 0
+                                      : closeoutData.valor_recebido,
+                              })
+                            }
+                            className="input-field"
+                          >
+                            {paymentStatusOptions.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="input-label">Forma de pagamento</label>
+                          <select
+                            value={closeoutData.forma_pagamento}
+                            onChange={(event) => setCloseoutData({ ...closeoutData, forma_pagamento: event.target.value })}
+                            className="input-field"
+                          >
+                            <option value="">Selecione</option>
+                            {paymentMethodOptions.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="input-label">Vencimento</label>
+                          <input
+                            type="date"
+                            value={closeoutData.data_vencimento_pagamento}
+                            onChange={(event) => setCloseoutData({ ...closeoutData, data_vencimento_pagamento: event.target.value })}
+                            className="input-field"
+                          />
+                        </div>
+                        <div>
+                          <label className="input-label">Data do pagamento</label>
+                          <input
+                            type="date"
+                            value={closeoutData.data_pagamento}
+                            onChange={(event) => setCloseoutData({ ...closeoutData, data_pagamento: event.target.value })}
+                            className="input-field"
+                            disabled={closeoutData.status_pagamento !== 'pago'}
+                          />
+                        </div>
+                        <div>
+                          <label className="input-label">Valor recebido</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={closeoutData.valor_recebido}
+                            onChange={(event) => setCloseoutData({ ...closeoutData, valor_recebido: Number(event.target.value) || 0 })}
+                            className="input-field"
+                          />
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                        <span>
+                          Total do encerramento: <strong className="text-slate-900">{formatCurrency(closeoutEstimativa)}</strong>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setCloseoutData({ ...closeoutData, valor_recebido: closeoutEstimativa, status_pagamento: 'pago' })}
+                          className="btn-secondary btn-sm"
+                        >
+                          Usar total como recebido
+                        </button>
+                      </div>
+                    </div>
+
                     <div>
                       <label className="input-label">Observacoes</label>
                       <textarea rows={4} value={closeoutData.observacoes} onChange={(event) => setCloseoutData({ ...closeoutData, observacoes: event.target.value })} className="input-field" />
@@ -835,6 +989,8 @@ const Contratos: React.FC = () => {
                           </div>
                         )}
                         <div className="flex justify-between text-red-600"><span>Desconto final</span><strong>- {formatCurrency(closeoutData.desconto)}</strong></div>
+                        <div className="flex justify-between"><span>Status financeiro</span><strong>{paymentStatusLabel(closeoutData.status_pagamento)}</strong></div>
+                        <div className="flex justify-between"><span>Valor recebido</span><strong>{formatCurrency(closeoutData.valor_recebido)}</strong></div>
                         <div className="flex justify-between pt-2 border-t border-blue-200 text-base"><span>Total estimado</span><strong>{formatCurrency(closeoutEstimativa)}</strong></div>
                       </div>
 

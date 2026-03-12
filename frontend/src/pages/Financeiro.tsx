@@ -27,11 +27,25 @@ interface Financeiro {
   categoria: string
   descricao: string
   valor: number
+  valor_recebido?: number
   empresa_id: string
   contrato_id?: string
   veiculo_id?: string
   comprovante_url?: string
+  origem_tipo?: string
+  forma_pagamento?: string
+  data_pagamento?: string
+  data_vencimento_pagamento?: string
   status: 'pendente' | 'pago' | 'cancelado'
+}
+
+interface FinanceiroResumo {
+  total_receita: number
+  total_receita_recebida: number
+  total_receita_pendente: number
+  total_despesa: number
+  lucro: number
+  saldo_realizado: number
 }
 
 interface PaginatedResponse<T> {
@@ -51,6 +65,8 @@ const FinanceiroPage: React.FC = () => {
   const [pagination, setPagination] = useState<PaginationParams>({ page: 1, limit: 10 })
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingRecord, setEditingRecord] = useState<Financeiro | null>(null)
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
+  const [editingPaymentRecord, setEditingPaymentRecord] = useState<Financeiro | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
   const [typeFilter, setTypeFilter] = useState<'todos' | 'receita' | 'despesa'>('todos')
   const [statusFilter, setStatusFilter] = useState<'todos' | 'pendente' | 'pago' | 'cancelado'>('todos')
@@ -62,6 +78,13 @@ const FinanceiroPage: React.FC = () => {
     valor: 0,
     data: new Date().toISOString().split('T')[0],
     status: 'pendente' as 'pendente' | 'pago' | 'cancelado',
+  })
+  const [paymentFormData, setPaymentFormData] = useState({
+    status_pagamento: 'pendente' as 'pendente' | 'pago' | 'cancelado',
+    forma_pagamento: '',
+    data_vencimento_pagamento: new Date().toISOString().split('T')[0],
+    data_pagamento: new Date().toISOString().split('T')[0],
+    valor_recebido: 0,
   })
 
   const { data, isLoading } = useQuery({
@@ -75,6 +98,14 @@ const FinanceiroPage: React.FC = () => {
           status: statusFilter !== 'todos' ? statusFilter : undefined,
         },
       })
+      return data
+    },
+  })
+
+  const { data: summaryData } = useQuery({
+    queryKey: ['financeiro-resumo'],
+    queryFn: async () => {
+      const { data } = await api.get<FinanceiroResumo>('/financeiro/resumo')
       return data
     },
   })
@@ -105,6 +136,22 @@ const FinanceiroPage: React.FC = () => {
     },
   })
 
+  const paymentMutation = useMutation({
+    mutationFn: (payload: any) => api.patch(`/contratos/${editingPaymentRecord?.id.split('-')[1]}/pagamento`, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['financeiro'] })
+      queryClient.invalidateQueries({ queryKey: ['financeiro-resumo'] })
+      queryClient.invalidateQueries({ queryKey: ['contratos'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      setIsPaymentModalOpen(false)
+      resetPaymentForm()
+      toast.success('Recebimento do contrato atualizado com sucesso!')
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao atualizar recebimento')
+    },
+  })
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/financeiro/${id}`),
     onSuccess: () => {
@@ -129,8 +176,31 @@ const FinanceiroPage: React.FC = () => {
     setEditingRecord(null)
   }
 
+  const resetPaymentForm = () => {
+    setPaymentFormData({
+      status_pagamento: 'pendente',
+      forma_pagamento: '',
+      data_vencimento_pagamento: new Date().toISOString().split('T')[0],
+      data_pagamento: new Date().toISOString().split('T')[0],
+      valor_recebido: 0,
+    })
+    setEditingPaymentRecord(null)
+  }
+
   const handleOpenModal = (record?: Financeiro) => {
     if (record) {
+      if (record.id.startsWith('c-')) {
+        setEditingPaymentRecord(record)
+        setPaymentFormData({
+          status_pagamento: record.status,
+          forma_pagamento: record.forma_pagamento || '',
+          data_vencimento_pagamento: record.data_vencimento_pagamento ? record.data_vencimento_pagamento.slice(0, 10) : new Date().toISOString().split('T')[0],
+          data_pagamento: record.data_pagamento ? record.data_pagamento.slice(0, 10) : new Date().toISOString().split('T')[0],
+          valor_recebido: record.valor_recebido || (record.status === 'pago' ? record.valor : 0),
+        })
+        setIsPaymentModalOpen(true)
+        return
+      }
       if (!record.id.startsWith('fm-')) {
         toast.error('Edite contratos e despesas nos módulos específicos. Aqui só editamos lançamentos manuais.')
         return
@@ -158,16 +228,42 @@ const FinanceiroPage: React.FC = () => {
     }
   }
 
+  const handlePaymentSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!editingPaymentRecord) return
+
+    if (paymentFormData.valor_recebido < 0) {
+      toast.error('O valor recebido nao pode ser negativo')
+      return
+    }
+
+    paymentMutation.mutate({
+      ...paymentFormData,
+      data_pagamento:
+        paymentFormData.status_pagamento === 'pago'
+          ? paymentFormData.data_pagamento
+          : '',
+      valor_recebido:
+        paymentFormData.status_pagamento === 'pago' && paymentFormData.valor_recebido <= 0
+          ? editingPaymentRecord.valor
+          : paymentFormData.status_pagamento === 'cancelado'
+            ? 0
+            : paymentFormData.valor_recebido,
+    })
+  }
+
   const records = data?.data || []
 
   const kpiData = useMemo(() => {
-    const totalReceita = records.filter((r) => r.tipo === 'receita').reduce((sum, r) => sum + r.valor, 0)
-    const totalDespesa = records.filter((r) => r.tipo === 'despesa').reduce((sum, r) => sum + r.valor, 0)
-    const saldo = totalReceita - totalDespesa
-    const pendentes = records.filter((r) => r.status === 'pendente').reduce((sum, r) => sum + r.valor, 0)
-
-    return { totalReceita, totalDespesa, saldo, pendentes }
-  }, [records])
+    return {
+      totalReceita: summaryData?.total_receita || 0,
+      totalDespesa: summaryData?.total_despesa || 0,
+      saldo: summaryData?.saldo_realizado ?? summaryData?.lucro ?? 0,
+      pendentes: summaryData?.total_receita_pendente || 0,
+      recebido: summaryData?.total_receita_recebida || 0,
+    }
+  }, [summaryData])
 
   const filteredRecords = useMemo(() => {
     return records.filter((record) => {
@@ -251,7 +347,7 @@ const FinanceiroPage: React.FC = () => {
               </div>
             </div>
             <div className="mt-3 pt-3 border-t border-green-100">
-              <p className="text-xs text-slate-600">Total de receitas registradas</p>
+              <p className="text-xs text-slate-600">Recebido: {formatCurrency(kpiData.recebido)}</p>
             </div>
           </div>
 
@@ -301,7 +397,7 @@ const FinanceiroPage: React.FC = () => {
               </div>
             </div>
             <div className="mt-3 pt-3 border-t border-amber-100">
-              <p className="text-xs text-slate-600">Registros aguardando pagamento</p>
+              <p className="text-xs text-slate-600">Receitas ainda em aberto</p>
             </div>
           </div>
         </div>
@@ -427,7 +523,16 @@ const FinanceiroPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="table-cell text-slate-700">{record.categoria}</td>
-                      <td className="table-cell text-slate-700">{record.descricao}</td>
+                      <td className="table-cell text-slate-700">
+                        <div>{record.descricao}</div>
+                        {record.origem_tipo === 'contrato' && (
+                          <div className="mt-1 text-xs text-slate-500">
+                            {record.forma_pagamento ? `Forma: ${record.forma_pagamento}` : 'Forma nao definida'}
+                            {record.data_vencimento_pagamento ? ` • Vencimento ${formatDate(record.data_vencimento_pagamento)}` : ''}
+                            {record.data_pagamento ? ` • Pagamento ${formatDate(record.data_pagamento)}` : ''}
+                          </div>
+                        )}
+                      </td>
                       <td className="table-cell text-right">
                         <span
                           className={`font-semibold ${
@@ -454,8 +559,8 @@ const FinanceiroPage: React.FC = () => {
                           <button
                             onClick={() => handleOpenModal(record)}
                             className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                            title="Editar"
-                            disabled={!record.id.startsWith('fm-')}
+                            title={record.id.startsWith('c-') ? 'Atualizar recebimento' : 'Editar'}
+                            disabled={!record.id.startsWith('fm-') && !record.id.startsWith('c-')}
                           >
                             <Edit size={18} />
                           </button>
@@ -716,6 +821,135 @@ const FinanceiroPage: React.FC = () => {
                 ) : (
                   'Criar'
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isPaymentModalOpen && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !paymentMutation.isPending && setIsPaymentModalOpen(false)}>
+          <div className="modal-content max-w-lg w-full flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">Recebimento do Contrato</h3>
+              <button
+                onClick={() => {
+                  setIsPaymentModalOpen(false)
+                  resetPaymentForm()
+                }}
+                className="btn-icon"
+                disabled={paymentMutation.isPending}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handlePaymentSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)] space-y-5">
+              <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                <p className="font-semibold">{editingPaymentRecord?.descricao}</p>
+                <p className="mt-1">Valor do contrato: {formatCurrency(editingPaymentRecord?.valor || 0)}</p>
+              </div>
+
+              <div>
+                <label className="input-label">Status do recebimento</label>
+                <select
+                  value={paymentFormData.status_pagamento}
+                  onChange={(e) =>
+                    setPaymentFormData({
+                      ...paymentFormData,
+                      status_pagamento: e.target.value as 'pendente' | 'pago' | 'cancelado',
+                      valor_recebido:
+                        e.target.value === 'pago' && paymentFormData.valor_recebido <= 0
+                          ? editingPaymentRecord?.valor || 0
+                          : e.target.value === 'cancelado'
+                            ? 0
+                            : paymentFormData.valor_recebido,
+                    })
+                  }
+                  className="input-field"
+                  disabled={paymentMutation.isPending}
+                >
+                  <option value="pendente">Pendente</option>
+                  <option value="pago">Pago</option>
+                  <option value="cancelado">Cancelado</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="input-label">Forma de pagamento</label>
+                  <select
+                    value={paymentFormData.forma_pagamento}
+                    onChange={(e) => setPaymentFormData({ ...paymentFormData, forma_pagamento: e.target.value })}
+                    className="input-field"
+                    disabled={paymentMutation.isPending}
+                  >
+                    <option value="">Selecione</option>
+                    <option value="Pix">Pix</option>
+                    <option value="Cartao">Cartao</option>
+                    <option value="Dinheiro">Dinheiro</option>
+                    <option value="Transferencia">Transferencia</option>
+                    <option value="Boleto">Boleto</option>
+                    <option value="Faturado">Faturado</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="input-label">Valor recebido</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={paymentFormData.valor_recebido}
+                    onChange={(e) => setPaymentFormData({ ...paymentFormData, valor_recebido: parseFloat(e.target.value) || 0 })}
+                    className="input-field"
+                    disabled={paymentMutation.isPending}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="input-label">Vencimento</label>
+                  <input
+                    type="date"
+                    value={paymentFormData.data_vencimento_pagamento}
+                    onChange={(e) => setPaymentFormData({ ...paymentFormData, data_vencimento_pagamento: e.target.value })}
+                    className="input-field"
+                    disabled={paymentMutation.isPending}
+                  />
+                </div>
+                <div>
+                  <label className="input-label">Data do pagamento</label>
+                  <input
+                    type="date"
+                    value={paymentFormData.data_pagamento}
+                    onChange={(e) => setPaymentFormData({ ...paymentFormData, data_pagamento: e.target.value })}
+                    className="input-field"
+                    disabled={paymentMutation.isPending || paymentFormData.status_pagamento !== 'pago'}
+                  />
+                </div>
+              </div>
+            </form>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPaymentModalOpen(false)
+                  resetPaymentForm()
+                }}
+                className="btn-secondary"
+                disabled={paymentMutation.isPending}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={paymentMutation.isPending}
+                onClick={handlePaymentSubmit}
+              >
+                {paymentMutation.isPending ? 'Salvando...' : 'Atualizar recebimento'}
               </button>
             </div>
           </div>

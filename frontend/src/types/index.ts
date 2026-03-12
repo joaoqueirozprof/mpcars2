@@ -83,6 +83,11 @@ export interface Contrato {
   valor_franquia_seguro?: number;
   taxa_administrativa?: number;
   desconto?: number;
+  status_pagamento?: 'pendente' | 'pago' | 'cancelado';
+  forma_pagamento?: string;
+  data_vencimento_pagamento?: string;
+  data_pagamento?: string;
+  valor_recebido?: number;
   tipo?: 'cliente' | 'empresa';
   cliente?: { nome: string };
   veiculo?: {
@@ -173,14 +178,27 @@ export interface Multa {
 export interface Manutencao {
   id: string;
   veiculo_id: string;
-  data_manutencao: string;
   tipo: 'preventiva' | 'corretiva';
   descricao: string;
-  valor: number;
-  oficina: string;
-  quilometragem: number;
+  data_manutencao?: string;
+  data_realizada?: string;
+  data_proxima?: string;
+  valor?: number;
+  custo?: number;
+  oficina?: string;
+  quilometragem?: number;
+  km_realizada?: number;
+  km_proxima?: number;
   empresa_id: string;
-  status: 'pendente' | 'em_progresso' | 'concluida' | 'cancelada';
+  status: 'pendente' | 'agendada' | 'em_progresso' | 'em_andamento' | 'concluida' | 'cancelada';
+  status_original?: 'pendente' | 'agendada' | 'em_progresso' | 'em_andamento' | 'concluida' | 'cancelada';
+  veiculo?: {
+    placa: string;
+    marca?: string;
+    modelo?: string;
+    km_atual?: number;
+    status?: string;
+  };
 }
 
 export interface Reserva {

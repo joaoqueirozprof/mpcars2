@@ -95,8 +95,55 @@ def _append_manual_records(records: list, db: Session):
                 "descricao": lancamento.descricao,
                 "valor": float(lancamento.valor) if lancamento.valor else 0.0,
                 "status": lancamento.status,
+                "origem_tipo": "manual",
             }
         )
+
+
+def _contrato_payment_status(contrato: Contrato) -> str:
+    if contrato.status_pagamento:
+        return str(contrato.status_pagamento).lower()
+    if contrato.status == "finalizado":
+        return "pago"
+    return "pendente"
+
+
+def _serialize_contrato_record(contrato: Contrato, cliente_nome: str) -> dict:
+    payment_status = _contrato_payment_status(contrato)
+    data_referencia = (
+        contrato.data_pagamento.isoformat()
+        if contrato.data_pagamento
+        else contrato.data_vencimento_pagamento.isoformat()
+        if contrato.data_vencimento_pagamento
+        else contrato.data_finalizacao.isoformat()
+        if contrato.data_finalizacao
+        else contrato.data_criacao.isoformat()
+        if contrato.data_criacao
+        else None
+    )
+    forma_pagamento = contrato.forma_pagamento
+    categoria = "Locacao"
+    if forma_pagamento:
+        categoria = "Locacao / {}".format(forma_pagamento.title())
+
+    return {
+        "id": f"c-{contrato.id}",
+        "data": data_referencia,
+        "tipo": "receita",
+        "categoria": categoria,
+        "descricao": f"Contrato #{contrato.numero} - {cliente_nome}",
+        "valor": float(contrato.valor_total) if contrato.valor_total else 0.0,
+        "valor_recebido": float(contrato.valor_recebido or 0.0),
+        "status": payment_status,
+        "origem_tipo": "contrato",
+        "forma_pagamento": forma_pagamento,
+        "data_pagamento": contrato.data_pagamento.isoformat() if contrato.data_pagamento else None,
+        "data_vencimento_pagamento": (
+            contrato.data_vencimento_pagamento.isoformat()
+            if contrato.data_vencimento_pagamento
+            else None
+        ),
+    }
 
 
 @router.get("/")
@@ -171,6 +218,24 @@ def list_financeiro(
 
     _append_manual_records(records, db)
 
+    for index, record in enumerate(records):
+        record_id = str(record.get("id", ""))
+        if not record_id.startswith("c-"):
+            continue
+
+        contrato_id = int(record_id.split("-", 1)[1])
+        contrato = next((item for item in contratos if item.id == contrato_id), None)
+        if not contrato:
+            continue
+
+        cliente = (
+            db.query(Cliente).filter(Cliente.id == contrato.cliente_id).first()
+            if contrato.cliente_id
+            else None
+        )
+        cliente_nome = cliente.nome if cliente else "Desconhecido"
+        records[index] = _serialize_contrato_record(contrato, cliente_nome)
+
     if tipo:
         records = [record for record in records if record["tipo"] == tipo]
 
@@ -198,9 +263,18 @@ def get_resumo(
     current_user: User = Depends(get_current_user),
 ):
     """Get financial summary."""
+    contratos = db.query(Contrato).all()
     total_receita = sum(
-        float(contrato.valor_total) for contrato in db.query(Contrato).all() if contrato.valor_total
+        float(contrato.valor_total) for contrato in contratos if contrato.valor_total
     )
+    total_receita_recebida = sum(
+        float(contrato.valor_total or 0)
+        if _contrato_payment_status(contrato) == "pago"
+        else float(contrato.valor_recebido or 0)
+        for contrato in contratos
+        if contrato.valor_total
+    )
+    total_receita_pendente = max(total_receita - total_receita_recebida, 0.0)
     total_despesa_contrato = sum(
         float(despesa.valor) for despesa in db.query(DespesaContrato).all() if despesa.valor
     )
@@ -216,6 +290,13 @@ def get_resumo(
         for lancamento in db.query(LancamentoFinanceiro).filter(LancamentoFinanceiro.tipo == "receita").all()
         if lancamento.valor
     )
+    total_manual_receita_recebida = sum(
+        float(lancamento.valor)
+        for lancamento in db.query(LancamentoFinanceiro)
+        .filter(LancamentoFinanceiro.tipo == "receita", LancamentoFinanceiro.status == "pago")
+        .all()
+        if lancamento.valor
+    )
     total_manual_despesa = sum(
         float(lancamento.valor)
         for lancamento in db.query(LancamentoFinanceiro).filter(LancamentoFinanceiro.tipo == "despesa").all()
@@ -223,13 +304,19 @@ def get_resumo(
     )
 
     total_receita += total_manual_receita
+    total_receita_recebida += total_manual_receita_recebida
+    total_receita_pendente = max(total_receita - total_receita_recebida, 0.0)
     total_despesa = total_despesa_contrato + total_despesa_veiculo + total_despesa_loja + total_manual_despesa
     lucro = total_receita - total_despesa
+    saldo_realizado = total_receita_recebida - total_despesa
 
     return {
         "total_receita": total_receita,
+        "total_receita_recebida": total_receita_recebida,
+        "total_receita_pendente": total_receita_pendente,
         "total_despesa": total_despesa,
         "lucro": lucro,
+        "saldo_realizado": saldo_realizado,
         "despesa_contrato": total_despesa_contrato,
         "despesa_veiculo": total_despesa_veiculo,
         "despesa_loja": total_despesa_loja + total_manual_despesa,

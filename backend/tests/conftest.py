@@ -1,6 +1,5 @@
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -8,7 +7,6 @@ from fastapi.testclient import TestClient
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-TEST_DB_PATH = Path(tempfile.gettempdir()) / "mpcars2-test.sqlite3"
 
 sys.path.insert(0, str(BACKEND_DIR))
 
@@ -18,7 +16,7 @@ os.environ["SEED_ON_STARTUP"] = "false"
 os.environ["RUN_LEGACY_COLUMN_MIGRATIONS"] = "false"
 os.environ["ALLOW_PUBLIC_REGISTRATION"] = "false"
 os.environ["SECRET_KEY"] = "test-secret-key-with-at-least-32-chars"
-os.environ["TEST_DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH.as_posix()}"
+os.environ["TEST_DATABASE_URL"] = "sqlite://"
 
 from app.core.database import Base, SessionLocal, engine  # noqa: E402
 from app.core.security import get_password_hash  # noqa: E402
@@ -54,8 +52,6 @@ def create_user(
 @pytest.fixture(autouse=True)
 def reset_database():
     engine.dispose()
-    if TEST_DB_PATH.exists():
-        TEST_DB_PATH.unlink()
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     try:
@@ -63,8 +59,6 @@ def reset_database():
     finally:
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
-        if TEST_DB_PATH.exists():
-            TEST_DB_PATH.unlink()
 
 
 @pytest.fixture

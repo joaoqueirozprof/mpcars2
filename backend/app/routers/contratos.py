@@ -1,5 +1,5 @@
 import math
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -67,6 +67,11 @@ class ContratoBase(BaseModel):
     valor_franquia_seguro: Optional[float] = None
     taxa_administrativa: Optional[float] = None
     desconto: Optional[float] = None
+    status_pagamento: Optional[str] = "pendente"
+    forma_pagamento: Optional[str] = None
+    data_vencimento_pagamento: Optional[date] = None
+    data_pagamento: Optional[date] = None
+    valor_recebido: Optional[float] = None
     tipo: Optional[str] = "cliente"
 
 
@@ -107,6 +112,11 @@ class ContratoUpdate(BaseModel):
     valor_franquia_seguro: Optional[float] = None
     taxa_administrativa: Optional[float] = None
     desconto: Optional[float] = None
+    status_pagamento: Optional[str] = None
+    forma_pagamento: Optional[str] = None
+    data_vencimento_pagamento: Optional[date] = None
+    data_pagamento: Optional[date] = None
+    valor_recebido: Optional[float] = None
     tipo: Optional[str] = None
 
 
@@ -127,8 +137,23 @@ class ContratoFinalizeRequest(BaseModel):
     valor_franquia_seguro: Optional[float] = None
     taxa_administrativa: Optional[float] = None
     desconto: Optional[float] = None
+    status_pagamento: Optional[str] = None
+    forma_pagamento: Optional[str] = None
+    data_vencimento_pagamento: Optional[date] = None
+    data_pagamento: Optional[date] = None
+    valor_recebido: Optional[float] = None
     observacoes: Optional[str] = None
     data_finalizacao: Optional[datetime] = None
+
+
+class ContratoPaymentUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    status_pagamento: Optional[str] = None
+    forma_pagamento: Optional[str] = None
+    data_vencimento_pagamento: Optional[date] = None
+    data_pagamento: Optional[date] = None
+    valor_recebido: Optional[float] = None
 
 
 class ContratoResponse(ContratoBase):
@@ -246,7 +271,7 @@ def _normalize_contrato_payload(payload: dict, is_create: bool = False) -> dict:
     for key, value in data.items():
         if value == "":
             normalized[key] = None
-        elif key in {"status", "tipo"} and isinstance(value, str):
+        elif key in {"status", "tipo", "status_pagamento"} and isinstance(value, str):
             normalized[key] = value.lower()
         else:
             normalized[key] = value
@@ -269,9 +294,76 @@ def _normalize_finalizacao_payload(payload: dict) -> dict:
 
     normalized = {}
     for key, value in data.items():
-        normalized[key] = None if value == "" else value
+        if value == "":
+            normalized[key] = None
+        elif key == "status_pagamento" and isinstance(value, str):
+            normalized[key] = value.lower()
+        else:
+            normalized[key] = value
 
     return normalized
+
+
+def _status_pagamento_atual(contrato: Contrato) -> str:
+    if contrato.status_pagamento:
+        return str(contrato.status_pagamento).lower()
+    if contrato.status == "finalizado":
+        return "pago"
+    return "pendente"
+
+
+def _apply_payment_details(
+    contrato: Contrato,
+    payment_data: dict,
+    *,
+    reference_date: Optional[datetime] = None,
+) -> None:
+    data = dict(payment_data or {})
+    allowed_status = {"pendente", "pago", "cancelado"}
+    current_status = _status_pagamento_atual(contrato)
+    next_status = current_status
+
+    if data.get("status_pagamento"):
+        next_status = str(data["status_pagamento"]).lower()
+        if next_status not in allowed_status:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Status de pagamento invalido",
+            )
+
+    if "forma_pagamento" in data:
+        contrato.forma_pagamento = data.get("forma_pagamento")
+    if "data_vencimento_pagamento" in data:
+        contrato.data_vencimento_pagamento = data.get("data_vencimento_pagamento")
+    if "data_pagamento" in data:
+        contrato.data_pagamento = data.get("data_pagamento")
+    if "valor_recebido" in data:
+        contrato.valor_recebido = data.get("valor_recebido")
+
+    contrato.status_pagamento = next_status
+    default_due_date = (
+        reference_date.date()
+        if reference_date
+        else contrato.data_finalizacao.date()
+        if contrato.data_finalizacao
+        else contrato.data_fim.date()
+        if contrato.data_fim
+        else datetime.now().date()
+    )
+
+    if not contrato.data_vencimento_pagamento:
+        contrato.data_vencimento_pagamento = default_due_date
+
+    if next_status == "pago":
+        if not contrato.data_pagamento:
+            contrato.data_pagamento = (
+                reference_date.date() if reference_date else datetime.now().date()
+            )
+        if contrato.valor_recebido is None or float(contrato.valor_recebido or 0) <= 0:
+            contrato.valor_recebido = float(contrato.valor_total or 0)
+    elif next_status == "cancelado":
+        if contrato.valor_recebido is None:
+            contrato.valor_recebido = 0
 
 
 def _append_observacao(existing_value: Optional[str], extra_value: Optional[str], titulo: str) -> Optional[str]:
@@ -471,6 +563,11 @@ def create_contrato(
         )
 
     db_contrato = Contrato(**contrato_data)
+    _apply_payment_details(
+        db_contrato,
+        contrato_data,
+        reference_date=contrato_data["data_fim"],
+    )
     db.add(db_contrato)
     db.flush()
 
@@ -615,6 +712,12 @@ def update_contrato(
             desconto=contrato.desconto,
         )
 
+    _apply_payment_details(
+        contrato,
+        update_data,
+        reference_date=contrato.data_finalizacao or contrato.data_fim,
+    )
+
     db.flush()
     _recalcular_status_veiculo(db, veiculo_antigo_id)
     _recalcular_status_veiculo(db, contrato.veiculo_id)
@@ -737,6 +840,7 @@ def finalizar_contrato(
     )
     contrato.status = "finalizado"
     contrato.data_finalizacao = data_finalizacao
+    _apply_payment_details(contrato, finalize_data, reference_date=data_finalizacao)
 
     db.flush()
     db.add(
@@ -760,6 +864,50 @@ def finalizar_contrato(
         "EDITAR",
         "Contrato",
         "Contrato {} finalizado".format(contrato.numero),
+        contrato_id,
+        request,
+    )
+    return contrato
+
+
+@router.patch("/{contrato_id}/pagamento", response_model=ContratoResponse)
+def atualizar_pagamento_contrato(
+    contrato_id: int,
+    pagamento_data: ContratoPaymentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
+):
+    contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    if not contrato:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Contrato nao encontrado",
+        )
+
+    update_data = _normalize_contrato_payload(
+        pagamento_data.model_dump(exclude_unset=True)
+    )
+    if not update_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nenhum dado de pagamento informado",
+        )
+
+    _apply_payment_details(
+        contrato,
+        update_data,
+        reference_date=contrato.data_finalizacao or contrato.data_fim or datetime.now(),
+    )
+
+    db.commit()
+    db.refresh(contrato)
+    log_activity(
+        db,
+        current_user,
+        "EDITAR",
+        "Contrato",
+        "Pagamento do contrato {} atualizado".format(contrato.numero),
         contrato_id,
         request,
     )

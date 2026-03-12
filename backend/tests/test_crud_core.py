@@ -157,6 +157,11 @@ def test_contrato_uses_vehicle_km_and_can_be_closed(client, admin_headers, db_se
             "taxa_acessorios": 15,
             "taxa_administrativa": 10,
             "desconto": 20,
+            "status_pagamento": "pago",
+            "forma_pagamento": "Pix",
+            "data_pagamento": "2026-03-13",
+            "data_vencimento_pagamento": "2026-03-13",
+            "valor_recebido": 570,
             "observacoes": "Risco leve no para-choque",
         },
     )
@@ -176,11 +181,152 @@ def test_contrato_uses_vehicle_km_and_can_be_closed(client, admin_headers, db_se
     assert float(contrato.taxa_limpeza) == 25.0
     assert float(contrato.taxa_acessorios) == 15.0
     assert float(contrato.taxa_administrativa) == 10.0
+    assert contrato.status_pagamento == "pago"
+    assert contrato.forma_pagamento == "Pix"
+    assert float(contrato.valor_recebido) == 570.0
     assert float(veiculo.km_atual) == 15480
     assert veiculo.status == "disponivel"
     assert len(checkins) == 2
     devolucao = next(checkin for checkin in checkins if checkin.tipo == "devolucao")
     assert devolucao.itens_checklist["triangulo"] is False
+
+
+def test_financeiro_reflects_contract_payment_status(client, admin_headers, db_session):
+    cliente = Cliente(
+        nome="Financeiro Cliente",
+        cpf="55544433322",
+        email="financeiro@example.org",
+        telefone="11999990003",
+        ativo=True,
+    )
+    veiculo = Veiculo(
+        placa="FIN2026",
+        marca="Nissan",
+        modelo="Versa",
+        km_atual=10200,
+        status="disponivel",
+        ativo=True,
+    )
+    db_session.add_all([cliente, veiculo])
+    db_session.commit()
+    db_session.refresh(cliente)
+    db_session.refresh(veiculo)
+
+    create_response = client.post(
+        "/api/v1/contratos/",
+        headers=admin_headers,
+        json={
+            "cliente_id": cliente.id,
+            "veiculo_id": veiculo.id,
+            "data_inicio": "2026-03-10T09:00:00",
+            "data_fim": "2026-03-12T09:00:00",
+            "valor_diaria": 200,
+        },
+    )
+
+    assert create_response.status_code == 200, create_response.text
+    contrato_id = create_response.json()["id"]
+
+    close_response = client.post(
+        f"/api/v1/contratos/{contrato_id}/encerrar",
+        headers=admin_headers,
+        json={
+            "km_atual_veiculo": 10410,
+            "status_pagamento": "pendente",
+            "forma_pagamento": "Boleto",
+            "data_vencimento_pagamento": "2026-03-20",
+            "valor_recebido": 150,
+        },
+    )
+    assert close_response.status_code == 200, close_response.text
+
+    financeiro_response = client.get("/api/v1/financeiro/", headers=admin_headers)
+    assert financeiro_response.status_code == 200, financeiro_response.text
+    contrato_record = next(
+        item for item in financeiro_response.json()["data"] if item["id"] == f"c-{contrato_id}"
+    )
+    assert contrato_record["status"] == "pendente"
+    assert contrato_record["forma_pagamento"] == "Boleto"
+    assert float(contrato_record["valor_recebido"]) == 150.0
+
+    payment_response = client.patch(
+        f"/api/v1/contratos/{contrato_id}/pagamento",
+        headers=admin_headers,
+        json={
+            "status_pagamento": "pago",
+            "forma_pagamento": "Pix",
+            "data_pagamento": "2026-03-12",
+            "valor_recebido": 400,
+        },
+    )
+    assert payment_response.status_code == 200, payment_response.text
+    assert payment_response.json()["status_pagamento"] == "pago"
+
+    resumo_response = client.get("/api/v1/financeiro/resumo", headers=admin_headers)
+    assert resumo_response.status_code == 200, resumo_response.text
+    resumo = resumo_response.json()
+    assert resumo["total_receita"] >= 400
+    assert resumo["total_receita_recebida"] >= 400
+
+
+def test_manutencao_blocks_vehicle_and_generates_alerts(client, admin_headers, db_session):
+    veiculo = Veiculo(
+        placa="MAN2026",
+        marca="Fiat",
+        modelo="Pulse",
+        km_atual=20000,
+        status="disponivel",
+        ativo=True,
+    )
+    db_session.add(veiculo)
+    db_session.commit()
+    db_session.refresh(veiculo)
+
+    create_response = client.post(
+        "/api/v1/manutencoes/",
+        headers=admin_headers,
+        json={
+            "veiculo_id": veiculo.id,
+            "tipo": "preventiva",
+            "descricao": "Revisao de 20 mil km",
+            "status": "agendada",
+            "oficina": "Oficina Centro",
+            "custo": 350,
+            "km_proxima": 19500,
+            "data_proxima": (datetime.now() - timedelta(days=1)).date().isoformat(),
+        },
+    )
+
+    assert create_response.status_code == 200, create_response.text
+    manutencao_id = create_response.json()["id"]
+
+    db_session.expire_all()
+    veiculo = db_session.query(Veiculo).filter(Veiculo.id == veiculo.id).first()
+    assert veiculo.status == "manutencao"
+
+    resumo_response = client.get("/api/v1/manutencoes/resumo", headers=admin_headers)
+    assert resumo_response.status_code == 200, resumo_response.text
+    resumo = resumo_response.json()
+    assert resumo["manutencoes_abertas"] == 1
+    assert resumo["vencidas_por_data"] == 1
+    assert resumo["vencidas_por_km"] == 1
+    assert resumo["criticas"] == 1
+    assert len(resumo["alertas"]) == 1
+    assert resumo["alertas"][0]["placa"] == "MAN2026"
+
+    complete_response = client.post(
+        f"/api/v1/manutencoes/{manutencao_id}/completar",
+        headers=admin_headers,
+    )
+    assert complete_response.status_code == 200, complete_response.text
+
+    db_session.expire_all()
+    manutencao = db_session.query(Manutencao).filter(Manutencao.id == manutencao_id).first()
+    veiculo = db_session.query(Veiculo).filter(Veiculo.id == veiculo.id).first()
+
+    assert manutencao.status == "concluida"
+    assert float(manutencao.km_realizada) == 20000.0
+    assert veiculo.status == "disponivel"
 
 
 def test_dashboard_root_returns_operational_data(client, admin_headers, db_session):

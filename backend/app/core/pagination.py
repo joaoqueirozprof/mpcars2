@@ -32,6 +32,7 @@ def _apply_legacy_aliases(item, result: dict) -> dict:
         result["data_manutencao"] = result.get("data_realizada") or result.get("data_proxima")
         result["valor"] = result.get("custo")
         result["quilometragem"] = result.get("km_realizada") or result.get("km_proxima")
+        result["status_original"] = result.get("status")
 
         if result.get("status") == "em_andamento":
             result["status"] = "em_progresso"
