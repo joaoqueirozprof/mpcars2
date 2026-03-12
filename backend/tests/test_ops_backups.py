@@ -66,7 +66,7 @@ def test_can_sync_existing_backup_to_google_drive(client, admin_headers, monkeyp
     monkeypatch.setattr(
         ops,
         "sync_backup_directory",
-        lambda path: {
+        lambda path, db=None: {
             "status": "synced",
             "root_folder_id": "root-folder",
             "root_folder_url": "https://drive.google.com/drive/folders/root-folder",
