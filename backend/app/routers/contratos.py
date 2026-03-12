@@ -59,6 +59,13 @@ class ContratoBase(BaseModel):
     valor_hora_extra: Optional[float] = None
     valor_km_excedente: Optional[float] = None
     valor_avarias: Optional[float] = None
+    taxa_combustivel: Optional[float] = None
+    taxa_limpeza: Optional[float] = None
+    taxa_higienizacao: Optional[float] = None
+    taxa_pneus: Optional[float] = None
+    taxa_acessorios: Optional[float] = None
+    valor_franquia_seguro: Optional[float] = None
+    taxa_administrativa: Optional[float] = None
     desconto: Optional[float] = None
     tipo: Optional[str] = "cliente"
 
@@ -92,6 +99,13 @@ class ContratoUpdate(BaseModel):
     valor_hora_extra: Optional[float] = None
     valor_km_excedente: Optional[float] = None
     valor_avarias: Optional[float] = None
+    taxa_combustivel: Optional[float] = None
+    taxa_limpeza: Optional[float] = None
+    taxa_higienizacao: Optional[float] = None
+    taxa_pneus: Optional[float] = None
+    taxa_acessorios: Optional[float] = None
+    valor_franquia_seguro: Optional[float] = None
+    taxa_administrativa: Optional[float] = None
     desconto: Optional[float] = None
     tipo: Optional[str] = None
 
@@ -104,6 +118,13 @@ class ContratoFinalizeRequest(BaseModel):
     km_atual_veiculo: Optional[float] = None
     combustivel_retorno: Optional[str] = None
     valor_avarias: Optional[float] = None
+    taxa_combustivel: Optional[float] = None
+    taxa_limpeza: Optional[float] = None
+    taxa_higienizacao: Optional[float] = None
+    taxa_pneus: Optional[float] = None
+    taxa_acessorios: Optional[float] = None
+    valor_franquia_seguro: Optional[float] = None
+    taxa_administrativa: Optional[float] = None
     desconto: Optional[float] = None
     observacoes: Optional[str] = None
     data_finalizacao: Optional[datetime] = None
@@ -169,13 +190,33 @@ def _calcular_valor_total(
     km_livres: Optional[float] = None,
     valor_km_excedente: Optional[float] = None,
     valor_avarias: Optional[float] = None,
+    taxa_combustivel: Optional[float] = None,
+    taxa_limpeza: Optional[float] = None,
+    taxa_higienizacao: Optional[float] = None,
+    taxa_pneus: Optional[float] = None,
+    taxa_acessorios: Optional[float] = None,
+    valor_franquia_seguro: Optional[float] = None,
+    taxa_administrativa: Optional[float] = None,
     desconto: Optional[float] = None,
 ) -> float:
     qtd_diarias = _calcular_qtd_diarias(data_inicio, data_fim)
     total_base = qtd_diarias * float(valor_diaria or 0)
     km_excedente = _calcular_km_excedente(km_inicial, km_final, km_livres)
     total_km = km_excedente * float(valor_km_excedente or 0)
-    total = total_base + total_km + float(valor_avarias or 0) - float(desconto or 0)
+    total_taxas = sum(
+        float(valor or 0)
+        for valor in (
+            valor_avarias,
+            taxa_combustivel,
+            taxa_limpeza,
+            taxa_higienizacao,
+            taxa_pneus,
+            taxa_acessorios,
+            valor_franquia_seguro,
+            taxa_administrativa,
+        )
+    )
+    total = total_base + total_km + total_taxas - float(desconto or 0)
     return round(max(total, 0.0), 2)
 
 
@@ -418,6 +459,13 @@ def create_contrato(
             km_livres=contrato_data.get("km_livres"),
             valor_km_excedente=contrato_data.get("valor_km_excedente"),
             valor_avarias=contrato_data.get("valor_avarias"),
+            taxa_combustivel=contrato_data.get("taxa_combustivel"),
+            taxa_limpeza=contrato_data.get("taxa_limpeza"),
+            taxa_higienizacao=contrato_data.get("taxa_higienizacao"),
+            taxa_pneus=contrato_data.get("taxa_pneus"),
+            taxa_acessorios=contrato_data.get("taxa_acessorios"),
+            valor_franquia_seguro=contrato_data.get("valor_franquia_seguro"),
+            taxa_administrativa=contrato_data.get("taxa_administrativa"),
             desconto=contrato_data.get("desconto"),
         )
 
@@ -527,7 +575,24 @@ def update_contrato(
         contrato.qtd_diarias = _calcular_qtd_diarias(nova_data_inicio, nova_data_fim)
 
     if "valor_total" not in update_data and (
-        {"data_inicio", "data_fim", "valor_diaria", "km_inicial", "km_final", "km_livres", "valor_km_excedente", "valor_avarias", "desconto"}
+        {
+            "data_inicio",
+            "data_fim",
+            "valor_diaria",
+            "km_inicial",
+            "km_final",
+            "km_livres",
+            "valor_km_excedente",
+            "valor_avarias",
+            "taxa_combustivel",
+            "taxa_limpeza",
+            "taxa_higienizacao",
+            "taxa_pneus",
+            "taxa_acessorios",
+            "valor_franquia_seguro",
+            "taxa_administrativa",
+            "desconto",
+        }
         & set(update_data.keys())
     ):
         contrato.valor_total = _calcular_valor_total(
@@ -539,6 +604,13 @@ def update_contrato(
             km_livres=contrato.km_livres,
             valor_km_excedente=contrato.valor_km_excedente,
             valor_avarias=contrato.valor_avarias,
+            taxa_combustivel=contrato.taxa_combustivel,
+            taxa_limpeza=contrato.taxa_limpeza,
+            taxa_higienizacao=contrato.taxa_higienizacao,
+            taxa_pneus=contrato.taxa_pneus,
+            taxa_acessorios=contrato.taxa_acessorios,
+            valor_franquia_seguro=contrato.valor_franquia_seguro,
+            taxa_administrativa=contrato.taxa_administrativa,
             desconto=contrato.desconto,
         )
 
@@ -610,6 +682,20 @@ def finalizar_contrato(
         contrato.combustivel_retorno = finalize_data.get("combustivel_retorno")
     if "valor_avarias" in finalize_data:
         contrato.valor_avarias = finalize_data.get("valor_avarias")
+    if "taxa_combustivel" in finalize_data:
+        contrato.taxa_combustivel = finalize_data.get("taxa_combustivel")
+    if "taxa_limpeza" in finalize_data:
+        contrato.taxa_limpeza = finalize_data.get("taxa_limpeza")
+    if "taxa_higienizacao" in finalize_data:
+        contrato.taxa_higienizacao = finalize_data.get("taxa_higienizacao")
+    if "taxa_pneus" in finalize_data:
+        contrato.taxa_pneus = finalize_data.get("taxa_pneus")
+    if "taxa_acessorios" in finalize_data:
+        contrato.taxa_acessorios = finalize_data.get("taxa_acessorios")
+    if "valor_franquia_seguro" in finalize_data:
+        contrato.valor_franquia_seguro = finalize_data.get("valor_franquia_seguro")
+    if "taxa_administrativa" in finalize_data:
+        contrato.taxa_administrativa = finalize_data.get("taxa_administrativa")
     if "desconto" in finalize_data:
         contrato.desconto = finalize_data.get("desconto")
     if finalize_data.get("observacoes"):
@@ -630,6 +716,13 @@ def finalizar_contrato(
         km_livres=contrato.km_livres,
         valor_km_excedente=contrato.valor_km_excedente,
         valor_avarias=contrato.valor_avarias,
+        taxa_combustivel=contrato.taxa_combustivel,
+        taxa_limpeza=contrato.taxa_limpeza,
+        taxa_higienizacao=contrato.taxa_higienizacao,
+        taxa_pneus=contrato.taxa_pneus,
+        taxa_acessorios=contrato.taxa_acessorios,
+        valor_franquia_seguro=contrato.valor_franquia_seguro,
+        taxa_administrativa=contrato.taxa_administrativa,
         desconto=contrato.desconto,
     )
     contrato.status = "finalizado"
@@ -705,6 +798,13 @@ def prorrogar_contrato(
             km_livres=contrato.km_livres,
             valor_km_excedente=contrato.valor_km_excedente,
             valor_avarias=contrato.valor_avarias,
+            taxa_combustivel=contrato.taxa_combustivel,
+            taxa_limpeza=contrato.taxa_limpeza,
+            taxa_higienizacao=contrato.taxa_higienizacao,
+            taxa_pneus=contrato.taxa_pneus,
+            taxa_acessorios=contrato.taxa_acessorios,
+            valor_franquia_seguro=contrato.valor_franquia_seguro,
+            taxa_administrativa=contrato.taxa_administrativa,
             desconto=contrato.desconto,
         )
 

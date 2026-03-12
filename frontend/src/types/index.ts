@@ -74,6 +74,13 @@ export interface Contrato {
   valor_hora_extra?: number;
   valor_km_excedente?: number;
   valor_avarias?: number;
+  taxa_combustivel?: number;
+  taxa_limpeza?: number;
+  taxa_higienizacao?: number;
+  taxa_pneus?: number;
+  taxa_acessorios?: number;
+  valor_franquia_seguro?: number;
+  taxa_administrativa?: number;
   desconto?: number;
   tipo?: 'cliente' | 'empresa';
   cliente?: { nome: string };

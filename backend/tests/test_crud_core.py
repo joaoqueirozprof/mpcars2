@@ -147,6 +147,11 @@ def test_contrato_uses_vehicle_km_and_can_be_closed(client, admin_headers, db_se
             "km_atual_veiculo": 15480,
             "combustivel_retorno": "3/4",
             "valor_avarias": 50,
+            "taxa_combustivel": 40,
+            "taxa_limpeza": 25,
+            "taxa_acessorios": 15,
+            "taxa_administrativa": 10,
+            "desconto": 20,
             "observacoes": "Risco leve no para-choque",
         },
     )
@@ -160,8 +165,12 @@ def test_contrato_uses_vehicle_km_and_can_be_closed(client, admin_headers, db_se
 
     assert contrato.status == "finalizado"
     assert float(contrato.km_final) == 15480
-    assert float(contrato.valor_total) == 500.0
+    assert float(contrato.valor_total) == 570.0
     assert contrato.combustivel_retorno == "3/4"
+    assert float(contrato.taxa_combustivel) == 40.0
+    assert float(contrato.taxa_limpeza) == 25.0
+    assert float(contrato.taxa_acessorios) == 15.0
+    assert float(contrato.taxa_administrativa) == 10.0
     assert float(veiculo.km_atual) == 15480
     assert veiculo.status == "disponivel"
     assert len(checkins) == 2

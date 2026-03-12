@@ -43,11 +43,39 @@ type CloseoutForm = {
   km_atual_veiculo: number
   combustivel_retorno: string
   valor_avarias: number
+  taxa_combustivel: number
+  taxa_limpeza: number
+  taxa_higienizacao: number
+  taxa_pneus: number
+  taxa_acessorios: number
+  valor_franquia_seguro: number
+  taxa_administrativa: number
   desconto: number
   observacoes: string
 }
 
+type CloseoutFeeFieldKey =
+  | 'valor_avarias'
+  | 'taxa_combustivel'
+  | 'taxa_limpeza'
+  | 'taxa_higienizacao'
+  | 'taxa_pneus'
+  | 'taxa_acessorios'
+  | 'valor_franquia_seguro'
+  | 'taxa_administrativa'
+
 const fuelOptions = ['1/4', '1/2', '3/4', 'Cheio']
+
+const closeoutFeeFields: Array<{ key: CloseoutFeeFieldKey; label: string; hint: string }> = [
+  { key: 'valor_avarias', label: 'Avarias / funilaria', hint: 'Batidas, riscos, lanternas, para-choque' },
+  { key: 'taxa_combustivel', label: 'Taxa de combustivel', hint: 'Retorno abaixo do nivel combinado' },
+  { key: 'taxa_limpeza', label: 'Limpeza simples', hint: 'Sujeira interna ou externa fora do normal' },
+  { key: 'taxa_higienizacao', label: 'Higienizacao / odor', hint: 'Fumaca, mau cheiro ou sujeira pesada' },
+  { key: 'taxa_pneus', label: 'Pneus / rodas', hint: 'Pneu furado, roda riscada, calibragem extrema' },
+  { key: 'taxa_acessorios', label: 'Acessorios / documentos', hint: 'Chave, estepe, triangulo, documentos, tapetes' },
+  { key: 'valor_franquia_seguro', label: 'Franquia de seguro', hint: 'Quando houver sinistro com coparticipacao' },
+  { key: 'taxa_administrativa', label: 'Taxa administrativa', hint: 'Custos operacionais extras na devolucao' },
+]
 
 const getErrorMessage = (error: any, fallback: string) =>
   error?.response?.data?.detail || error?.response?.data?.message || fallback
@@ -76,6 +104,15 @@ const statusClass = (status: string) =>
   }[status] || 'badge-info')
 
 const toDateInput = (value?: string) => (value ? value.slice(0, 10) : '')
+
+const getRoundedDaysBetween = (start?: string, end?: string | Date) => {
+  if (!start || !end) return 0
+
+  const startDate = new Date(start)
+  const endDate = end instanceof Date ? end : new Date(end)
+  const diffMs = Math.max(endDate.getTime() - startDate.getTime(), 0)
+  return Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)))
+}
 
 const Contratos: React.FC = () => {
   const queryClient = useQueryClient()
@@ -109,6 +146,13 @@ const Contratos: React.FC = () => {
     km_atual_veiculo: 0,
     combustivel_retorno: '',
     valor_avarias: 0,
+    taxa_combustivel: 0,
+    taxa_limpeza: 0,
+    taxa_higienizacao: 0,
+    taxa_pneus: 0,
+    taxa_acessorios: 0,
+    valor_franquia_seguro: 0,
+    taxa_administrativa: 0,
     desconto: 0,
     observacoes: '',
   })
@@ -271,6 +315,13 @@ const Contratos: React.FC = () => {
       km_atual_veiculo: contrato.veiculo?.km_atual ?? contrato.quilometragem_inicial ?? 0,
       combustivel_retorno: contrato.combustivel_retorno || '',
       valor_avarias: contrato.valor_avarias || 0,
+      taxa_combustivel: contrato.taxa_combustivel || 0,
+      taxa_limpeza: contrato.taxa_limpeza || 0,
+      taxa_higienizacao: contrato.taxa_higienizacao || 0,
+      taxa_pneus: contrato.taxa_pneus || 0,
+      taxa_acessorios: contrato.taxa_acessorios || 0,
+      valor_franquia_seguro: contrato.valor_franquia_seguro || 0,
+      taxa_administrativa: contrato.taxa_administrativa || 0,
       desconto: contrato.desconto || 0,
       observacoes: '',
     })
@@ -295,11 +346,32 @@ const Contratos: React.FC = () => {
   const closeoutKmExcedente = closingContract
     ? Math.max(closeoutKmRodado - (closingContract.km_livres || 0), 0)
     : 0
-  const closeoutValorExtra = closingContract
+  const closeoutValorKmExcedente = closingContract
     ? closeoutKmExcedente * (closingContract.valor_km_excedente || 0)
     : 0
+  const closeoutBillingEnd = closingContract ? new Date(Math.max(new Date(closingContract.data_fim).getTime(), Date.now())) : null
+  const closeoutDiasContratados = closingContract
+    ? Math.max(closingContract.qtd_diarias || getRoundedDaysBetween(closingContract.data_inicio, closingContract.data_fim), 1)
+    : 0
+  const closeoutDiasFaturados = closingContract && closeoutBillingEnd
+    ? getRoundedDaysBetween(closingContract.data_inicio, closeoutBillingEnd)
+    : 0
+  const closeoutValorBaseContratado = closingContract
+    ? closeoutDiasContratados * (closingContract.valor_diaria || 0)
+    : 0
+  const closeoutValorBaseAtualizado = closingContract
+    ? closeoutDiasFaturados * (closingContract.valor_diaria || 0)
+    : 0
+  const closeoutValorAtraso = Math.max(closeoutValorBaseAtualizado - closeoutValorBaseContratado, 0)
+  const closeoutTaxasOperacionais = closeoutFeeFields.reduce(
+    (total, field) => total + Number(closeoutData[field.key] || 0),
+    0
+  )
+  const closeoutFeeBreakdown = closeoutFeeFields
+    .map((field) => ({ ...field, value: Number(closeoutData[field.key] || 0) }))
+    .filter((field) => field.value > 0)
   const closeoutEstimativa = closingContract
-    ? Math.max((closingContract.valor_total || 0) + closeoutValorExtra + closeoutData.valor_avarias - closeoutData.desconto, 0)
+    ? Math.max(closeoutValorBaseAtualizado + closeoutValorKmExcedente + closeoutTaxasOperacionais - closeoutData.desconto, 0)
     : 0
 
   const summary = useMemo(() => {
@@ -336,6 +408,10 @@ const Contratos: React.FC = () => {
     if (!closingContract) return
     if (closeoutData.km_atual_veiculo <= 0) {
       toast.error('Informe o KM atual do veiculo.')
+      return
+    }
+    if (closeoutData.km_atual_veiculo < (closingContract.quilometragem_inicial || 0)) {
+      toast.error('O KM atual nao pode ser menor que o KM de retirada.')
       return
     }
     closeMutation.mutate(closeoutData)
@@ -540,17 +616,45 @@ const Contratos: React.FC = () => {
 
       {closingContract && (
         <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !closeMutation.isPending && setClosingContract(null)}>
-          <div className="modal-content max-w-lg w-full" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-content max-w-5xl w-full" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
               <h3 className="text-lg font-display font-bold text-slate-900">Encerrar Contrato</h3>
               <button onClick={() => setClosingContract(null)} className="btn-icon" disabled={closeMutation.isPending}><X size={20} /></button>
             </div>
             <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-              <div className="modal-scroll-body space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4"><p className="text-xs uppercase tracking-wide text-slate-500">KM de Retirada</p><p className="text-2xl font-bold text-slate-900 mt-2">{(closingContract.quilometragem_inicial || 0).toLocaleString('pt-BR')}</p></div>
-                  <div><label className="input-label">KM Atual do Veiculo *</label><input type="number" min={closingContract.quilometragem_inicial || 0} value={closeoutData.km_atual_veiculo} onChange={(event) => setCloseoutData({ ...closeoutData, km_atual_veiculo: Number(event.target.value) || 0 })} className="input-field" /></div>
+              <div className="modal-scroll-body space-y-6">
+                <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+                  <p className="font-semibold">Fechamento completo da devolucao</p>
+                  <p className="mt-1 text-blue-900/80">
+                    KM excedente e atraso entram automaticamente pelo contrato. Use as taxas abaixo para combustivel, limpeza, danos,
+                    pneus, acessorios, franquia e outras ocorrencias da devolucao.
+                  </p>
                 </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">KM de Retirada</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-2">{(closingContract.quilometragem_inicial || 0).toLocaleString('pt-BR')}</p>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Diarias Faturadas</p>
+                    <p className="text-2xl font-bold text-slate-900 mt-2">{closeoutDiasFaturados}</p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Contratadas: {closeoutDiasContratados} | Base atualizada: {formatCurrency(closeoutValorBaseAtualizado)}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="input-label">KM Atual do Veiculo *</label>
+                    <input
+                      type="number"
+                      min={closingContract.quilometragem_inicial || 0}
+                      value={closeoutData.km_atual_veiculo}
+                      onChange={(event) => setCloseoutData({ ...closeoutData, km_atual_veiculo: Number(event.target.value) || 0 })}
+                      className="input-field"
+                    />
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="input-label">Combustivel Retorno</label>
@@ -559,16 +663,64 @@ const Contratos: React.FC = () => {
                       {fuelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
                     </select>
                   </div>
-                  <div><label className="input-label">Valor Avarias</label><input type="number" step="0.01" value={closeoutData.valor_avarias} onChange={(event) => setCloseoutData({ ...closeoutData, valor_avarias: Number(event.target.value) || 0 })} className="input-field" /></div>
+                  <div>
+                    <label className="input-label">Desconto Final</label>
+                    <input type="number" step="0.01" value={closeoutData.desconto} onChange={(event) => setCloseoutData({ ...closeoutData, desconto: Number(event.target.value) || 0 })} className="input-field" />
+                  </div>
                 </div>
-                <div><label className="input-label">Desconto Final</label><input type="number" step="0.01" value={closeoutData.desconto} onChange={(event) => setCloseoutData({ ...closeoutData, desconto: Number(event.target.value) || 0 })} className="input-field" /></div>
+
+                <div className="space-y-3">
+                  <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+                    <div>
+                      <h4 className="text-base font-semibold text-slate-900">Taxas de devolucao</h4>
+                      <p className="text-sm text-slate-500">Preencha apenas as situacoes que realmente aconteceram com o veiculo.</p>
+                    </div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Campos adicionais de cobranca</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {closeoutFeeFields.map((field) => (
+                      <div key={field.key} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                        <label className="input-label">{field.label}</label>
+                        <p className="mb-3 text-xs text-slate-500">{field.hint}</p>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={closeoutData[field.key]}
+                          onChange={(event) => setCloseoutData({ ...closeoutData, [field.key]: Number(event.target.value) || 0 })}
+                          className="input-field bg-white"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm space-y-2">
+                  <div className="flex justify-between"><span>Valor base contratado</span><strong>{formatCurrency(closeoutValorBaseContratado)}</strong></div>
+                  <div className="flex justify-between"><span>Valor base atualizado</span><strong>{formatCurrency(closeoutValorBaseAtualizado)}</strong></div>
+                  {closeoutValorAtraso > 0 && <div className="flex justify-between text-amber-700"><span>Acrescimo por atraso</span><strong>{formatCurrency(closeoutValorAtraso)}</strong></div>}
                   <div className="flex justify-between"><span>KM rodado</span><strong>{closeoutKmRodado.toLocaleString('pt-BR')}</strong></div>
                   <div className="flex justify-between"><span>KM excedente</span><strong>{closeoutKmExcedente.toLocaleString('pt-BR')}</strong></div>
-                  <div className="flex justify-between"><span>Cobranca extra</span><strong>{formatCurrency(closeoutValorExtra)}</strong></div>
-                  <div className="flex justify-between pt-2 border-t border-blue-200"><span>Total estimado</span><strong>{formatCurrency(closeoutEstimativa)}</strong></div>
+                  <div className="flex justify-between"><span>Cobranca KM excedente</span><strong>{formatCurrency(closeoutValorKmExcedente)}</strong></div>
+                  <div className="flex justify-between"><span>Taxas operacionais</span><strong>{formatCurrency(closeoutTaxasOperacionais)}</strong></div>
+                  {closeoutFeeBreakdown.length > 0 && (
+                    <div className="pt-2 border-t border-blue-200 space-y-1">
+                      {closeoutFeeBreakdown.map((field) => (
+                        <div key={field.key} className="flex justify-between text-slate-600">
+                          <span>{field.label}</span>
+                          <strong>{formatCurrency(field.value)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex justify-between text-red-600"><span>Desconto final</span><strong>- {formatCurrency(closeoutData.desconto)}</strong></div>
+                  <div className="flex justify-between pt-2 border-t border-blue-200 text-base"><span>Total estimado</span><strong>{formatCurrency(closeoutEstimativa)}</strong></div>
                 </div>
-                <div><label className="input-label">Observacoes</label><textarea rows={3} value={closeoutData.observacoes} onChange={(event) => setCloseoutData({ ...closeoutData, observacoes: event.target.value })} className="input-field" /></div>
+
+                <div>
+                  <label className="input-label">Observacoes</label>
+                  <textarea rows={4} value={closeoutData.observacoes} onChange={(event) => setCloseoutData({ ...closeoutData, observacoes: event.target.value })} className="input-field" />
+                </div>
               </div>
               <div className="modal-footer">
                 <button onClick={() => setClosingContract(null)} className="btn-secondary" disabled={closeMutation.isPending}>Cancelar</button>
