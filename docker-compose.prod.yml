@@ -22,6 +22,10 @@ services:
       RUN_LEGACY_COLUMN_MIGRATIONS: ${RUN_LEGACY_COLUMN_MIGRATIONS:-false}
       BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
       BACKUP_DIRECTORY: ${BACKUP_DIRECTORY:-/backups}
+      GOOGLE_DRIVE_BACKUP_ENABLED: ${GOOGLE_DRIVE_BACKUP_ENABLED:-false}
+      GOOGLE_DRIVE_SYNC_ON_BACKUP: ${GOOGLE_DRIVE_SYNC_ON_BACKUP:-true}
+      GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID:-}
+      GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE: ${GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE:-}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
       CORS_ORIGINS: ${CORS_ORIGINS}
       TRUSTED_HOSTS: ${TRUSTED_HOSTS}
@@ -29,6 +33,7 @@ services:
       - uploads:/app/uploads
       - pdfs:/app/pdfs
       - ./backups:${BACKUP_DIRECTORY:-/backups}
+      - ./secrets:/run/secrets:ro
 
   mpcars2-celery:
     env_file:
@@ -39,8 +44,13 @@ services:
       REDIS_URL: ${REDIS_URL}
       BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
       BACKUP_DIRECTORY: ${BACKUP_DIRECTORY:-/backups}
+      GOOGLE_DRIVE_BACKUP_ENABLED: ${GOOGLE_DRIVE_BACKUP_ENABLED:-false}
+      GOOGLE_DRIVE_SYNC_ON_BACKUP: ${GOOGLE_DRIVE_SYNC_ON_BACKUP:-true}
+      GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID:-}
+      GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE: ${GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE:-}
     volumes:
       - ./backups:${BACKUP_DIRECTORY:-/backups}
+      - ./secrets:/run/secrets:ro
 
   mpcars2-web:
     ports:

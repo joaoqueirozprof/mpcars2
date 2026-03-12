@@ -13,3 +13,4 @@ node_modules/
 .npm-cache/
 frontend/.npm-cache/
 backend/tests/.test.sqlite3
+secrets/
