@@ -44,6 +44,7 @@ export interface Veiculo {
   empresa_id: string;
   data_compra: string;
   valor_aquisicao: number;
+  valor_diaria?: number;
   observacoes: string;
   foto_url: string | null;
   ativo: boolean;
@@ -188,9 +189,16 @@ export interface Reserva {
   data_inicio: string;
   data_fim: string;
   data_reserva: string;
-  empresa_id: string;
-  status: 'ativa' | 'cancelada' | 'convertida';
-  observacoes: string;
+  empresa_id?: string;
+  status: 'ativa' | 'pendente' | 'confirmada' | 'cancelada' | 'convertida';
+  status_original?: 'pendente' | 'confirmada' | 'cancelada' | 'convertida';
+  valor_estimado?: number;
+  cliente?: { nome: string };
+  veiculo?: {
+    placa: string;
+    marca?: string;
+    modelo?: string;
+  };
 }
 
 export interface DashboardStats {

@@ -41,6 +41,7 @@ def _apply_legacy_aliases(item, result: dict) -> dict:
     elif table_name == "reservas":
         result["data_reserva"] = result.get("data_criacao")
         status = result.get("status")
+        result["status_original"] = status
         if status in {"pendente", "confirmada"}:
             result["status"] = "ativa"
 

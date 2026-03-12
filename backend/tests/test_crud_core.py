@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.models import CheckinCheckout, Cliente, Contrato, Veiculo
+from app.models import CheckinCheckout, Cliente, Contrato, Reserva, Veiculo
 
 
 def test_cliente_crud_with_legacy_aliases(client, admin_headers):
@@ -235,3 +235,85 @@ def test_dashboard_root_returns_operational_data(client, admin_headers, db_sessi
     assert body["top_veiculos"][0]["placa"] == "XYZ9876"
     assert len(body["contratos_atrasados"]) == 1
     assert len(body["alertas"]) >= 1
+
+
+def test_reserva_can_be_confirmed_and_converted_to_contract(client, admin_headers, db_session):
+    cliente = Cliente(
+        nome="Reserva Cliente",
+        cpf="22233344455",
+        email="reserva@example.org",
+        telefone="11999990002",
+        ativo=True,
+    )
+    veiculo = Veiculo(
+        placa="RES4321",
+        marca="Renault",
+        modelo="Kwid",
+        km_atual=8120,
+        status="disponivel",
+        ativo=True,
+    )
+    db_session.add_all([cliente, veiculo])
+    db_session.commit()
+    db_session.refresh(cliente)
+    db_session.refresh(veiculo)
+
+    create_response = client.post(
+        "/api/v1/reservas/",
+        headers=admin_headers,
+        json={
+            "cliente_id": cliente.id,
+            "veiculo_id": veiculo.id,
+            "data_inicio": "2026-03-15T09:00:00",
+            "data_fim": "2026-03-18T09:00:00",
+            "valor_estimado": 540,
+        },
+    )
+
+    assert create_response.status_code == 200, create_response.text
+    reserva_id = create_response.json()["id"]
+
+    confirmar_response = client.post(
+        f"/api/v1/reservas/{reserva_id}/confirmar",
+        headers=admin_headers,
+    )
+    assert confirmar_response.status_code == 200, confirmar_response.text
+
+    converter_response = client.post(
+        f"/api/v1/reservas/{reserva_id}/converter",
+        headers=admin_headers,
+        json={
+            "valor_diaria": 180,
+            "tipo": "cliente",
+            "hora_saida": "09:30",
+            "combustivel_saida": "Cheio",
+            "km_livres": 250,
+            "valor_km_excedente": 1.9,
+            "desconto": 20,
+            "observacoes": "Cliente retirou com reserva confirmada",
+        },
+    )
+
+    assert converter_response.status_code == 200, converter_response.text
+    payload = converter_response.json()
+    assert payload["numero"].startswith("CTR-RES-")
+    assert float(payload["valor_total"]) == 520.0
+
+    db_session.expire_all()
+    reserva = db_session.query(Reserva).filter(Reserva.id == reserva_id).first()
+    contrato = db_session.query(Contrato).filter(Contrato.id == payload["id"]).first()
+    veiculo = db_session.query(Veiculo).filter(Veiculo.id == veiculo.id).first()
+    checkins = db_session.query(CheckinCheckout).filter(CheckinCheckout.contrato_id == contrato.id).all()
+
+    assert reserva.status == "convertida"
+    assert contrato is not None
+    assert contrato.status == "ativo"
+    assert contrato.numero.startswith("CTR-RES-")
+    assert float(contrato.km_inicial) == 8120.0
+    assert contrato.combustivel_saida == "Cheio"
+    assert float(contrato.km_livres) == 250.0
+    assert float(contrato.valor_km_excedente) == 1.9
+    assert int(contrato.qtd_diarias) == 3
+    assert float(contrato.valor_total) == 520.0
+    assert veiculo.status == "alugado"
+    assert len(checkins) == 1
