@@ -523,22 +523,22 @@ const Contratos: React.FC = () => {
     : 0
   const closeoutBillingEnd = closingContract ? new Date(Math.max(new Date(closingContract.data_fim).getTime(), Date.now())) : null
   const closeoutDiasContratados = closingContract
-    ? str(closingContract.tipo || '').toLowerCase() === 'empresa'
+    ? String(closingContract.tipo || '').toLowerCase() === 'empresa'
       ? 1
       : Math.max(closingContract.qtd_diarias || getRoundedDaysBetween(closingContract.data_inicio, closingContract.data_fim), 1)
     : 0
   const closeoutDiasFaturados = closingContract && closeoutBillingEnd
-    ? str(closingContract.tipo || '').toLowerCase() === 'empresa'
+    ? String(closingContract.tipo || '').toLowerCase() === 'empresa'
       ? 1
       : getRoundedDaysBetween(closingContract.data_inicio, closeoutBillingEnd)
     : 0
   const closeoutValorBaseContratado = closingContract
-    ? str(closingContract.tipo || '').toLowerCase() === 'empresa'
+    ? String(closingContract.tipo || '').toLowerCase() === 'empresa'
       ? closingContract.valor_diaria || 0
       : closeoutDiasContratados * (closingContract.valor_diaria || 0)
     : 0
   const closeoutValorBaseAtualizado = closingContract
-    ? str(closingContract.tipo || '').toLowerCase() === 'empresa'
+    ? String(closingContract.tipo || '').toLowerCase() === 'empresa'
       ? closingContract.valor_diaria || 0
       : closeoutDiasFaturados * (closingContract.valor_diaria || 0)
     : 0
