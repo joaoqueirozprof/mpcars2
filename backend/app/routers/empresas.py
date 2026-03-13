@@ -422,10 +422,23 @@ def list_usos_empresa(
         query = query.filter(UsoVeiculoEmpresa.status == status_filter)
 
     usos = query.order_by(UsoVeiculoEmpresa.data_criacao.desc()).all()
+    uso_ids = [uso.id for uso in usos]
+    relatorios_por_uso: dict[int, list[RelatorioNF]] = {}
+    if uso_ids:
+        relatorios = (
+            db.query(RelatorioNF)
+            .filter(RelatorioNF.uso_id.in_(uso_ids))
+            .order_by(RelatorioNF.data_criacao.desc())
+            .all()
+        )
+        for relatorio in relatorios:
+            relatorios_por_uso.setdefault(relatorio.uso_id, []).append(relatorio)
 
     result = []
     for uso in usos:
         veiculo = uso.veiculo
+        relatorios_uso = relatorios_por_uso.get(uso.id, [])
+        ultimo_relatorio = relatorios_uso[0] if relatorios_uso else None
         km_percorrido = uso.km_percorrido or (
             (uso.km_final - uso.km_inicial) if uso.km_final and uso.km_inicial else None
         )
@@ -454,6 +467,15 @@ def list_usos_empresa(
             "data_inicio": uso.data_inicio.isoformat() if uso.data_inicio else None,
             "data_fim": uso.data_fim.isoformat() if uso.data_fim else None,
             "status": uso.status,
+            "medicoes_salvas": len(relatorios_uso),
+            "total_km_faturada": float(sum(rel.km_percorrida or 0 for rel in relatorios_uso)),
+            "total_km_excedente": float(sum(rel.km_excedente or 0 for rel in relatorios_uso)),
+            "total_valor_extra": float(sum(float(rel.valor_total_extra or 0) for rel in relatorios_uso)),
+            "ultimo_periodo_inicio": ultimo_relatorio.periodo_inicio.isoformat() if ultimo_relatorio and ultimo_relatorio.periodo_inicio else None,
+            "ultimo_periodo_fim": ultimo_relatorio.periodo_fim.isoformat() if ultimo_relatorio and ultimo_relatorio.periodo_fim else None,
+            "ultimo_km_faturada": float(ultimo_relatorio.km_percorrida or 0) if ultimo_relatorio else None,
+            "ultimo_km_excedente": float(ultimo_relatorio.km_excedente or 0) if ultimo_relatorio else None,
+            "ultimo_valor_total_extra": float(ultimo_relatorio.valor_total_extra or 0) if ultimo_relatorio else None,
         })
 
     return result

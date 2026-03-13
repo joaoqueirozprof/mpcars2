@@ -34,6 +34,12 @@ interface VeiculoUso {
   data_inicio: string | null
   data_fim: string | null
   status: string
+  medicoes_salvas?: number
+  total_km_faturada?: number
+  total_km_excedente?: number
+  total_valor_extra?: number
+  ultimo_periodo_inicio?: string | null
+  ultimo_periodo_fim?: string | null
   selected: boolean
   km_input: string
   km_permitido_input: string
@@ -112,6 +118,7 @@ const Relatorios: React.FC = () => {
   const [selectedEmpresa, setSelectedEmpresa] = useState('')
   const [veiculosUso, setVeiculosUso] = useState<VeiculoUso[]>([])
   const [loadingUsos, setLoadingUsos] = useState(false)
+  const [nfPeriod, setNfPeriod] = useState({ start: '', end: '' })
   const [exportDates, setExportDates] = useState({ start: '', end: '' })
   const [exportStatus, setExportStatus] = useState('')
 
@@ -240,6 +247,8 @@ const Relatorios: React.FC = () => {
       const valorExtra = parseFloat(uso.valor_km_extra_input)
       if (kmPermitido >= 0 && uso.km_permitido_input) url += `&km_referencia=${kmPermitido}`
       if (valorExtra >= 0 && uso.valor_km_extra_input) url += `&valor_km_extra=${valorExtra}`
+      if (nfPeriod.start) url += `&periodo_inicio=${nfPeriod.start}`
+      if (nfPeriod.end) url += `&periodo_fim=${nfPeriod.end}`
       await downloadFile(url, `nf_${uso.placa}.pdf`)
       toast.dismiss(tid)
       toast.success(`NF gerada para ${uso.placa}!`)
@@ -271,6 +280,8 @@ const Relatorios: React.FC = () => {
     try {
       const body = {
         empresa_id: parseInt(selectedEmpresa, 10),
+        periodo_inicio: nfPeriod.start || undefined,
+        periodo_fim: nfPeriod.end || undefined,
         veiculos: selecionados.map((veiculo) => {
           const item: any = {
             uso_id: veiculo.id,
@@ -686,6 +697,26 @@ const Relatorios: React.FC = () => {
                 </div>
               )}
             </div>
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div>
+                <label className="input-label">Periodo inicial da medicao</label>
+                <input
+                  type="date"
+                  value={nfPeriod.start}
+                  onChange={(event) => setNfPeriod((current) => ({ ...current, start: event.target.value }))}
+                  className="input-field"
+                />
+              </div>
+              <div>
+                <label className="input-label">Periodo final da medicao</label>
+                <input
+                  type="date"
+                  value={nfPeriod.end}
+                  onChange={(event) => setNfPeriod((current) => ({ ...current, end: event.target.value }))}
+                  className="input-field"
+                />
+              </div>
+            </div>
           </div>
 
           <div className="mt-6">
@@ -739,7 +770,9 @@ const Relatorios: React.FC = () => {
                             <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-400">
                               {veiculo.data_inicio && <span>Inicio: {new Date(veiculo.data_inicio).toLocaleDateString('pt-BR')}</span>}
                               {veiculo.data_fim && <span>Fim: {new Date(veiculo.data_fim).toLocaleDateString('pt-BR')}</span>}
-                              {veiculo.valor_diaria_empresa && <span>Diaria: {formatCurrency(Number(veiculo.valor_diaria_empresa))}</span>}
+                              {veiculo.valor_diaria_empresa && <span>Valor base: {formatCurrency(Number(veiculo.valor_diaria_empresa))}</span>}
+                              {veiculo.medicoes_salvas ? <span>{veiculo.medicoes_salvas} medicoes salvas</span> : null}
+                              {veiculo.ultimo_periodo_inicio ? <span>Ultimo periodo: {new Date(veiculo.ultimo_periodo_inicio).toLocaleDateString('pt-BR')} a {new Date(veiculo.ultimo_periodo_fim || veiculo.ultimo_periodo_inicio).toLocaleDateString('pt-BR')}</span> : null}
                             </div>
                           </div>
                         </div>

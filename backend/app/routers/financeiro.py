@@ -16,10 +16,12 @@ from app.models import (
     DespesaLoja,
     DespesaNF,
     DespesaVeiculo,
+    Empresa,
     IpvaRegistro,
     LancamentoFinanceiro,
     Manutencao,
     Multa,
+    RelatorioNF,
     Seguro,
     ProrrogacaoContrato,
     Quilometragem,
@@ -159,6 +161,189 @@ def _append_manual_records(records: list, db: Session):
         )
 
 
+def _merge_date_with_existing(date_value: Optional[date], current_value: Optional[datetime]) -> Optional[datetime]:
+    if date_value is None:
+        return current_value
+
+    current_time = current_value.time() if current_value else datetime.min.time()
+    return datetime.combine(date_value, current_time)
+
+
+def _parse_finance_category_suffix(category: Optional[str], fallback: Optional[str] = None) -> Optional[str]:
+    if not category:
+        return fallback
+
+    if "/" in category:
+        _, suffix = category.split("/", 1)
+        cleaned_suffix = suffix.strip().lower()
+        return cleaned_suffix or fallback
+
+    cleaned_category = category.strip().lower()
+    return cleaned_category or fallback
+
+
+def _normalize_source_status(record_id: str, status_value: Optional[str], current_status: Optional[str] = None) -> Optional[str]:
+    if status_value is None:
+        return current_status
+
+    normalized = str(status_value).lower()
+    prefix = record_id.split("-", 1)[0]
+
+    if prefix == "mt":
+        if normalized == "pago":
+            return "concluida"
+        if normalized == "cancelado":
+            return "cancelada"
+        if current_status in {"pendente", "agendada", "em_andamento"}:
+            return current_status
+        return "agendada"
+
+    if prefix in {"ip", "sg"}:
+        return "pago" if normalized == "pago" else "pendente"
+
+    if prefix == "ml":
+        if normalized == "pago":
+            return "pago"
+        if normalized == "cancelado":
+            return "recurso"
+        return "pendente"
+
+    return normalized
+
+
+def _serialize_updated_finance_record(record_id: str, obj, db: Session) -> dict:
+    prefix = record_id.split("-", 1)[0]
+
+    if prefix == "fm":
+        return {
+            "id": f"fm-{obj.id}",
+            "data": obj.data.isoformat() if obj.data else None,
+            "tipo": obj.tipo,
+            "categoria": obj.categoria,
+            "descricao": obj.descricao,
+            "valor": float(obj.valor or 0.0),
+            "status": obj.status,
+            "origem_tipo": "manual",
+        }
+
+    if prefix == "dc":
+        return {
+            "id": f"dc-{obj.id}",
+            "data": obj.data_registro.isoformat() if obj.data_registro else None,
+            "tipo": "despesa",
+            "categoria": obj.tipo or "Contrato",
+            "descricao": obj.descricao,
+            "valor": float(obj.valor or 0.0),
+            "status": "pago",
+            "origem_tipo": "despesa_contrato",
+            "contrato_id": str(obj.contrato_id) if obj.contrato_id else None,
+        }
+
+    if prefix == "dv":
+        return {
+            "id": f"dv-{obj.id}",
+            "data": obj.data.isoformat() if obj.data else None,
+            "tipo": "despesa",
+            "categoria": obj.tipo or "Veiculo",
+            "descricao": obj.descricao,
+            "valor": float(obj.valor or 0.0),
+            "status": "pago",
+            "origem_tipo": "despesa_veiculo",
+            "veiculo_id": str(obj.veiculo_id) if obj.veiculo_id else None,
+        }
+
+    if prefix == "dl":
+        return {
+            "id": f"dl-{obj.id}",
+            "data": obj.data.isoformat() if obj.data else None,
+            "tipo": "despesa",
+            "categoria": obj.categoria or "Loja",
+            "descricao": obj.descricao,
+            "valor": float(obj.valor or 0.0),
+            "status": "pago",
+            "origem_tipo": "despesa_loja",
+        }
+
+    if prefix == "mt":
+        veiculo = db.query(Veiculo).filter(Veiculo.id == obj.veiculo_id).first() if obj.veiculo_id else None
+        return {
+            "id": f"mt-{obj.id}",
+            "data": (
+                obj.data_realizada.isoformat()
+                if obj.data_realizada
+                else obj.data_proxima.isoformat()
+                if obj.data_proxima
+                else None
+            ),
+            "tipo": "despesa",
+            "categoria": "Manutencao / {}".format((obj.tipo or "pendente").title()),
+            "descricao": f"{obj.descricao} | {_vehicle_label(veiculo)}" if veiculo else obj.descricao,
+            "valor": float(obj.custo or 0.0),
+            "status": "pago" if obj.status == "concluida" else "pendente",
+            "veiculo_id": str(obj.veiculo_id) if obj.veiculo_id else None,
+            "origem_tipo": "manutencao",
+        }
+
+    if prefix == "ip":
+        veiculo = db.query(Veiculo).filter(Veiculo.id == obj.veiculo_id).first() if obj.veiculo_id else None
+        return {
+            "id": f"ip-{obj.id}",
+            "data": (
+                obj.data_pagamento.isoformat()
+                if obj.data_pagamento
+                else obj.data_vencimento.isoformat()
+                if obj.data_vencimento
+                else None
+            ),
+            "tipo": "despesa",
+            "categoria": "IPVA",
+            "descricao": f"IPVA {obj.ano_referencia or ''} | {_vehicle_label(veiculo)}".strip(),
+            "valor": float(obj.valor_ipva or obj.valor_pago or 0.0),
+            "status": "pago" if obj.status == "pago" else "pendente",
+            "veiculo_id": str(obj.veiculo_id) if obj.veiculo_id else None,
+            "origem_tipo": "ipva",
+        }
+
+    if prefix == "sg":
+        veiculo = db.query(Veiculo).filter(Veiculo.id == obj.veiculo_id).first() if obj.veiculo_id else None
+        return {
+            "id": f"sg-{obj.id}",
+            "data": obj.data_inicio.isoformat() if obj.data_inicio else None,
+            "tipo": "despesa",
+            "categoria": "Seguro",
+            "descricao": f"{obj.seguradora or 'Seguro'} - {obj.numero_apolice or 'sem apolice'} | {_vehicle_label(veiculo)}" if veiculo else (obj.seguradora or "Seguro"),
+            "valor": float(obj.valor or 0.0),
+            "status": "pago" if obj.status == "pago" else "pendente",
+            "veiculo_id": str(obj.veiculo_id) if obj.veiculo_id else None,
+            "origem_tipo": "seguro",
+        }
+
+    if prefix == "ml":
+        veiculo = db.query(Veiculo).filter(Veiculo.id == obj.veiculo_id).first() if obj.veiculo_id else None
+        return {
+            "id": f"ml-{obj.id}",
+            "data": (
+                obj.data_pagamento.isoformat()
+                if obj.data_pagamento
+                else obj.data_vencimento.isoformat()
+                if obj.data_vencimento
+                else obj.data_infracao.isoformat()
+                if obj.data_infracao
+                else None
+            ),
+            "tipo": "despesa",
+            "categoria": "Multa",
+            "descricao": f"{obj.descricao or 'Multa'} | {_vehicle_label(veiculo)}" if veiculo else (obj.descricao or "Multa"),
+            "valor": float(obj.valor or 0.0),
+            "status": "pago" if obj.status == "pago" else "pendente",
+            "veiculo_id": str(obj.veiculo_id) if obj.veiculo_id else None,
+            "contrato_id": str(obj.contrato_id) if obj.contrato_id else None,
+            "origem_tipo": "multa",
+        }
+
+    raise HTTPException(status_code=400, detail="Tipo de registro desconhecido")
+
+
 def _contrato_payment_status(contrato: Contrato) -> str:
     if contrato.status_pagamento:
         return str(contrato.status_pagamento).lower()
@@ -207,6 +392,48 @@ def _serialize_contrato_record(contrato: Contrato, cliente_nome: str) -> dict:
     }
 
 
+def _relatorio_nf_total(relatorio: RelatorioNF, uso: Optional[UsoVeiculoEmpresa]) -> float:
+    valor_base = float(uso.valor_diaria_empresa or 0) if uso else 0.0
+    valor_extra = float(relatorio.valor_total_extra or 0)
+    return round(valor_base + valor_extra, 2)
+
+
+def _serialize_relatorio_nf_record(
+    relatorio: RelatorioNF,
+    uso: Optional[UsoVeiculoEmpresa],
+    veiculo: Optional[Veiculo],
+    empresa: Optional[Empresa],
+) -> dict:
+    periodo_inicio = relatorio.periodo_inicio.strftime("%d/%m/%Y") if relatorio.periodo_inicio else "-"
+    periodo_fim = relatorio.periodo_fim.strftime("%d/%m/%Y") if relatorio.periodo_fim else "-"
+    referencia = (
+        relatorio.periodo_fim.isoformat()
+        if relatorio.periodo_fim
+        else relatorio.data_criacao.isoformat()
+        if relatorio.data_criacao
+        else None
+    )
+    km_texto = float(relatorio.km_percorrida or 0)
+    km_excedente = float(relatorio.km_excedente or 0)
+    empresa_nome = empresa.nome if empresa else "Empresa"
+    veiculo_nome = _vehicle_label(veiculo)
+    return {
+        "id": f"nf-{relatorio.id}",
+        "data": referencia,
+        "tipo": "receita",
+        "categoria": "Faturamento empresa",
+        "descricao": (
+            f"NF {empresa_nome} | {veiculo_nome} | Periodo {periodo_inicio} a {periodo_fim} | "
+            f"KM {km_texto:,.1f} | Excedente {km_excedente:,.1f}"
+        ),
+        "valor": _relatorio_nf_total(relatorio, uso),
+        "valor_recebido": 0.0,
+        "status": "pendente",
+        "veiculo_id": str(relatorio.veiculo_id) if relatorio.veiculo_id else None,
+        "origem_tipo": "nf_empresa",
+    }
+
+
 @router.get("/")
 def list_financeiro(
     page: int = 1,
@@ -233,6 +460,8 @@ def list_financeiro(
 
     contratos = db.query(Contrato).all()
     for contrato in contratos:
+        if str(contrato.tipo or "").lower() == "empresa":
+            continue
         cliente = db.query(Cliente).filter(Cliente.id == contrato.cliente_id).first() if contrato.cliente_id else None
         cliente_nome = cliente.nome if cliente else "Desconhecido"
         records.append(
@@ -246,6 +475,29 @@ def list_financeiro(
                 "status": "pago" if contrato.status == "finalizado" else "pendente",
             }
         )
+
+    relatorios_nf = db.query(RelatorioNF).all()
+    uso_ids = [relatorio.uso_id for relatorio in relatorios_nf if relatorio.uso_id]
+    usos_empresa = {}
+    empresas = {}
+    veiculos_nf = {}
+    if uso_ids:
+        for uso in db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id.in_(uso_ids)).all():
+            usos_empresa[uso.id] = uso
+        empresa_ids = [uso.empresa_id for uso in usos_empresa.values() if uso.empresa_id]
+        veiculo_ids = [uso.veiculo_id for uso in usos_empresa.values() if uso.veiculo_id]
+        if empresa_ids:
+            for empresa in db.query(Empresa).filter(Empresa.id.in_(empresa_ids)).all():
+                empresas[empresa.id] = empresa
+        if veiculo_ids:
+            for veiculo in db.query(Veiculo).filter(Veiculo.id.in_(veiculo_ids)).all():
+                veiculos_nf[veiculo.id] = veiculo
+
+    for relatorio in relatorios_nf:
+        uso = usos_empresa.get(relatorio.uso_id)
+        empresa = empresas.get(relatorio.empresa_id) if relatorio.empresa_id else None
+        veiculo = veiculos_nf.get(relatorio.veiculo_id) if relatorio.veiculo_id else None
+        records.append(_serialize_relatorio_nf_record(relatorio, uso, veiculo, empresa))
 
     despesas_contrato = db.query(DespesaContrato).all()
     for despesa in despesas_contrato:
@@ -426,16 +678,29 @@ def get_resumo(
     """Get financial summary."""
     contratos = db.query(Contrato).all()
     total_receita = sum(
-        float(contrato.valor_total) for contrato in contratos if contrato.valor_total
+        float(contrato.valor_total)
+        for contrato in contratos
+        if contrato.valor_total and str(contrato.tipo or "").lower() != "empresa"
     )
     total_receita_recebida = sum(
         float(contrato.valor_total or 0)
         if _contrato_payment_status(contrato) == "pago"
         else float(contrato.valor_recebido or 0)
         for contrato in contratos
-        if contrato.valor_total
+        if contrato.valor_total and str(contrato.tipo or "").lower() != "empresa"
     )
     total_receita_pendente = max(total_receita - total_receita_recebida, 0.0)
+    relatorios_nf = db.query(RelatorioNF).all()
+    uso_ids = [relatorio.uso_id for relatorio in relatorios_nf if relatorio.uso_id]
+    usos_empresa = {}
+    if uso_ids:
+        for uso in db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id.in_(uso_ids)).all():
+            usos_empresa[uso.id] = uso
+    total_receita_nf = sum(
+        _relatorio_nf_total(relatorio, usos_empresa.get(relatorio.uso_id))
+        for relatorio in relatorios_nf
+    )
+
     total_despesa_contrato = sum(
         float(despesa.valor) for despesa in db.query(DespesaContrato).all() if despesa.valor
     )
@@ -476,7 +741,7 @@ def get_resumo(
         if lancamento.valor
     )
 
-    total_receita += total_manual_receita
+    total_receita += total_manual_receita + total_receita_nf
     total_receita_recebida += total_manual_receita_recebida
     total_receita_pendente = max(total_receita - total_receita_recebida, 0.0)
     total_despesa = (
@@ -506,6 +771,7 @@ def get_resumo(
         "despesa_seguro": total_seguros,
         "despesa_ipva": total_ipva,
         "despesa_multa": total_multas,
+        "receita_nf_empresa": total_receita_nf,
     }
 
 
@@ -550,42 +816,134 @@ def update_lancamento_financeiro(
     current_user: User = Depends(get_current_user),
     request: Request = None,
 ):
-    """Update only manual financial records created via the finance page."""
-    if not record_id.startswith("fm-"):
+    """Update finance records directly from the consolidated finance view."""
+    update_data = lancamento_data.model_dump(exclude_unset=True)
+    prefix, id_str = record_id.split("-", 1) if "-" in record_id else ("", "")
+    if not prefix or not id_str.isdigit():
+        raise HTTPException(status_code=400, detail="ID inválido")
+
+    real_id = int(id_str)
+
+    if prefix == "fm":
+        obj = db.query(LancamentoFinanceiro).filter(LancamentoFinanceiro.id == real_id).first()
+        if not obj:
+            raise HTTPException(status_code=404, detail="Registro não encontrado")
+        for key, value in update_data.items():
+            setattr(obj, key, value)
+    elif prefix == "dc":
+        obj = db.query(DespesaContrato).filter(DespesaContrato.id == real_id).first()
+        if not obj:
+            raise HTTPException(status_code=404, detail="Registro não encontrado")
+        if "categoria" in update_data:
+            obj.tipo = update_data["categoria"]
+        if "descricao" in update_data:
+            obj.descricao = update_data["descricao"]
+        if "valor" in update_data:
+            obj.valor = update_data["valor"]
+        if "data" in update_data:
+            obj.data_registro = _merge_date_with_existing(update_data["data"], obj.data_registro)
+    elif prefix == "dv":
+        obj = db.query(DespesaVeiculo).filter(DespesaVeiculo.id == real_id).first()
+        if not obj:
+            raise HTTPException(status_code=404, detail="Registro não encontrado")
+        if "categoria" in update_data:
+            obj.tipo = update_data["categoria"]
+        if "descricao" in update_data:
+            obj.descricao = update_data["descricao"]
+        if "valor" in update_data:
+            obj.valor = update_data["valor"]
+        if "data" in update_data:
+            obj.data = _merge_date_with_existing(update_data["data"], obj.data)
+    elif prefix == "dl":
+        obj = db.query(DespesaLoja).filter(DespesaLoja.id == real_id).first()
+        if not obj:
+            raise HTTPException(status_code=404, detail="Registro não encontrado")
+        if "categoria" in update_data:
+            obj.categoria = update_data["categoria"]
+        if "descricao" in update_data:
+            obj.descricao = update_data["descricao"]
+        if "valor" in update_data:
+            obj.valor = update_data["valor"]
+        if "data" in update_data:
+            merged_date = _merge_date_with_existing(update_data["data"], obj.data)
+            obj.data = merged_date
+            if merged_date:
+                obj.mes = merged_date.month
+                obj.ano = merged_date.year
+    elif prefix == "mt":
+        obj = db.query(Manutencao).filter(Manutencao.id == real_id).first()
+        if not obj:
+            raise HTTPException(status_code=404, detail="Registro não encontrado")
+        if "categoria" in update_data:
+            obj.tipo = _parse_finance_category_suffix(update_data["categoria"], obj.tipo)
+        if "descricao" in update_data:
+            obj.descricao = update_data["descricao"]
+        if "valor" in update_data:
+            obj.custo = update_data["valor"]
+        obj.status = _normalize_source_status(record_id, update_data.get("status"), obj.status)
+        if "data" in update_data:
+            if obj.status == "concluida":
+                obj.data_realizada = update_data["data"]
+            else:
+                obj.data_proxima = update_data["data"]
+    elif prefix == "ip":
+        obj = db.query(IpvaRegistro).filter(IpvaRegistro.id == real_id).first()
+        if not obj:
+            raise HTTPException(status_code=404, detail="Registro não encontrado")
+        if "valor" in update_data:
+            obj.valor_ipva = update_data["valor"]
+            if obj.status == "pago":
+                obj.valor_pago = update_data["valor"]
+        obj.status = _normalize_source_status(record_id, update_data.get("status"), obj.status)
+        if "data" in update_data:
+            if obj.status == "pago":
+                obj.data_pagamento = update_data["data"]
+                obj.valor_pago = float(obj.valor_ipva or update_data.get("valor") or obj.valor_pago or 0)
+            else:
+                obj.data_vencimento = update_data["data"]
+    elif prefix == "sg":
+        obj = db.query(Seguro).filter(Seguro.id == real_id).first()
+        if not obj:
+            raise HTTPException(status_code=404, detail="Registro nÃ£o encontrado")
+        if "descricao" in update_data:
+            obj.seguradora = update_data["descricao"]
+        if "valor" in update_data:
+            obj.valor = update_data["valor"]
+        obj.status = _normalize_source_status(record_id, update_data.get("status"), obj.status)
+        if "data" in update_data:
+            obj.data_inicio = update_data["data"]
+    elif prefix == "ml":
+        obj = db.query(Multa).filter(Multa.id == real_id).first()
+        if not obj:
+            raise HTTPException(status_code=404, detail="Registro não encontrado")
+        if "descricao" in update_data:
+            obj.descricao = update_data["descricao"]
+        if "valor" in update_data:
+            obj.valor = update_data["valor"]
+        obj.status = _normalize_source_status(record_id, update_data.get("status"), obj.status)
+        if "data" in update_data:
+            if obj.status == "pago":
+                obj.data_pagamento = update_data["data"]
+            else:
+                obj.data_vencimento = update_data["data"]
+    else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A edição só está disponível para lançamentos manuais do financeiro.",
+            detail="A edição ainda não está disponível para este tipo de lançamento.",
         )
 
-    lancamento_id = int(record_id.split("-", 1)[1])
-    lancamento = db.query(LancamentoFinanceiro).filter(LancamentoFinanceiro.id == lancamento_id).first()
-    if not lancamento:
-        raise HTTPException(status_code=404, detail="Registro não encontrado")
-
-    update_data = lancamento_data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(lancamento, key, value)
-
     db.commit()
-    db.refresh(lancamento)
+    db.refresh(obj)
     log_activity(
         db,
         current_user,
         "EDITAR",
-        "LancamentoFinanceiro",
-        f"Lançamento financeiro editado: {lancamento.descricao}",
-        lancamento.id,
+        "Financeiro",
+        f"Lançamento financeiro editado: {record_id}",
+        real_id,
         request,
     )
-    return {
-        "id": f"fm-{lancamento.id}",
-        "data": lancamento.data.isoformat(),
-        "tipo": lancamento.tipo,
-        "categoria": lancamento.categoria,
-        "descricao": lancamento.descricao,
-        "valor": float(lancamento.valor),
-        "status": lancamento.status,
-    }
+    return _serialize_updated_finance_record(record_id, obj, db)
 
 
 @router.post("/despesa-contrato")

@@ -40,6 +40,72 @@ router = APIRouter(
 )
 
 
+def _resolve_nf_period(periodo_inicio: Optional[date], periodo_fim: Optional[date]) -> tuple[date, date]:
+    today = date.today()
+    start = periodo_inicio or (periodo_fim.replace(day=1) if periodo_fim else today.replace(day=1))
+    end = periodo_fim or today
+
+    if start > end:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="periodo_inicio deve ser menor ou igual a periodo_fim.",
+        )
+
+    return start, end
+
+
+def _upsert_relatorio_nf(
+    db: Session,
+    *,
+    uso: UsoVeiculoEmpresa,
+    periodo_inicio: date,
+    periodo_fim: date,
+    km_percorrido: float,
+    km_referencia: Optional[float] = None,
+    valor_km_extra: Optional[float] = None,
+) -> RelatorioNF:
+    km_real = float(km_percorrido or 0)
+    km_permitido = float(km_referencia if km_referencia is not None else (uso.km_referencia or 0))
+    taxa_extra = float(valor_km_extra if valor_km_extra is not None else (uso.valor_km_extra or 0))
+    km_excedente = max(km_real - km_permitido, 0.0)
+    valor_total_extra = km_excedente * taxa_extra
+
+    uso.km_percorrido = km_real
+    if km_referencia is not None:
+        uso.km_referencia = km_referencia
+    if valor_km_extra is not None:
+        uso.valor_km_extra = valor_km_extra
+
+    relatorio = (
+        db.query(RelatorioNF)
+        .filter(
+            RelatorioNF.uso_id == uso.id,
+            RelatorioNF.periodo_inicio == periodo_inicio,
+            RelatorioNF.periodo_fim == periodo_fim,
+        )
+        .first()
+    )
+    if not relatorio:
+        relatorio = RelatorioNF(
+            veiculo_id=uso.veiculo_id,
+            empresa_id=uso.empresa_id,
+            uso_id=uso.id,
+            periodo_inicio=periodo_inicio,
+            periodo_fim=periodo_fim,
+        )
+        db.add(relatorio)
+
+    relatorio.veiculo_id = uso.veiculo_id
+    relatorio.empresa_id = uso.empresa_id
+    relatorio.uso_id = uso.id
+    relatorio.periodo_inicio = periodo_inicio
+    relatorio.periodo_fim = periodo_fim
+    relatorio.km_percorrida = km_real
+    relatorio.km_excedente = km_excedente
+    relatorio.valor_total_extra = valor_total_extra
+    return relatorio
+
+
 def _parse_optional_export_dates(
     data_inicio: Optional[str],
     data_fim: Optional[str],
@@ -149,6 +215,8 @@ def get_nf_pdf(
     km_percorrido: Optional[float] = None,
     km_referencia: Optional[float] = None,
     valor_km_extra: Optional[float] = None,
+    periodo_inicio: Optional[str] = None,
+    periodo_fim: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -161,8 +229,19 @@ def get_nf_pdf(
     if not empresa:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Empresa nao encontrada para este uso")
 
+    parsed_start, parsed_end = _parse_optional_export_dates(periodo_inicio, periodo_fim)
+    billing_start, billing_end = _resolve_nf_period(parsed_start, parsed_end)
+
     if km_percorrido is not None:
-        uso.km_percorrido = km_percorrido
+        _upsert_relatorio_nf(
+            db,
+            uso=uso,
+            periodo_inicio=billing_start,
+            periodo_fim=billing_end,
+            km_percorrido=km_percorrido,
+            km_referencia=km_referencia,
+            valor_km_extra=valor_km_extra,
+        )
         db.commit()
 
     try:
@@ -204,6 +283,8 @@ class VeiculoKM(PydanticBase):
 class NFEmpresaRequest(PydanticBase):
     empresa_id: int
     veiculos: TypingList[VeiculoKM]
+    periodo_inicio: Optional[date] = None
+    periodo_fim: Optional[date] = None
 
 
 @router.post("/nf/empresa/pdf")
@@ -220,10 +301,20 @@ def get_nf_empresa_pdf(
     if not request.veiculos:
         raise HTTPException(status_code=400, detail="Nenhum veiculo informado")
 
+    billing_start, billing_end = _resolve_nf_period(request.periodo_inicio, request.periodo_fim)
+
     for item in request.veiculos:
         uso = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id == item.uso_id).first()
         if uso:
-            uso.km_percorrido = item.km_percorrido
+            _upsert_relatorio_nf(
+                db,
+                uso=uso,
+                periodo_inicio=billing_start,
+                periodo_fim=billing_end,
+                km_percorrido=item.km_percorrido,
+                km_referencia=item.km_referencia,
+                valor_km_extra=item.valor_km_extra,
+            )
     db.commit()
 
     veiculos_km = [

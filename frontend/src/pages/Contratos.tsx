@@ -263,9 +263,14 @@ const Contratos: React.FC = () => {
   })
 
   const { data: clientes } = useQuery({
-    queryKey: ['clientes-select'],
+    queryKey: ['clientes-select', formData.tipo],
     queryFn: async () => {
-      const { data } = await api.get<PaginatedResponse<any>>('/clientes', { params: { limit: 1000 } })
+      const { data } = await api.get<PaginatedResponse<any>>('/clientes', {
+        params: {
+          limit: 1000,
+          tipo: formData.tipo === 'empresa' ? 'pj' : 'pf',
+        },
+      })
       return data.data || []
     },
   })
@@ -283,14 +288,25 @@ const Contratos: React.FC = () => {
   })
 
   const availableVehicles = useMemo(
-    () =>
-      (veiculos || []).filter(
+    () => {
+      const baseVehicles = (veiculos || []).filter(
         (veiculo: any) =>
           veiculo.status === 'disponivel' ||
           String(veiculo.id) === String(formData.veiculo_id) ||
           String(veiculo.id) === String(editingContract?.veiculo_id)
-      ),
-    [veiculos, formData.veiculo_id, editingContract]
+      )
+
+      if (formData.tipo !== 'empresa') {
+        return baseVehicles
+      }
+
+      const empresaVehicleIds = new Set(
+        (empresaUsos || []).map((uso: any) => String(uso.veiculo_id))
+      )
+
+      return baseVehicles.filter((veiculo: any) => empresaVehicleIds.has(String(veiculo.id)))
+    },
+    [veiculos, formData.veiculo_id, editingContract, formData.tipo, empresaUsos]
   )
 
   const selectedCliente = clientes?.find((cliente: any) => String(cliente.id) === String(formData.cliente_id))
@@ -298,11 +314,11 @@ const Contratos: React.FC = () => {
   const selectedEmpresaId = selectedCliente?.empresa_id ? String(selectedCliente.empresa_id) : ''
 
   const { data: empresaUsos } = useQuery({
-    queryKey: ['empresa-usos-select', selectedEmpresaId],
+    queryKey: ['empresa-usos-select', selectedEmpresaId, editingContract?.id || 'novo'],
     enabled: Boolean(selectedEmpresaId && formData.tipo === 'empresa'),
     queryFn: async () => {
       const { data } = await api.get(`/empresas/${selectedEmpresaId}/usos`, {
-        params: { status_filter: 'ativo' },
+        params: { status_filter: editingContract ? undefined : 'ativo' },
       })
       return data || []
     },
@@ -460,9 +476,11 @@ const Contratos: React.FC = () => {
 
   const handleVehicleChange = (veiculoId: string) => {
     const veiculo: any = (veiculos || []).find((item: any) => String(item.id) === String(veiculoId))
+    const usoEmpresa = (empresaUsos || []).find((uso: any) => String(uso.veiculo_id) === String(veiculoId))
     setFormData((current) => ({
       ...current,
       veiculo_id: veiculoId,
+      empresa_uso_id: current.tipo === 'empresa' ? String(usoEmpresa?.id || '') : '',
       km_atual_veiculo: veiculo?.km_atual || 0,
       valor_diaria: current.valor_diaria || veiculo?.valor_diaria || config.valor_diaria_padrao || 0,
     }))
@@ -490,8 +508,11 @@ const Contratos: React.FC = () => {
   }, [formData.tipo, selectedEmpresaUso])
 
   const dias = formData.data_inicio && formData.data_fim ? calculateDays(formData.data_inicio, formData.data_fim) : 0
-  const diasPreview = formData.vigencia_indeterminada ? 1 : dias
-  const valorPreview = Math.max(diasPreview * formData.valor_diaria - formData.desconto, 0)
+  const diasPreview = formData.tipo === 'empresa' || formData.vigencia_indeterminada ? 1 : dias
+  const valorPreview = Math.max(
+    (formData.tipo === 'empresa' ? formData.valor_diaria : diasPreview * formData.valor_diaria) - formData.desconto,
+    0
+  )
 
   const closeoutKmRodado = closingContract
     ? Math.max(closeoutData.km_atual_veiculo - (closingContract.quilometragem_inicial || 0), 0)
@@ -504,16 +525,24 @@ const Contratos: React.FC = () => {
     : 0
   const closeoutBillingEnd = closingContract ? new Date(Math.max(new Date(closingContract.data_fim).getTime(), Date.now())) : null
   const closeoutDiasContratados = closingContract
-    ? Math.max(closingContract.qtd_diarias || getRoundedDaysBetween(closingContract.data_inicio, closingContract.data_fim), 1)
+    ? str(closingContract.tipo || '').toLowerCase() === 'empresa'
+      ? 1
+      : Math.max(closingContract.qtd_diarias || getRoundedDaysBetween(closingContract.data_inicio, closingContract.data_fim), 1)
     : 0
   const closeoutDiasFaturados = closingContract && closeoutBillingEnd
-    ? getRoundedDaysBetween(closingContract.data_inicio, closeoutBillingEnd)
+    ? str(closingContract.tipo || '').toLowerCase() === 'empresa'
+      ? 1
+      : getRoundedDaysBetween(closingContract.data_inicio, closeoutBillingEnd)
     : 0
   const closeoutValorBaseContratado = closingContract
-    ? closeoutDiasContratados * (closingContract.valor_diaria || 0)
+    ? str(closingContract.tipo || '').toLowerCase() === 'empresa'
+      ? closingContract.valor_diaria || 0
+      : closeoutDiasContratados * (closingContract.valor_diaria || 0)
     : 0
   const closeoutValorBaseAtualizado = closingContract
-    ? closeoutDiasFaturados * (closingContract.valor_diaria || 0)
+    ? str(closingContract.tipo || '').toLowerCase() === 'empresa'
+      ? closingContract.valor_diaria || 0
+      : closeoutDiasFaturados * (closingContract.valor_diaria || 0)
     : 0
   const closeoutValorAtraso = Math.max(closeoutValorBaseAtualizado - closeoutValorBaseContratado, 0)
   const closeoutTaxasOperacionais = closeoutFeeFields.reduce(
@@ -737,13 +766,14 @@ const Contratos: React.FC = () => {
               <div className="modal-scroll-body space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="input-label">Cliente *</label>
+                    <label className="input-label">{formData.tipo === 'empresa' ? 'Empresa cliente *' : 'Cliente *'}</label>
                     <select
                       value={formData.cliente_id}
                       onChange={(event) =>
                         setFormData({
                           ...formData,
                           cliente_id: event.target.value,
+                          veiculo_id: '',
                           empresa_uso_id: '',
                         })
                       }
@@ -759,10 +789,9 @@ const Contratos: React.FC = () => {
                       value={formData.tipo}
                       onChange={(event) =>
                         setFormData({
-                          ...formData,
+                          ...buildForm(),
                           tipo: event.target.value as 'cliente' | 'empresa',
-                          vigencia_indeterminada:
-                            event.target.value === 'empresa' ? formData.vigencia_indeterminada : false,
+                          valor_diaria: config.valor_diaria_padrao || 0,
                         })
                       }
                       className="input-field"
@@ -773,7 +802,7 @@ const Contratos: React.FC = () => {
                   </div>
                 </div>
                 <div>
-                  <label className="input-label">Veiculo *</label>
+                  <label className="input-label">{formData.tipo === 'empresa' ? 'Veiculo vinculado a empresa *' : 'Veiculo *'}</label>
                   <select value={formData.veiculo_id} onChange={(event) => handleVehicleChange(event.target.value)} className="input-field">
                     <option value="">Selecione</option>
                     {availableVehicles.map((veiculo: any) => <option key={veiculo.id} value={veiculo.id}>{veiculo.placa} - {veiculo.marca} {veiculo.modelo}</option>)}
@@ -812,6 +841,11 @@ const Contratos: React.FC = () => {
                     {!selectedEmpresaId && (
                       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                         Escolha um cliente vinculado a uma empresa para habilitar a parametrizacao corporativa.
+                      </div>
+                    )}
+                    {selectedEmpresaId && (empresaUsos || []).length === 0 && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        Essa empresa ainda nao possui veiculos vinculados. Abra o cadastro da empresa e use o botao <strong>Frota</strong> para associar os carros.
                       </div>
                     )}
                     {selectedEmpresaUso && (

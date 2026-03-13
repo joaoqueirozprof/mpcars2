@@ -48,6 +48,9 @@ const Veiculos: React.FC = () => {
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [viewingPhoto, setViewingPhoto] = useState<{ isOpen: boolean; url?: string; placa?: string }>({ isOpen: false })
   const [historyVehicle, setHistoryVehicle] = useState<Veiculo | null>(null)
+  const [financialHistory, setFinancialHistory] = useState<any | null>(null)
+  const [financialHistoryError, setFinancialHistoryError] = useState('')
+  const [isLoadingFinancialHistory, setIsLoadingFinancialHistory] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
@@ -64,15 +67,6 @@ const Veiculos: React.FC = () => {
   })
 
   const currentYear = new Date().getFullYear()
-
-  const { data: financialHistory, isLoading: isLoadingFinancialHistory } = useQuery({
-    queryKey: ['veiculo-financial-history', historyVehicle?.id],
-    enabled: Boolean(historyVehicle?.id),
-    queryFn: async () => {
-      const { data } = await api.get(`/veiculos/historico-financeiro/${historyVehicle?.id}`)
-      return data
-    },
-  })
 
   // Fetch all vehicles
   const { data: vehiclesData, isLoading: isLoadingVehicles } = useQuery({
@@ -300,6 +294,21 @@ const Veiculos: React.FC = () => {
       resetForm()
     }
     setIsModalOpen(true)
+  }
+
+  const openFinancialHistory = async (vehicle: Veiculo) => {
+    setHistoryVehicle(vehicle)
+    setFinancialHistory(null)
+    setFinancialHistoryError('')
+    setIsLoadingFinancialHistory(true)
+    try {
+      const { data } = await api.get(`/veiculos/historico-financeiro/${vehicle.id}`)
+      setFinancialHistory(data)
+    } catch (error: any) {
+      setFinancialHistoryError(error.response?.data?.detail || 'Nao foi possivel carregar o historico financeiro desse veiculo.')
+    } finally {
+      setIsLoadingFinancialHistory(false)
+    }
   }
 
   useEffect(() => {
@@ -537,7 +546,8 @@ const Veiculos: React.FC = () => {
                       <td className="table-cell text-center">
                         <div className="flex items-center justify-center gap-2">
                           <button
-                            onClick={() => setHistoryVehicle(vehicle)}
+                            type="button"
+                            onClick={() => openFinancialHistory(vehicle)}
                             className="btn-icon transition-colors duration-200"
                             title="Historico financeiro do veiculo"
                           >
@@ -880,6 +890,11 @@ const Veiculos: React.FC = () => {
                 <div className="flex items-center justify-center py-16 text-slate-500">
                   <Loader2 size={22} className="animate-spin mr-2" />
                   Carregando historico financeiro...
+                </div>
+              ) : financialHistoryError ? (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-8 text-center text-red-700">
+                  <p className="font-semibold">Nao foi possivel abrir o historico financeiro.</p>
+                  <p className="mt-2 text-sm">{financialHistoryError}</p>
                 </div>
               ) : (
                 <>

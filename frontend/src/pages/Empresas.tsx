@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Edit, Trash2, Building2, CarFront, X } from 'lucide-react'
 import { useEffect } from 'react'
@@ -16,6 +16,8 @@ import { formatPhone, formatCNPJ, formatCurrency, formatDate } from '@/lib/utils
 type EmpresaUso = {
   id: string
   veiculo_id: string
+  empresa_id?: string
+  contrato_id?: string | null
   placa?: string
   modelo?: string
   marca?: string
@@ -27,6 +29,17 @@ type EmpresaUso = {
   km_referencia?: number | null
   valor_km_extra?: number | null
   valor_diaria_empresa?: number | null
+  km_excedente?: number | null
+  valor_excedente?: number | null
+  medicoes_salvas?: number
+  total_km_faturada?: number
+  total_km_excedente?: number
+  total_valor_extra?: number
+  ultimo_periodo_inicio?: string | null
+  ultimo_periodo_fim?: string | null
+  ultimo_km_faturada?: number | null
+  ultimo_km_excedente?: number | null
+  ultimo_valor_total_extra?: number | null
 }
 
 type EmpresaUsoForm = {
@@ -46,6 +59,7 @@ const Empresas: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingCompany, setEditingCompany] = useState<Empresa | null>(null)
   const [fleetCompany, setFleetCompany] = useState<Empresa | null>(null)
+  const submitActionRef = useRef<'save' | 'save-and-fleet'>('save')
   const [editingUsage, setEditingUsage] = useState<EmpresaUso | null>(null)
   const [usageDeleteConfirm, setUsageDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
@@ -119,10 +133,14 @@ const Empresas: React.FC = () => {
 
   const createMutation = useMutation({
     mutationFn: (formData: any) => api.post('/empresas', formData),
-    onSuccess: () => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['empresas'] })
       setIsModalOpen(false)
+      if (submitActionRef.current === 'save-and-fleet') {
+        setFleetCompany(response.data)
+      }
       resetForm()
+      submitActionRef.current = 'save'
       toast.success('Empresa criada com sucesso!')
     },
     onError: (error: any) => {
@@ -132,10 +150,14 @@ const Empresas: React.FC = () => {
 
   const updateMutation = useMutation({
     mutationFn: (formData: any) => api.patch(`/empresas/${editingCompany?.id}`, formData),
-    onSuccess: () => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['empresas'] })
       setIsModalOpen(false)
+      if (submitActionRef.current === 'save-and-fleet') {
+        setFleetCompany(response.data)
+      }
       resetForm()
+      submitActionRef.current = 'save'
       toast.success('Empresa atualizada com sucesso!')
     },
     onError: (error: any) => {
@@ -229,6 +251,7 @@ const Empresas: React.FC = () => {
   }
 
   const handleOpenModal = (company?: Empresa) => {
+    submitActionRef.current = 'save'
     if (company) {
       setEditingCompany(company)
       setFormData(company)
@@ -344,10 +367,11 @@ const Empresas: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => handleOpenFleetModal(row)}
-            className="btn-icon p-2 text-slate-600 hover:text-cyan-600 hover:bg-cyan-50 rounded transition-colors"
-            title="Gerir frota da empresa"
+            className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-700 transition-colors hover:bg-cyan-100"
+            title="Vincular veiculos da empresa"
           >
             <CarFront size={16} />
+            Frota
           </button>
           <button
             onClick={() => handleOpenModal(row)}
@@ -570,6 +594,20 @@ const Empresas: React.FC = () => {
               <button
                 type="submit"
                 form="empresa-form"
+                onClick={() => {
+                  submitActionRef.current = 'save-and-fleet'
+                }}
+                className="btn-secondary"
+                disabled={createMutation.isPending || updateMutation.isPending}
+              >
+                Salvar e vincular veiculos
+              </button>
+              <button
+                type="submit"
+                form="empresa-form"
+                onClick={() => {
+                  submitActionRef.current = 'save'
+                }}
                 className="btn-primary"
                 disabled={createMutation.isPending || updateMutation.isPending}
               >
@@ -715,6 +753,12 @@ const Empresas: React.FC = () => {
                               <p>KM permitida: <strong className="text-slate-900">{Number(uso.km_referencia || 0).toLocaleString('pt-BR')} km</strong></p>
                               <p>Valor mensal: <strong className="text-slate-900">{formatCurrency(Number(uso.valor_diaria_empresa || 0))}</strong></p>
                               <p>KM extra: <strong className="text-slate-900">{formatCurrency(Number(uso.valor_km_extra || 0))} / km</strong></p>
+                              <p>Medicoes salvas: <strong className="text-slate-900">{Number(uso.medicoes_salvas || 0)}</strong></p>
+                              <p>Total KM faturada: <strong className="text-slate-900">{Number(uso.total_km_faturada || 0).toLocaleString('pt-BR')} km</strong></p>
+                              <p>Total KM excedente: <strong className="text-slate-900">{Number(uso.total_km_excedente || 0).toLocaleString('pt-BR')} km</strong></p>
+                              <p>Total valor extra: <strong className="text-slate-900">{formatCurrency(Number(uso.total_valor_extra || 0))}</strong></p>
+                              <p>Ultimo periodo: <strong className="text-slate-900">{uso.ultimo_periodo_inicio ? `${formatDate(uso.ultimo_periodo_inicio)} a ${formatDate(uso.ultimo_periodo_fim)}` : 'Sem medicao'}</strong></p>
+                              <p>Ultima KM faturada: <strong className="text-slate-900">{Number(uso.ultimo_km_faturada || 0).toLocaleString('pt-BR')} km</strong></p>
                             </div>
                           </div>
                           <div className="flex items-center gap-2">

@@ -144,7 +144,7 @@ class PDFNFService:
         # Calculate despesas total
         total_despesas = sum(float(d.valor or 0) for d in despesas)
 
-        # Calculate diarias
+        # Valor base do faturamento corporativo: mensal / por periodo, nao diario.
         valor_diaria = float(uso.valor_diaria_empresa or 0)
         dias = 0
         if uso.data_inicio and uso.data_fim:
@@ -153,7 +153,7 @@ class PDFNFService:
         elif uso.data_inicio:
             delta = datetime.now() - uso.data_inicio
             dias = max(1, delta.days)
-        total_diarias = valor_diaria * dias
+        total_diarias = valor_diaria
 
         total_geral = total_diarias + valor_km_excedente + total_despesas
 
@@ -322,8 +322,8 @@ class PDFNFService:
         story.append(Paragraph(f"{section_num}. RESUMO FINANCEIRO", styles['section_header']))
 
         resumo_data = [
-            [Paragraph("<b>Diárias</b>", styles['normal_nf']),
-             Paragraph(f"{dias} dias x {PDFNFService._format_currency(valor_diaria)}", styles['normal_nf']),
+            [Paragraph("<b>Valor Base</b>", styles['normal_nf']),
+             Paragraph(f"Período faturado a {PDFNFService._format_currency(valor_diaria)}", styles['normal_nf']),
              Paragraph(PDFNFService._format_currency(total_diarias), styles['right_nf'])],
             [Paragraph("<b>KM Excedente</b>", styles['normal_nf']),
              Paragraph(f"{km_excedente:,.1f} km x {PDFNFService._format_currency(taxa_km_extra)}/km", styles['normal_nf']),
@@ -468,14 +468,14 @@ class PDFNFService:
             valor_exc = km_exc * taxa
             total_desp = sum(float(d.valor or 0) for d in despesas)
 
-            # Diarias
+            # Valor base do faturamento corporativo: fixo por ciclo medido.
             valor_diaria = float(uso.valor_diaria_empresa or 0)
             dias = 0
             if uso.data_inicio and uso.data_fim:
                 dias = max(1, (uso.data_fim - uso.data_inicio).days)
             elif uso.data_inicio:
                 dias = max(1, (datetime.now() - uso.data_inicio).days)
-            total_diarias = valor_diaria * dias
+            total_diarias = valor_diaria
 
             subtotal = total_diarias + valor_exc + total_desp
 
@@ -538,7 +538,7 @@ class PDFNFService:
         # === TOTAL GERAL ===
         story.append(Paragraph("TOTAL GERAL", styles['section_header']))
         totais_data = [
-            [Paragraph("<b>Total Diárias</b>", styles['normal_nf']),
+            [Paragraph("<b>Total Base</b>", styles['normal_nf']),
              Paragraph(PDFNFService._format_currency(total_diarias_geral), styles['right_nf'])],
             [Paragraph("<b>Total KM Excedente</b>", styles['normal_nf']),
              Paragraph(PDFNFService._format_currency(total_valor_extra), styles['right_nf'])],

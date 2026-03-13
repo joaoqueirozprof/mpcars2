@@ -62,6 +62,10 @@ interface PaginationParams {
   limit: number
 }
 
+const EDITABLE_FINANCE_PREFIXES = ['fm-', 'dc-', 'dv-', 'dl-', 'mt-', 'ip-', 'ml-', 'sg-']
+const DELETABLE_FINANCE_PREFIXES = ['fm-', 'dc-', 'dv-', 'dl-']
+const FINANCE_CATEGORIES = ['Salarios', 'Aluguel', 'Combustivel', 'Manutencao', 'Seguros', 'Publicidade', 'Vendas', 'Juros', 'Outros']
+
 const FinanceiroPage: React.FC = () => {
   const queryClient = useQueryClient()
   const [pagination, setPagination] = useState<PaginationParams>({ page: 1, limit: 10 })
@@ -209,12 +213,19 @@ const FinanceiroPage: React.FC = () => {
         setIsPaymentModalOpen(true)
         return
       }
-      if (!record.id.startsWith('fm-')) {
+      if (!EDITABLE_FINANCE_PREFIXES.some((prefix) => record.id.startsWith(prefix))) {
         toast.error('Edite contratos e despesas nos módulos específicos. Aqui só editamos lançamentos manuais.')
         return
       }
       setEditingRecord(record)
-      setFormData(record)
+      setFormData({
+        tipo: record.tipo,
+        categoria: record.categoria,
+        descricao: record.descricao,
+        valor: record.valor,
+        data: record.data ? record.data.slice(0, 10) : new Date().toISOString().split('T')[0],
+        status: record.status,
+      })
     } else {
       resetForm()
     }
@@ -283,6 +294,13 @@ const FinanceiroPage: React.FC = () => {
   }, [summaryData])
 
   const filteredRecords = useMemo(() => records, [records])
+  const isManualEditing = !editingRecord || editingRecord.id.startsWith('fm-')
+  const categoryOptions = useMemo(() => {
+    if (!formData.categoria || FINANCE_CATEGORIES.includes(formData.categoria)) {
+      return FINANCE_CATEGORIES
+    }
+    return [formData.categoria, ...FINANCE_CATEGORIES]
+  }, [formData.categoria])
 
   const getStatusBadgeClass = (status: string): string => {
     switch (status) {
@@ -610,12 +628,10 @@ const FinanceiroPage: React.FC = () => {
                       <td className="table-cell text-center">
                         <div className="flex items-center justify-center gap-2">
                           {(() => {
-                            const canManageFromFinance = record.id.startsWith('fm-') || record.id.startsWith('c-')
-                            const canDeleteFromFinance =
-                              canManageFromFinance ||
-                              record.id.startsWith('dc-') ||
-                              record.id.startsWith('dv-') ||
-                              record.id.startsWith('dl-')
+                            const canManageFromFinance =
+                              record.id.startsWith('c-') ||
+                              EDITABLE_FINANCE_PREFIXES.some((prefix) => record.id.startsWith(prefix))
+                            const canDeleteFromFinance = DELETABLE_FINANCE_PREFIXES.some((prefix) => record.id.startsWith(prefix))
 
                             return (
                               <>
@@ -747,7 +763,7 @@ const FinanceiroPage: React.FC = () => {
                       value="receita"
                       checked={formData.tipo === 'receita'}
                       onChange={(e) => setFormData({ ...formData, tipo: e.target.value as any })}
-                      disabled={createMutation.isPending || updateMutation.isPending}
+                      disabled={createMutation.isPending || updateMutation.isPending || !isManualEditing}
                       className="w-4 h-4"
                     />
                     <span className="text-slate-700 font-medium">Receita</span>
@@ -758,7 +774,7 @@ const FinanceiroPage: React.FC = () => {
                       value="despesa"
                       checked={formData.tipo === 'despesa'}
                       onChange={(e) => setFormData({ ...formData, tipo: e.target.value as any })}
-                      disabled={createMutation.isPending || updateMutation.isPending}
+                      disabled={createMutation.isPending || updateMutation.isPending || !isManualEditing}
                       className="w-4 h-4"
                     />
                     <span className="text-slate-700 font-medium">Despesa</span>
@@ -779,15 +795,11 @@ const FinanceiroPage: React.FC = () => {
                   disabled={createMutation.isPending || updateMutation.isPending}
                 >
                   <option value="">Selecione uma categoria</option>
-                  <option value="Salários">Salários</option>
-                  <option value="Aluguel">Aluguel</option>
-                  <option value="Combustível">Combustível</option>
-                  <option value="Manutenção">Manutenção</option>
-                  <option value="Seguros">Seguros</option>
-                  <option value="Publicidade">Publicidade</option>
-                  <option value="Vendas">Vendas</option>
-                  <option value="Juros">Juros</option>
-                  <option value="Outros">Outros</option>
+                  {categoryOptions.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
                 </select>
               </div>
 

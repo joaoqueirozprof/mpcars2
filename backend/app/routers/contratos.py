@@ -234,6 +234,7 @@ def _calcular_valor_total(
     data_fim: datetime,
     valor_diaria: float,
     *,
+    tipo: Optional[str] = None,
     km_inicial: Optional[float] = None,
     km_final: Optional[float] = None,
     km_livres: Optional[float] = None,
@@ -249,7 +250,7 @@ def _calcular_valor_total(
     desconto: Optional[float] = None,
 ) -> float:
     qtd_diarias = _calcular_qtd_diarias(data_inicio, data_fim)
-    total_base = qtd_diarias * float(valor_diaria or 0)
+    total_base = float(valor_diaria or 0) if str(tipo or "").lower() == "empresa" else qtd_diarias * float(valor_diaria or 0)
     km_excedente = _calcular_km_excedente(km_inicial, km_final, km_livres)
     total_km = km_excedente * float(valor_km_excedente or 0)
     total_taxas = sum(
@@ -638,9 +639,13 @@ def create_contrato(
         contrato_data["km_inicial"] = float(veiculo.km_atual or 0)
 
     if not contrato_data.get("qtd_diarias"):
-        contrato_data["qtd_diarias"] = _calcular_qtd_diarias(
-            contrato_data["data_inicio"],
-            contrato_data["data_fim"],
+        contrato_data["qtd_diarias"] = (
+            1
+            if str(contrato_data.get("tipo") or "").lower() == "empresa"
+            else _calcular_qtd_diarias(
+                contrato_data["data_inicio"],
+                contrato_data["data_fim"],
+            )
         )
 
     if not contrato_data.get("valor_total"):
@@ -648,6 +653,7 @@ def create_contrato(
             contrato_data["data_inicio"],
             contrato_data["data_fim"],
             float(contrato_data["valor_diaria"]),
+            tipo=contrato_data.get("tipo"),
             km_inicial=contrato_data.get("km_inicial"),
             km_final=contrato_data.get("km_final"),
             km_livres=contrato_data.get("km_livres"),
@@ -786,8 +792,12 @@ def update_contrato(
     for key, value in update_data.items():
         setattr(contrato, key, value)
 
-    if not contrato.qtd_diarias or {"data_inicio", "data_fim"} & set(update_data.keys()):
-        contrato.qtd_diarias = _calcular_qtd_diarias(nova_data_inicio, nova_data_fim)
+    if not contrato.qtd_diarias or {"data_inicio", "data_fim", "tipo"} & set(update_data.keys()):
+        contrato.qtd_diarias = (
+            1
+            if str(contrato.tipo or "").lower() == "empresa"
+            else _calcular_qtd_diarias(nova_data_inicio, nova_data_fim)
+        )
 
     if "valor_total" not in update_data and (
         {
@@ -814,6 +824,7 @@ def update_contrato(
             nova_data_inicio,
             nova_data_fim,
             float(novo_valor_diaria or 0),
+            tipo=contrato.tipo,
             km_inicial=contrato.km_inicial,
             km_final=contrato.km_final,
             km_livres=contrato.km_livres,
@@ -943,11 +954,16 @@ def finalizar_contrato(
         )
 
     data_base_cobranca = max(contrato.data_fim, data_finalizacao)
-    contrato.qtd_diarias = _calcular_qtd_diarias(contrato.data_inicio, data_base_cobranca)
+    contrato.qtd_diarias = (
+        1
+        if str(contrato.tipo or "").lower() == "empresa"
+        else _calcular_qtd_diarias(contrato.data_inicio, data_base_cobranca)
+    )
     contrato.valor_total = _calcular_valor_total(
         contrato.data_inicio,
         data_base_cobranca,
         float(contrato.valor_diaria or 0),
+        tipo=contrato.tipo,
         km_inicial=contrato.km_inicial,
         km_final=contrato.km_final,
         km_livres=contrato.km_livres,
@@ -1072,12 +1088,17 @@ def prorrogar_contrato(
     db.add(prorrogacao)
 
     contrato.data_fim = data_nova
-    contrato.qtd_diarias = _calcular_qtd_diarias(contrato.data_inicio, data_nova)
+    contrato.qtd_diarias = (
+        1
+        if str(contrato.tipo or "").lower() == "empresa"
+        else _calcular_qtd_diarias(contrato.data_inicio, data_nova)
+    )
     if contrato.valor_diaria:
         contrato.valor_total = _calcular_valor_total(
             contrato.data_inicio,
             data_nova,
             float(contrato.valor_diaria),
+            tipo=contrato.tipo,
             km_inicial=contrato.km_inicial,
             km_final=contrato.km_final,
             km_livres=contrato.km_livres,

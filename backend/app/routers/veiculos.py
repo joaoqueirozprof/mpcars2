@@ -31,6 +31,12 @@ router = APIRouter(
 )
 
 
+def _nf_total_for_uso(uso: Optional[UsoVeiculoEmpresa], relatorio: RelatorioNF) -> float:
+    valor_base = float(uso.valor_diaria_empresa or 0) if uso else 0.0
+    valor_extra = float(relatorio.valor_total_extra or 0)
+    return round(valor_base + valor_extra, 2)
+
+
 class VeiculoBase(BaseModel):
     placa: str
     marca: str
@@ -182,14 +188,26 @@ def get_veiculo_financial_analysis(
         )
 
     # Receita total de contratos - SQL SUM
-    total_receita = float(db.query(
-        sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0)
-    ).filter(Contrato.veiculo_id == veiculo_id).scalar())
+    contratos = db.query(Contrato).filter(Contrato.veiculo_id == veiculo_id).all()
+    total_receita_contratos = sum(
+        float(contrato.valor_total or 0)
+        for contrato in contratos
+        if str(contrato.tipo or "").lower() != "empresa"
+    )
+    relatorios_nf = db.query(RelatorioNF).filter(RelatorioNF.veiculo_id == veiculo_id).all()
+    uso_ids = [relatorio.uso_id for relatorio in relatorios_nf if relatorio.uso_id]
+    usos_empresa = {}
+    if uso_ids:
+        for uso in db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id.in_(uso_ids)).all():
+            usos_empresa[uso.id] = uso
+    total_receita_nf = sum(
+        _nf_total_for_uso(usos_empresa.get(relatorio.uso_id), relatorio)
+        for relatorio in relatorios_nf
+    )
+    total_receita = total_receita_contratos + total_receita_nf
 
     # Total de contratos
-    total_contratos = db.query(sqlfunc.count(Contrato.id)).filter(
-        Contrato.veiculo_id == veiculo_id
-    ).scalar() or 0
+    total_contratos = len(contratos)
 
     # Despesas do veiculo - SQL SUM
     total_despesas_veiculo = float(db.query(
@@ -241,6 +259,7 @@ def get_veiculo_financial_analysis(
         "valor_aquisicao": valor_aquisicao,
         "total_receita": total_receita,
         "total_contratos": total_contratos,
+        "receita_nf_empresa": total_receita_nf,
         "despesas": {
             "veiculo": total_despesas_veiculo,
             "contrato": total_despesas_contrato,
@@ -286,6 +305,8 @@ def get_veiculo_financial_history(
 
     contratos = db.query(Contrato).filter(Contrato.veiculo_id == veiculo_id).all()
     for contrato in contratos:
+        if str(contrato.tipo or "").lower() == "empresa":
+            continue
         records.append(
             {
                 "id": "ct-{}".format(contrato.id),
@@ -295,6 +316,28 @@ def get_veiculo_financial_history(
                 "descricao": "Contrato {}".format(contrato.numero),
                 "valor": float(contrato.valor_total or 0),
                 "origem_tipo": "contrato",
+            }
+        )
+
+    relatorios_nf = db.query(RelatorioNF).filter(RelatorioNF.veiculo_id == veiculo_id).all()
+    uso_ids = [relatorio.uso_id for relatorio in relatorios_nf if relatorio.uso_id]
+    usos_empresa = {}
+    if uso_ids:
+        for uso in db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id.in_(uso_ids)).all():
+            usos_empresa[uso.id] = uso
+    for relatorio in relatorios_nf:
+        uso = usos_empresa.get(relatorio.uso_id)
+        periodo_inicio = relatorio.periodo_inicio.strftime("%d/%m/%Y") if relatorio.periodo_inicio else "-"
+        periodo_fim = relatorio.periodo_fim.strftime("%d/%m/%Y") if relatorio.periodo_fim else "-"
+        records.append(
+            {
+                "id": "nf-{}".format(relatorio.id),
+                "data": relatorio.periodo_fim.isoformat() if relatorio.periodo_fim else relatorio.data_criacao.isoformat() if relatorio.data_criacao else None,
+                "tipo": "receita",
+                "categoria": "Faturamento empresa",
+                "descricao": "Periodo {} a {}".format(periodo_inicio, periodo_fim),
+                "valor": _nf_total_for_uso(uso, relatorio),
+                "origem_tipo": "nf_empresa",
             }
         )
 
