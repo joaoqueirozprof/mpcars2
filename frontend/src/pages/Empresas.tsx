@@ -47,7 +47,7 @@ type EmpresaUsoForm = {
   data_inicio: string
   data_fim: string
   km_inicial: number
-  km_referencia: number
+  km_referencia: number | ''
   valor_km_extra: number
   valor_diaria_empresa: number
 }
@@ -673,7 +673,18 @@ const Empresas: React.FC = () => {
                   </div>
                   <div>
                     <label className="input-label">KM permitida por mes</label>
-                    <input type="number" value={usageForm.km_referencia} onChange={(e) => setUsageForm({ ...usageForm, km_referencia: Number(e.target.value) || 0 })} className="input-field" min="0" />
+                    <input
+                      type="number"
+                      value={usageForm.km_referencia === 0 ? '' : usageForm.km_referencia}
+                      onChange={(e) =>
+                        setUsageForm({
+                          ...usageForm,
+                          km_referencia: e.target.value === '' ? '' : Number(e.target.value) || 0,
+                        })
+                      }
+                      className="input-field"
+                      min="0"
+                    />
                   </div>
                 </div>
 
