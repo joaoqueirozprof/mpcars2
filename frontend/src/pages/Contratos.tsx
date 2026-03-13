@@ -335,20 +335,29 @@ const Contratos: React.FC = () => {
 
   const availableVehicles = useMemo(
     () => {
-      const baseVehicles = (veiculos || []).filter(
-        (veiculo: any) =>
-          veiculo.status === 'disponivel' ||
-          String(veiculo.id) === String(formData.veiculo_id) ||
-          String(veiculo.id) === String(editingContract?.veiculo_id)
-      )
-
       if (formData.tipo !== 'empresa') {
-        return baseVehicles
+        return (veiculos || []).filter(
+          (veiculo: any) =>
+            veiculo.status === 'disponivel' ||
+            String(veiculo.id) === String(formData.veiculo_id) ||
+            String(veiculo.id) === String(editingContract?.veiculo_id)
+        )
       }
 
-      const empresaVehicleIds = new Set((empresaUsos || []).map((uso: any) => String(uso.veiculo_id)))
+      return (empresaUsos || []).map((uso: any) => {
+        const veiculoRelacionado = (veiculos || []).find(
+          (veiculo: any) => String(veiculo.id) === String(uso.veiculo_id)
+        )
 
-      return baseVehicles.filter((veiculo: any) => empresaVehicleIds.has(String(veiculo.id)))
+        return {
+          ...veiculoRelacionado,
+          id: uso.veiculo_id,
+          placa: uso.placa || veiculoRelacionado?.placa || 'Sem placa',
+          marca: uso.marca || veiculoRelacionado?.marca || '',
+          modelo: uso.modelo || veiculoRelacionado?.modelo || '',
+          km_atual: veiculoRelacionado?.km_atual ?? uso.km_inicial ?? 0,
+        }
+      })
     },
     [veiculos, formData.veiculo_id, editingContract, formData.tipo, empresaUsos]
   )
@@ -497,16 +506,31 @@ const Contratos: React.FC = () => {
   }
 
   const handleVehicleChange = (veiculoId: string) => {
-    const veiculo: any = (veiculos || []).find((item: any) => String(item.id) === String(veiculoId))
+    const veiculo: any = availableVehicles.find((item: any) => String(item.id) === String(veiculoId))
     const usoEmpresa = (empresaUsos || []).find((uso: any) => String(uso.veiculo_id) === String(veiculoId))
     setFormData((current) => ({
       ...current,
       veiculo_id: veiculoId,
       empresa_uso_id: current.tipo === 'empresa' ? String(usoEmpresa?.id || '') : '',
-      km_atual_veiculo: veiculo?.km_atual || 0,
-      valor_diaria: current.valor_diaria || veiculo?.valor_diaria || config.valor_diaria_padrao || 0,
+      km_atual_veiculo: veiculo?.km_atual ?? usoEmpresa?.km_inicial ?? 0,
+      valor_diaria:
+        current.tipo === 'empresa'
+          ? Number(usoEmpresa?.valor_diaria_empresa || veiculo?.valor_diaria || 0)
+          : current.valor_diaria || veiculo?.valor_diaria || config.valor_diaria_padrao || 0,
     }))
   }
+
+  useEffect(() => {
+    if (formData.tipo !== 'empresa' || !selectedEmpresaId || !(empresaUsos || []).length) return
+
+    const selectedStillExists = (empresaUsos || []).some(
+      (uso: any) => String(uso.veiculo_id) === String(formData.veiculo_id)
+    )
+
+    if (!selectedStillExists) {
+      handleVehicleChange(String(empresaUsos?.[0]?.veiculo_id || ''))
+    }
+  }, [formData.tipo, selectedEmpresaId, empresaUsos])
 
   useEffect(() => {
     if (formData.tipo !== 'empresa' || !selectedEmpresaUso) return
@@ -514,20 +538,17 @@ const Contratos: React.FC = () => {
     setFormData((current) => ({
       ...current,
       empresa_uso_id: String(selectedEmpresaUso.id),
-      km_livres:
-        current.km_livres > 0
-          ? current.km_livres
-          : Number(selectedEmpresaUso.km_referencia || 0),
-      valor_km_excedente:
-        current.valor_km_excedente > 0
-          ? current.valor_km_excedente
-          : Number(selectedEmpresaUso.valor_km_extra || 0),
-      valor_diaria:
-        current.valor_diaria > 0
-          ? current.valor_diaria
-          : Number(selectedEmpresaUso.valor_diaria_empresa || current.valor_diaria || 0),
+      km_atual_veiculo: selectedVeiculo?.km_atual ?? Number(selectedEmpresaUso.km_inicial || 0),
+      km_livres: Number(selectedEmpresaUso.km_referencia || 0),
+      valor_km_excedente: Number(selectedEmpresaUso.valor_km_extra || 0),
+      valor_diaria: Number(selectedEmpresaUso.valor_diaria_empresa || 0),
+      data_inicio: current.data_inicio || toDateInput(selectedEmpresaUso.data_inicio),
+      data_fim:
+        current.vigencia_indeterminada
+          ? ''
+          : (current.data_fim || toDateInput(selectedEmpresaUso.data_fim)),
     }))
-  }, [formData.tipo, selectedEmpresaUso])
+  }, [formData.tipo, selectedEmpresaUso, selectedVeiculo])
 
   const dias = formData.data_inicio && formData.data_fim ? calculateDays(formData.data_inicio, formData.data_fim) : 0
   const diasPreview = formData.tipo === 'empresa' || formData.vigencia_indeterminada ? 1 : dias
