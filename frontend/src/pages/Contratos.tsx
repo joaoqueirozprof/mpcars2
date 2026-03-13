@@ -287,28 +287,6 @@ const Contratos: React.FC = () => {
     },
   })
 
-  const availableVehicles = useMemo(
-    () => {
-      const baseVehicles = (veiculos || []).filter(
-        (veiculo: any) =>
-          veiculo.status === 'disponivel' ||
-          String(veiculo.id) === String(formData.veiculo_id) ||
-          String(veiculo.id) === String(editingContract?.veiculo_id)
-      )
-
-      if (formData.tipo !== 'empresa') {
-        return baseVehicles
-      }
-
-      const empresaVehicleIds = new Set(
-        (empresaUsos || []).map((uso: any) => String(uso.veiculo_id))
-      )
-
-      return baseVehicles.filter((veiculo: any) => empresaVehicleIds.has(String(veiculo.id)))
-    },
-    [veiculos, formData.veiculo_id, editingContract, formData.tipo, empresaUsos]
-  )
-
   const selectedCliente = clientes?.find((cliente: any) => String(cliente.id) === String(formData.cliente_id))
   const selectedVeiculo = (veiculos || []).find((veiculo: any) => String(veiculo.id) === String(formData.veiculo_id))
   const selectedEmpresaId = selectedCliente?.empresa_id ? String(selectedCliente.empresa_id) : ''
@@ -332,6 +310,26 @@ const Contratos: React.FC = () => {
           String(uso.id) === String(formData.empresa_uso_id)
       ),
     [empresaUsos, formData.veiculo_id, formData.empresa_uso_id]
+  )
+
+  const availableVehicles = useMemo(
+    () => {
+      const baseVehicles = (veiculos || []).filter(
+        (veiculo: any) =>
+          veiculo.status === 'disponivel' ||
+          String(veiculo.id) === String(formData.veiculo_id) ||
+          String(veiculo.id) === String(editingContract?.veiculo_id)
+      )
+
+      if (formData.tipo !== 'empresa') {
+        return baseVehicles
+      }
+
+      const empresaVehicleIds = new Set((empresaUsos || []).map((uso: any) => String(uso.veiculo_id)))
+
+      return baseVehicles.filter((veiculo: any) => empresaVehicleIds.has(String(veiculo.id)))
+    },
+    [veiculos, formData.veiculo_id, editingContract, formData.tipo, empresaUsos]
   )
 
   const invalidateCoreQueries = () => {
