@@ -30,6 +30,7 @@ from app.services.pdf_service import PDFService
 from app.services.pdf_contrato import PDFContratoService
 from app.services.pdf_financeiro import PDFFinanceiroService
 from app.services.pdf_nf import PDFNFService
+from app.services.pdf_empresa_report import PDFEmpresaReportService
 from app.services.exportacao import ExportacaoService
 
 
@@ -328,7 +329,7 @@ def get_nf_empresa_pdf(
     ]
 
     try:
-        pdf_buffer = PDFNFService.generate_nf_empresa_pdf(db, request.empresa_id, veiculos_km)
+        pdf_buffer = PDFEmpresaReportService.generate_nf_empresa_pdf(db, request.empresa_id, veiculos_km)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Erro ao gerar NF empresa: {}".format(str(e)))
 
