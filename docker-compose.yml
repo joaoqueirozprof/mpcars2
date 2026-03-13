@@ -4,9 +4,9 @@ services:
     container_name: mpcars2-db
     restart: always
     environment:
-      POSTGRES_DB: mpcars2
-      POSTGRES_USER: mpcars2
-      POSTGRES_PASSWORD: mpcars2pass
+      POSTGRES_DB: ${POSTGRES_DB:-mpcars2}
+      POSTGRES_USER: ${POSTGRES_USER:-mpcars2}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-KQKFbCN7RP0KoZtUGK7zZ8ZzjWNQcXVo}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -35,9 +35,9 @@ services:
       - "8002:8000"
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-production}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://mpcars2:mpcars2pass@mpcars2-db:5432/mpcars2}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mpcars2:KQKFbCN7RP0KoZtUGK7zZ8ZzjWNQcXVo@mpcars2-db:5432/mpcars2}
       REDIS_URL: ${REDIS_URL:-redis://mpcars2-redis:6379/0}
-      SECRET_KEY: ${SECRET_KEY:-mpcars2-secret-key-production-2024}
+      SECRET_KEY: ${SECRET_KEY:-47UTWvCLa3kg-0aDtw7mJW8SNOB0_37h_XMSc0KSm9iMdd0Et1qyhHj9FhnrDmCA}
       ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
       SEED_ON_STARTUP: ${SEED_ON_STARTUP:-false}
       RUN_LEGACY_COLUMN_MIGRATIONS: ${RUN_LEGACY_COLUMN_MIGRATIONS:-false}
@@ -71,7 +71,7 @@ services:
     command: celery -A app.celery_app worker -l info -B
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-production}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://mpcars2:mpcars2pass@mpcars2-db:5432/mpcars2}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mpcars2:KQKFbCN7RP0KoZtUGK7zZ8ZzjWNQcXVo@mpcars2-db:5432/mpcars2}
       REDIS_URL: ${REDIS_URL:-redis://mpcars2-redis:6379/0}
       BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
       BACKUP_DIRECTORY: ${BACKUP_DIRECTORY:-/backups}
