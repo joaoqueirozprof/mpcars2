@@ -16,6 +16,7 @@ from app.models import (
     Cliente,
     Contrato,
     DespesaContrato,
+    Empresa,
     Multa,
     ProrrogacaoContrato,
     Quilometragem,
@@ -75,6 +76,7 @@ class ContratoBase(BaseModel):
     tipo: Optional[str] = "cliente"
     vigencia_indeterminada: Optional[bool] = False
     empresa_uso_id: Optional[int] = None
+    empresa_id: Optional[int] = None
 
 
 class ContratoCreate(ContratoBase):
@@ -122,6 +124,7 @@ class ContratoUpdate(BaseModel):
     tipo: Optional[str] = None
     vigencia_indeterminada: Optional[bool] = None
     empresa_uso_id: Optional[int] = None
+    empresa_id: Optional[int] = None
 
 
 class ContratoFinalizeRequest(BaseModel):
@@ -414,6 +417,71 @@ def _ensure_cliente_exists(db: Session, cliente_id: int) -> Cliente:
     return cliente
 
 
+def _resolve_cliente_contrato(
+    db: Session,
+    *,
+    tipo: Optional[str],
+    cliente_id: Optional[int],
+    empresa_id: Optional[int] = None,
+) -> Cliente:
+    if str(tipo or "").lower() != "empresa":
+        if cliente_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cliente obrigatorio para criar contrato",
+            )
+        return _ensure_cliente_exists(db, cliente_id)
+
+    target_empresa_id = empresa_id
+    if not target_empresa_id and cliente_id:
+        cliente_existente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+        if cliente_existente and cliente_existente.empresa_id:
+            return cliente_existente
+
+        empresa_existente = db.query(Empresa).filter(Empresa.id == cliente_id).first()
+        if empresa_existente:
+            target_empresa_id = empresa_existente.id
+
+    if not target_empresa_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empresa obrigatoria para criar contrato corporativo",
+        )
+
+    empresa = db.query(Empresa).filter(Empresa.id == target_empresa_id).first()
+    if not empresa:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Empresa nao encontrada",
+        )
+
+    cliente = (
+        db.query(Cliente)
+        .filter(Cliente.empresa_id == target_empresa_id)
+        .order_by(Cliente.id.asc())
+        .first()
+    )
+    if cliente:
+        return cliente
+
+    cpf_base = "".join(ch for ch in str(empresa.cnpj or "") if ch.isdigit()) or f"empresa-{empresa.id}"
+    cpf = cpf_base
+    if db.query(Cliente).filter(Cliente.cpf == cpf).first():
+        cpf = f"{cpf_base}-{empresa.id}"
+
+    cliente = Cliente(
+        nome=empresa.nome,
+        cpf=cpf,
+        telefone=empresa.telefone,
+        email=None,
+        empresa_id=empresa.id,
+        ativo=True,
+    )
+    db.add(cliente)
+    db.flush()
+    return cliente
+
+
 def _sincronizar_uso_empresa(
     db: Session,
     contrato: Contrato,
@@ -613,6 +681,7 @@ def create_contrato(
     raw_payload = contrato.model_dump(exclude_unset=True)
     vigencia_indeterminada = bool(raw_payload.pop("vigencia_indeterminada", False))
     empresa_uso_id = raw_payload.pop("empresa_uso_id", None)
+    empresa_id = raw_payload.pop("empresa_id", None)
     contrato_data = _normalize_contrato_payload(
         raw_payload,
         is_create=True,
@@ -632,7 +701,13 @@ def create_contrato(
             detail="Numero de contrato ja existe",
         )
 
-    cliente = _ensure_cliente_exists(db, contrato_data["cliente_id"])
+    cliente = _resolve_cliente_contrato(
+        db,
+        tipo=contrato_data.get("tipo"),
+        cliente_id=contrato_data.get("cliente_id"),
+        empresa_id=empresa_id,
+    )
+    contrato_data["cliente_id"] = cliente.id
     veiculo = _ensure_veiculo_available(db, contrato_data["veiculo_id"])
 
     if contrato_data.get("km_inicial") is None:
@@ -746,6 +821,7 @@ def update_contrato(
     raw_payload = contrato_data.model_dump(exclude_unset=True)
     vigencia_indeterminada = raw_payload.pop("vigencia_indeterminada", None)
     empresa_uso_id = raw_payload.pop("empresa_uso_id", None)
+    empresa_id = raw_payload.pop("empresa_id", None)
     update_data = _normalize_contrato_payload(raw_payload)
 
     if "numero" in update_data and update_data["numero"]:
@@ -774,7 +850,13 @@ def update_contrato(
     )
     update_data["data_fim"] = nova_data_fim
     _validar_datas(nova_data_inicio, nova_data_fim)
-    cliente = _ensure_cliente_exists(db, novo_cliente_id)
+    cliente = _resolve_cliente_contrato(
+        db,
+        tipo=update_data.get("tipo", contrato.tipo),
+        cliente_id=novo_cliente_id,
+        empresa_id=empresa_id,
+    )
+    update_data["cliente_id"] = cliente.id
 
     veiculo_destino = None
     if novo_status == "ativo":

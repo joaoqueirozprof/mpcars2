@@ -264,12 +264,24 @@ const Contratos: React.FC = () => {
 
   const { data: clientes } = useQuery({
     queryKey: ['clientes-select', formData.tipo],
+    enabled: formData.tipo === 'cliente',
     queryFn: async () => {
       const { data } = await api.get<PaginatedResponse<any>>('/clientes', {
         params: {
           limit: 1000,
-          tipo: formData.tipo === 'empresa' ? 'pj' : 'pf',
+          tipo: 'pf',
         },
+      })
+      return data.data || []
+    },
+  })
+
+  const { data: empresas } = useQuery({
+    queryKey: ['empresas-select'],
+    enabled: formData.tipo === 'empresa',
+    queryFn: async () => {
+      const { data } = await api.get<PaginatedResponse<any>>('/empresas', {
+        params: { limit: 1000 },
       })
       return data.data || []
     },
@@ -287,9 +299,18 @@ const Contratos: React.FC = () => {
     },
   })
 
-  const selectedCliente = clientes?.find((cliente: any) => String(cliente.id) === String(formData.cliente_id))
+  const selectedCliente = formData.tipo === 'cliente'
+    ? clientes?.find((cliente: any) => String(cliente.id) === String(formData.cliente_id))
+    : null
+  const selectedEmpresa = formData.tipo === 'empresa'
+    ? empresas?.find((empresa: any) => String(empresa.id) === String(formData.cliente_id))
+    : null
   const selectedVeiculo = (veiculos || []).find((veiculo: any) => String(veiculo.id) === String(formData.veiculo_id))
-  const selectedEmpresaId = selectedCliente?.empresa_id ? String(selectedCliente.empresa_id) : ''
+  const selectedEmpresaId = formData.tipo === 'empresa'
+    ? (selectedEmpresa ? String(selectedEmpresa.id) : '')
+    : (selectedCliente?.empresa_id ? String(selectedCliente.empresa_id) : '')
+  const contractPartyOptions = formData.tipo === 'empresa' ? (empresas || []) : (clientes || [])
+  const selectedPartyName = formData.tipo === 'empresa' ? selectedEmpresa?.nome : selectedCliente?.nome
 
   const { data: empresaUsos } = useQuery({
     queryKey: ['empresa-usos-select', selectedEmpresaId, editingContract?.id || 'novo'],
@@ -427,7 +448,10 @@ const Contratos: React.FC = () => {
   const openEdit = (contrato: Contrato) => {
     setEditingContract(contrato)
     setFormData({
-      cliente_id: contrato.cliente_id,
+      cliente_id:
+        (contrato.tipo || 'cliente') === 'empresa' && contrato.cliente?.empresa_id
+          ? String(contrato.cliente.empresa_id)
+          : String(contrato.cliente_id),
       veiculo_id: contrato.veiculo_id,
       tipo: contrato.tipo || 'cliente',
       data_inicio: toDateInput(contrato.data_inicio),
@@ -589,6 +613,7 @@ const Contratos: React.FC = () => {
 
     const payload = {
       ...formData,
+      empresa_id: formData.tipo === 'empresa' ? Number(formData.cliente_id) || undefined : undefined,
       data_fim: formData.vigencia_indeterminada ? '' : formData.data_fim,
       qtd_diarias: diasPreview,
       valor_total: valorPreview,
@@ -778,7 +803,7 @@ const Contratos: React.FC = () => {
                       className="input-field"
                     >
                       <option value="">Selecione</option>
-                      {clientes?.map((cliente: any) => <option key={cliente.id} value={cliente.id}>{cliente.nome}</option>)}
+                      {contractPartyOptions.map((item: any) => <option key={item.id} value={item.id}>{item.nome}</option>)}
                     </select>
                   </div>
                   <div>
@@ -806,9 +831,9 @@ const Contratos: React.FC = () => {
                     {availableVehicles.map((veiculo: any) => <option key={veiculo.id} value={veiculo.id}>{veiculo.placa} - {veiculo.marca} {veiculo.modelo}</option>)}
                   </select>
                 </div>
-                {selectedCliente && selectedVeiculo && (
+                {selectedPartyName && selectedVeiculo && (
                   <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-700">
-                    {selectedCliente.nome} | {selectedVeiculo.marca} {selectedVeiculo.modelo} | KM atual {selectedVeiculo.km_atual || 0}
+                    {selectedPartyName} | {selectedVeiculo.marca} {selectedVeiculo.modelo} | KM atual {selectedVeiculo.km_atual || 0}
                   </div>
                 )}
                 {formData.tipo === 'empresa' && (
@@ -838,7 +863,7 @@ const Contratos: React.FC = () => {
                     </div>
                     {!selectedEmpresaId && (
                       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                        Escolha um cliente vinculado a uma empresa para habilitar a parametrizacao corporativa.
+                        Escolha uma empresa para habilitar a parametrizacao corporativa.
                       </div>
                     )}
                     {selectedEmpresaId && (empresaUsos || []).length === 0 && (
