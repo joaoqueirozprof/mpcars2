@@ -635,7 +635,7 @@ const Contratos: React.FC = () => {
     const payload = {
       ...formData,
       empresa_id: formData.tipo === 'empresa' ? Number(formData.cliente_id) || undefined : undefined,
-      data_fim: formData.vigencia_indeterminada ? '' : formData.data_fim,
+      data_fim: formData.vigencia_indeterminada ? undefined : formData.data_fim,
       qtd_diarias: diasPreview,
       valor_total: valorPreview,
     }
