@@ -16,11 +16,15 @@ from app.models import (
     DespesaLoja,
     DespesaNF,
     DespesaVeiculo,
+    IpvaRegistro,
     LancamentoFinanceiro,
+    Manutencao,
     Multa,
+    Seguro,
     ProrrogacaoContrato,
     Quilometragem,
     UsoVeiculoEmpresa,
+    Veiculo,
 )
 from app.models.user import User
 from app.services.activity_logger import log_activity
@@ -83,6 +87,61 @@ class LancamentoFinanceiroUpdate(BaseModel):
     status: Optional[str] = None
 
 
+def _parse_date_range(
+    *,
+    data_inicio: Optional[str] = None,
+    data_fim: Optional[str] = None,
+    mes: Optional[int] = None,
+    ano: Optional[int] = None,
+):
+    start_date = None
+    end_date = None
+
+    if data_inicio:
+        start_date = datetime.strptime(data_inicio, "%Y-%m-%d").date()
+    if data_fim:
+        end_date = datetime.strptime(data_fim, "%Y-%m-%d").date()
+
+    if mes and ano:
+        start_date = date(ano, mes, 1)
+        if mes == 12:
+            end_date = date(ano + 1, 1, 1)
+        else:
+            end_date = date(ano, mes + 1, 1)
+
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Data inicial nao pode ser maior que a data final",
+        )
+
+    return start_date, end_date
+
+
+def _record_in_period(record_date: Optional[str], start_date: Optional[date], end_date: Optional[date]) -> bool:
+    if not start_date and not end_date:
+        return True
+    if not record_date:
+        return False
+
+    current = datetime.fromisoformat(record_date).date()
+    if start_date and current < start_date:
+        return False
+    if end_date and current >= end_date:
+        return False
+    return True
+
+
+def _vehicle_label(veiculo: Optional[Veiculo]) -> str:
+    if not veiculo:
+        return "Veiculo nao identificado"
+    parts = [veiculo.placa]
+    modelo = " ".join(part for part in [veiculo.marca, veiculo.modelo] if part)
+    if modelo:
+        parts.append(modelo)
+    return " - ".join(parts)
+
+
 def _append_manual_records(records: list, db: Session):
     lancamentos = db.query(LancamentoFinanceiro).all()
     for lancamento in lancamentos:
@@ -135,6 +194,8 @@ def _serialize_contrato_record(contrato: Contrato, cliente_nome: str) -> dict:
         "valor": float(contrato.valor_total) if contrato.valor_total else 0.0,
         "valor_recebido": float(contrato.valor_recebido or 0.0),
         "status": payment_status,
+        "contrato_id": str(contrato.id),
+        "veiculo_id": str(contrato.veiculo_id) if contrato.veiculo_id else None,
         "origem_tipo": "contrato",
         "forma_pagamento": forma_pagamento,
         "data_pagamento": contrato.data_pagamento.isoformat() if contrato.data_pagamento else None,
@@ -152,10 +213,22 @@ def list_financeiro(
     limit: int = 50,
     tipo: Optional[str] = None,
     status: Optional[str] = None,
+    search: Optional[str] = None,
+    data_inicio: Optional[str] = None,
+    data_fim: Optional[str] = None,
+    mes: Optional[int] = None,
+    ano: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get paginated financial records (consolidated view)."""
+    del current_user
+    start_date, end_date = _parse_date_range(
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+        mes=mes,
+        ano=ano,
+    )
     records = []
 
     contratos = db.query(Contrato).all()
@@ -216,6 +289,83 @@ def list_financeiro(
             }
         )
 
+    manutencoes = db.query(Manutencao).all()
+    for manutencao in manutencoes:
+        veiculo = db.query(Veiculo).filter(Veiculo.id == manutencao.veiculo_id).first() if manutencao.veiculo_id else None
+        records.append(
+            {
+                "id": f"mt-{manutencao.id}",
+                "data": (
+                    manutencao.data_realizada.isoformat()
+                    if manutencao.data_realizada
+                    else manutencao.updated_at.isoformat()
+                    if manutencao.updated_at
+                    else manutencao.data_criacao.isoformat()
+                    if manutencao.data_criacao
+                    else None
+                ),
+                "tipo": "despesa",
+                "categoria": f"Manutencao / {manutencao.tipo.title()}",
+                "descricao": f"{manutencao.descricao} | {_vehicle_label(veiculo)}" if veiculo else manutencao.descricao,
+                "valor": float(manutencao.custo) if manutencao.custo else 0.0,
+                "status": "pago" if manutencao.status == "concluida" else "pendente",
+                "veiculo_id": str(manutencao.veiculo_id) if manutencao.veiculo_id else None,
+                "origem_tipo": "manutencao",
+            }
+        )
+
+    seguros = db.query(Seguro).all()
+    for seguro in seguros:
+        veiculo = db.query(Veiculo).filter(Veiculo.id == seguro.veiculo_id).first() if seguro.veiculo_id else None
+        records.append(
+            {
+                "id": f"sg-{seguro.id}",
+                "data": seguro.data_inicio.isoformat() if seguro.data_inicio else None,
+                "tipo": "despesa",
+                "categoria": "Seguro",
+                "descricao": f"{seguro.seguradora or 'Seguro'} - {seguro.numero_apolice or 'sem apolice'} | {_vehicle_label(veiculo)}" if veiculo else (seguro.seguradora or "Seguro"),
+                "valor": float(seguro.valor) if seguro.valor else 0.0,
+                "status": "pago" if seguro.status == "ativo" else "pendente",
+                "veiculo_id": str(seguro.veiculo_id) if seguro.veiculo_id else None,
+                "origem_tipo": "seguro",
+            }
+        )
+
+    registros_ipva = db.query(IpvaRegistro).all()
+    for registro in registros_ipva:
+        veiculo = db.query(Veiculo).filter(Veiculo.id == registro.veiculo_id).first() if registro.veiculo_id else None
+        records.append(
+            {
+                "id": f"ip-{registro.id}",
+                "data": registro.data_pagamento.isoformat() if registro.data_pagamento else registro.data_vencimento.isoformat() if registro.data_vencimento else None,
+                "tipo": "despesa",
+                "categoria": "IPVA",
+                "descricao": f"IPVA {registro.ano_referencia or ''} | {_vehicle_label(veiculo)}".strip(),
+                "valor": float(registro.valor_ipva or registro.valor_pago or 0.0),
+                "status": "pago" if registro.status == "pago" else "pendente",
+                "veiculo_id": str(registro.veiculo_id) if registro.veiculo_id else None,
+                "origem_tipo": "ipva",
+            }
+        )
+
+    multas = db.query(Multa).all()
+    for multa in multas:
+        veiculo = db.query(Veiculo).filter(Veiculo.id == multa.veiculo_id).first() if multa.veiculo_id else None
+        records.append(
+            {
+                "id": f"ml-{multa.id}",
+                "data": multa.data_pagamento.isoformat() if multa.data_pagamento else multa.data_infracao.isoformat() if multa.data_infracao else None,
+                "tipo": "despesa",
+                "categoria": "Multa",
+                "descricao": f"{multa.descricao or 'Multa'} | {_vehicle_label(veiculo)}" if veiculo else (multa.descricao or "Multa"),
+                "valor": float(multa.valor) if multa.valor else 0.0,
+                "status": "pago" if multa.status == "pago" else "pendente",
+                "veiculo_id": str(multa.veiculo_id) if multa.veiculo_id else None,
+                "contrato_id": str(multa.contrato_id) if multa.contrato_id else None,
+                "origem_tipo": "multa",
+            }
+        )
+
     _append_manual_records(records, db)
 
     for index, record in enumerate(records):
@@ -241,6 +391,17 @@ def list_financeiro(
 
     if status:
         records = [record for record in records if record["status"] == status]
+
+    if search:
+        term = search.strip().lower()
+        records = [
+            record
+            for record in records
+            if term in str(record.get("descricao", "")).lower()
+            or term in str(record.get("categoria", "")).lower()
+        ]
+
+    records = [record for record in records if _record_in_period(record.get("data"), start_date, end_date)]
 
     records.sort(key=lambda item: item["data"] or "", reverse=True)
 
@@ -284,6 +445,18 @@ def get_resumo(
     total_despesa_loja = sum(
         float(despesa.valor) for despesa in db.query(DespesaLoja).all() if despesa.valor
     )
+    total_manutencao = sum(
+        float(manutencao.custo) for manutencao in db.query(Manutencao).all() if manutencao.custo
+    )
+    total_seguros = sum(
+        float(seguro.valor) for seguro in db.query(Seguro).all() if seguro.valor
+    )
+    total_ipva = sum(
+        float(ipva.valor_ipva or ipva.valor_pago or 0) for ipva in db.query(IpvaRegistro).all()
+    )
+    total_multas = sum(
+        float(multa.valor) for multa in db.query(Multa).all() if multa.valor
+    )
 
     total_manual_receita = sum(
         float(lancamento.valor)
@@ -306,7 +479,16 @@ def get_resumo(
     total_receita += total_manual_receita
     total_receita_recebida += total_manual_receita_recebida
     total_receita_pendente = max(total_receita - total_receita_recebida, 0.0)
-    total_despesa = total_despesa_contrato + total_despesa_veiculo + total_despesa_loja + total_manual_despesa
+    total_despesa = (
+        total_despesa_contrato
+        + total_despesa_veiculo
+        + total_despesa_loja
+        + total_manutencao
+        + total_seguros
+        + total_ipva
+        + total_multas
+        + total_manual_despesa
+    )
     lucro = total_receita - total_despesa
     saldo_realizado = total_receita_recebida - total_despesa
 
@@ -320,6 +502,10 @@ def get_resumo(
         "despesa_contrato": total_despesa_contrato,
         "despesa_veiculo": total_despesa_veiculo,
         "despesa_loja": total_despesa_loja + total_manual_despesa,
+        "despesa_manutencao": total_manutencao,
+        "despesa_seguro": total_seguros,
+        "despesa_ipva": total_ipva,
+        "despesa_multa": total_multas,
     }
 
 

@@ -255,6 +255,148 @@ def get_veiculo_financial_analysis(
     }
 
 
+@router.get("/historico-financeiro/{veiculo_id}")
+def get_veiculo_financial_history(
+    veiculo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get the complete financial history for a vehicle."""
+    del current_user
+    veiculo = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
+    if not veiculo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Veiculo nao encontrado"
+        )
+
+    records = []
+
+    if veiculo.valor_aquisicao:
+        records.append(
+            {
+                "id": "aq-{}".format(veiculo.id),
+                "data": veiculo.data_aquisicao.isoformat() if veiculo.data_aquisicao else None,
+                "tipo": "despesa",
+                "categoria": "Aquisicao",
+                "descricao": "Compra do veiculo {}".format(veiculo.placa),
+                "valor": float(veiculo.valor_aquisicao),
+                "origem_tipo": "aquisicao",
+            }
+        )
+
+    contratos = db.query(Contrato).filter(Contrato.veiculo_id == veiculo_id).all()
+    for contrato in contratos:
+        records.append(
+            {
+                "id": "ct-{}".format(contrato.id),
+                "data": contrato.data_finalizacao.isoformat() if contrato.data_finalizacao else contrato.data_criacao.isoformat() if contrato.data_criacao else None,
+                "tipo": "receita",
+                "categoria": "Contrato",
+                "descricao": "Contrato {}".format(contrato.numero),
+                "valor": float(contrato.valor_total or 0),
+                "origem_tipo": "contrato",
+            }
+        )
+
+    for despesa in db.query(DespesaVeiculo).filter(DespesaVeiculo.veiculo_id == veiculo_id).all():
+        records.append(
+            {
+                "id": "dv-{}".format(despesa.id),
+                "data": despesa.data.isoformat() if despesa.data else None,
+                "tipo": "despesa",
+                "categoria": despesa.tipo or "Despesa veiculo",
+                "descricao": despesa.descricao,
+                "valor": float(despesa.valor or 0),
+                "origem_tipo": "despesa_veiculo",
+            }
+        )
+
+    for despesa in (
+        db.query(DespesaContrato)
+        .join(Contrato, Contrato.id == DespesaContrato.contrato_id)
+        .filter(Contrato.veiculo_id == veiculo_id)
+        .all()
+    ):
+        records.append(
+            {
+                "id": "dc-{}".format(despesa.id),
+                "data": despesa.data_registro.isoformat() if despesa.data_registro else None,
+                "tipo": "despesa",
+                "categoria": despesa.tipo or "Despesa contrato",
+                "descricao": despesa.descricao,
+                "valor": float(despesa.valor or 0),
+                "origem_tipo": "despesa_contrato",
+            }
+        )
+
+    for manutencao in db.query(Manutencao).filter(Manutencao.veiculo_id == veiculo_id).all():
+        records.append(
+            {
+                "id": "mt-{}".format(manutencao.id),
+                "data": manutencao.data_realizada.isoformat() if manutencao.data_realizada else manutencao.data_criacao.isoformat() if manutencao.data_criacao else None,
+                "tipo": "despesa",
+                "categoria": "Manutencao / {}".format(manutencao.tipo),
+                "descricao": manutencao.descricao,
+                "valor": float(manutencao.custo or 0),
+                "origem_tipo": "manutencao",
+            }
+        )
+
+    for seguro in db.query(Seguro).filter(Seguro.veiculo_id == veiculo_id).all():
+        records.append(
+            {
+                "id": "sg-{}".format(seguro.id),
+                "data": seguro.data_inicio.isoformat() if seguro.data_inicio else None,
+                "tipo": "despesa",
+                "categoria": "Seguro",
+                "descricao": "{} - {}".format(seguro.seguradora or "Seguro", seguro.numero_apolice or "sem apolice"),
+                "valor": float(seguro.valor or 0),
+                "origem_tipo": "seguro",
+            }
+        )
+
+    for ipva in db.query(IpvaRegistro).filter(IpvaRegistro.veiculo_id == veiculo_id).all():
+        records.append(
+            {
+                "id": "ip-{}".format(ipva.id),
+                "data": ipva.data_pagamento.isoformat() if ipva.data_pagamento else ipva.data_vencimento.isoformat() if ipva.data_vencimento else None,
+                "tipo": "despesa",
+                "categoria": "IPVA",
+                "descricao": "IPVA {}".format(ipva.ano_referencia or ""),
+                "valor": float(ipva.valor_ipva or ipva.valor_pago or 0),
+                "origem_tipo": "ipva",
+            }
+        )
+
+    for multa in db.query(Multa).filter(Multa.veiculo_id == veiculo_id).all():
+        records.append(
+            {
+                "id": "ml-{}".format(multa.id),
+                "data": multa.data_pagamento.isoformat() if multa.data_pagamento else multa.data_infracao.isoformat() if multa.data_infracao else None,
+                "tipo": "despesa",
+                "categoria": "Multa",
+                "descricao": multa.descricao or "Multa",
+                "valor": float(multa.valor or 0),
+                "origem_tipo": "multa",
+            }
+        )
+
+    records.sort(key=lambda item: item.get("data") or "", reverse=True)
+
+    total_receita = sum(item["valor"] for item in records if item["tipo"] == "receita")
+    total_despesa = sum(item["valor"] for item in records if item["tipo"] == "despesa")
+
+    return {
+        "veiculo_id": veiculo.id,
+        "placa": veiculo.placa,
+        "veiculo": "{} {}".format(veiculo.marca, veiculo.modelo),
+        "total_receita": total_receita,
+        "total_despesa": total_despesa,
+        "saldo": total_receita - total_despesa,
+        "records": records,
+    }
+
+
 @router.get("/foto/{veiculo_id}")
 def get_veiculo_foto(
     veiculo_id: int,

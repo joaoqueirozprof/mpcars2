@@ -7,6 +7,7 @@ import toast from 'react-hot-toast'
 import AppLayout from '@/components/layout/AppLayout'
 import DataTable from '@/components/shared/DataTable'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
+import CurrencyInput from '@/components/shared/CurrencyInput'
 import StatusBadge from '@/components/shared/StatusBadge'
 import { Seguro, Veiculo, PaginatedResponse, PaginationParams } from '@/types'
 import { formatCurrency, formatDate, isExpiringSoon, isExpired } from '@/lib/utils'
@@ -442,32 +443,18 @@ const Seguros: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="input-label">Valor Total *</label>
-                  <input
-                    type="number"
-                    value={formData.valor || ''}
-                    onChange={(e) => setFormData({ ...formData, valor: parseFloat(e.target.value) || 0 })}
-                    step="0.01"
-                    min="0"
-                    className="input-field"
-                    placeholder="0,00"
-                    disabled={createMutation.isPending || updateMutation.isPending}
-                  />
-                </div>
-                <div>
-                  <label className="input-label">Valor Franquia</label>
-                  <input
-                    type="number"
-                    value={formData.valor_franquia || ''}
-                    onChange={(e) => setFormData({ ...formData, valor_franquia: parseFloat(e.target.value) || 0 })}
-                    step="0.01"
-                    min="0"
-                    className="input-field"
-                    placeholder="0,00"
-                    disabled={createMutation.isPending || updateMutation.isPending}
-                  />
-                </div>
+                <CurrencyInput
+                  label="Valor Total *"
+                  value={formData.valor}
+                  onChange={(valor) => setFormData({ ...formData, valor })}
+                  disabled={createMutation.isPending || updateMutation.isPending}
+                />
+                <CurrencyInput
+                  label="Valor Franquia"
+                  value={formData.valor_franquia}
+                  onChange={(valor_franquia) => setFormData({ ...formData, valor_franquia })}
+                  disabled={createMutation.isPending || updateMutation.isPending}
+                />
               </div>
 
               {/* Parcelas section - only show on create */}

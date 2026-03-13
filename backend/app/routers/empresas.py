@@ -91,7 +91,7 @@ class MotoristaEmpresaResponse(BaseModel):
 
 class UsoVeiculoCreate(BaseModel):
     veiculo_id: int
-    empresa_id: int
+    empresa_id: Optional[int] = None
     contrato_id: Optional[int] = None
     km_inicial: Optional[float] = None
     data_inicio: Optional[str] = None
@@ -476,6 +476,14 @@ def create_uso_veiculo(
     veiculo = db.query(Veiculo).filter(Veiculo.id == uso_data.veiculo_id).first()
     if not veiculo:
         raise HTTPException(status_code=404, detail="Veiculo nao encontrado")
+
+    uso_ativo = db.query(UsoVeiculoEmpresa).filter(
+        UsoVeiculoEmpresa.empresa_id == empresa_id,
+        UsoVeiculoEmpresa.veiculo_id == uso_data.veiculo_id,
+        UsoVeiculoEmpresa.status == "ativo",
+    ).first()
+    if uso_ativo:
+        raise HTTPException(status_code=400, detail="Este veiculo ja esta vinculado ativamente a esta empresa")
 
     uso = UsoVeiculoEmpresa(
         veiculo_id=uso_data.veiculo_id,

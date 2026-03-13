@@ -18,6 +18,7 @@ import { useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import AppLayout from '@/components/layout/AppLayout'
+import CurrencyInput from '@/components/shared/CurrencyInput'
 import { useConfig } from '@/contexts/ConfigContext'
 import { calculateDays, formatCurrency, formatDate } from '@/lib/utils'
 import api from '@/services/api'
@@ -31,6 +32,8 @@ type ContractForm = {
   tipo: 'cliente' | 'empresa'
   data_inicio: string
   data_fim: string
+  vigencia_indeterminada: boolean
+  empresa_uso_id: string
   km_atual_veiculo: number
   hora_saida: string
   combustivel_saida: string
@@ -202,6 +205,8 @@ const Contratos: React.FC = () => {
     tipo: 'cliente',
     data_inicio: '',
     data_fim: '',
+    vigencia_indeterminada: false,
+    empresa_uso_id: '',
     km_atual_veiculo: 0,
     hora_saida: '',
     combustivel_saida: '',
@@ -290,6 +295,28 @@ const Contratos: React.FC = () => {
 
   const selectedCliente = clientes?.find((cliente: any) => String(cliente.id) === String(formData.cliente_id))
   const selectedVeiculo = (veiculos || []).find((veiculo: any) => String(veiculo.id) === String(formData.veiculo_id))
+  const selectedEmpresaId = selectedCliente?.empresa_id ? String(selectedCliente.empresa_id) : ''
+
+  const { data: empresaUsos } = useQuery({
+    queryKey: ['empresa-usos-select', selectedEmpresaId],
+    enabled: Boolean(selectedEmpresaId && formData.tipo === 'empresa'),
+    queryFn: async () => {
+      const { data } = await api.get(`/empresas/${selectedEmpresaId}/usos`, {
+        params: { status_filter: 'ativo' },
+      })
+      return data || []
+    },
+  })
+
+  const selectedEmpresaUso = useMemo(
+    () =>
+      (empresaUsos || []).find(
+        (uso: any) =>
+          String(uso.veiculo_id) === String(formData.veiculo_id) ||
+          String(uso.id) === String(formData.empresa_uso_id)
+      ),
+    [empresaUsos, formData.veiculo_id, formData.empresa_uso_id]
+  )
 
   const invalidateCoreQueries = () => {
     queryClient.invalidateQueries({ queryKey: ['contratos'] })
@@ -391,6 +418,10 @@ const Contratos: React.FC = () => {
       tipo: contrato.tipo || 'cliente',
       data_inicio: toDateInput(contrato.data_inicio),
       data_fim: toDateInput(contrato.data_fim),
+      vigencia_indeterminada:
+        (contrato.tipo || 'cliente') === 'empresa' &&
+        getRoundedDaysBetween(contrato.data_inicio, contrato.data_fim) >= 3650,
+      empresa_uso_id: '',
       km_atual_veiculo: contrato.veiculo?.km_atual ?? contrato.quilometragem_inicial ?? 0,
       hora_saida: contrato.hora_saida || '',
       combustivel_saida: contrato.combustivel_saida || '',
@@ -437,8 +468,30 @@ const Contratos: React.FC = () => {
     }))
   }
 
+  useEffect(() => {
+    if (formData.tipo !== 'empresa' || !selectedEmpresaUso) return
+
+    setFormData((current) => ({
+      ...current,
+      empresa_uso_id: String(selectedEmpresaUso.id),
+      km_livres:
+        current.km_livres > 0
+          ? current.km_livres
+          : Number(selectedEmpresaUso.km_referencia || 0),
+      valor_km_excedente:
+        current.valor_km_excedente > 0
+          ? current.valor_km_excedente
+          : Number(selectedEmpresaUso.valor_km_extra || 0),
+      valor_diaria:
+        current.valor_diaria > 0
+          ? current.valor_diaria
+          : Number(selectedEmpresaUso.valor_diaria_empresa || current.valor_diaria || 0),
+    }))
+  }, [formData.tipo, selectedEmpresaUso])
+
   const dias = formData.data_inicio && formData.data_fim ? calculateDays(formData.data_inicio, formData.data_fim) : 0
-  const valorPreview = Math.max(dias * formData.valor_diaria - formData.desconto, 0)
+  const diasPreview = formData.vigencia_indeterminada ? 1 : dias
+  const valorPreview = Math.max(diasPreview * formData.valor_diaria - formData.desconto, 0)
 
   const closeoutKmRodado = closingContract
     ? Math.max(closeoutData.km_atual_veiculo - (closingContract.quilometragem_inicial || 0), 0)
@@ -490,18 +543,27 @@ const Contratos: React.FC = () => {
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault()
-    if (!formData.cliente_id || !formData.veiculo_id || !formData.data_inicio || !formData.data_fim) {
-      toast.error('Preencha cliente, veiculo e datas.')
+    if (!formData.cliente_id || !formData.veiculo_id || !formData.data_inicio) {
+      toast.error('Preencha cliente, veiculo e a data inicial.')
       return
     }
-    if (new Date(formData.data_fim) <= new Date(formData.data_inicio)) {
+    if (!formData.vigencia_indeterminada && !formData.data_fim) {
+      toast.error('Informe a data final ou marque a vigencia indeterminada.')
+      return
+    }
+    if (!formData.vigencia_indeterminada && new Date(formData.data_fim) <= new Date(formData.data_inicio)) {
       toast.error('A data final precisa ser maior que a inicial.')
+      return
+    }
+    if (formData.tipo === 'empresa' && !selectedEmpresaId) {
+      toast.error('Escolha um cliente vinculado a uma empresa para criar contrato corporativo.')
       return
     }
 
     const payload = {
       ...formData,
-      qtd_diarias: dias,
+      data_fim: formData.vigencia_indeterminada ? '' : formData.data_fim,
+      qtd_diarias: diasPreview,
       valor_total: valorPreview,
     }
     if (editingContract) updateMutation.mutate(payload)
@@ -676,14 +738,35 @@ const Contratos: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="input-label">Cliente *</label>
-                    <select value={formData.cliente_id} onChange={(event) => setFormData({ ...formData, cliente_id: event.target.value })} className="input-field">
+                    <select
+                      value={formData.cliente_id}
+                      onChange={(event) =>
+                        setFormData({
+                          ...formData,
+                          cliente_id: event.target.value,
+                          empresa_uso_id: '',
+                        })
+                      }
+                      className="input-field"
+                    >
                       <option value="">Selecione</option>
                       {clientes?.map((cliente: any) => <option key={cliente.id} value={cliente.id}>{cliente.nome}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="input-label">Tipo</label>
-                    <select value={formData.tipo} onChange={(event) => setFormData({ ...formData, tipo: event.target.value as 'cliente' | 'empresa' })} className="input-field">
+                    <select
+                      value={formData.tipo}
+                      onChange={(event) =>
+                        setFormData({
+                          ...formData,
+                          tipo: event.target.value as 'cliente' | 'empresa',
+                          vigencia_indeterminada:
+                            event.target.value === 'empresa' ? formData.vigencia_indeterminada : false,
+                        })
+                      }
+                      className="input-field"
+                    >
                       <option value="cliente">Cliente</option>
                       <option value="empresa">Empresa</option>
                     </select>
@@ -701,9 +784,66 @@ const Contratos: React.FC = () => {
                     {selectedCliente.nome} | {selectedVeiculo.marca} {selectedVeiculo.modelo} | KM atual {selectedVeiculo.km_atual || 0}
                   </div>
                 )}
+                {formData.tipo === 'empresa' && (
+                  <div className="space-y-3 rounded-2xl border border-blue-200 bg-blue-50/80 p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-semibold text-blue-950">Fluxo corporativo</p>
+                        <p className="mt-1 text-sm text-blue-900/80">
+                          Contratos de empresa podem operar com vigencia indeterminada e usar a parametrizacao mensal do veiculo associado.
+                        </p>
+                      </div>
+                      <label className="flex items-center gap-2 text-sm font-medium text-blue-950">
+                        <input
+                          type="checkbox"
+                          checked={formData.vigencia_indeterminada}
+                          onChange={(event) =>
+                            setFormData({
+                              ...formData,
+                              vigencia_indeterminada: event.target.checked,
+                              data_fim: event.target.checked ? '' : formData.data_fim,
+                            })
+                          }
+                          className="h-4 w-4 rounded border-blue-300"
+                        />
+                        Vigencia indeterminada
+                      </label>
+                    </div>
+                    {!selectedEmpresaId && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        Escolha um cliente vinculado a uma empresa para habilitar a parametrizacao corporativa.
+                      </div>
+                    )}
+                    {selectedEmpresaUso && (
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-3 text-sm">
+                        <div className="rounded-xl bg-white/90 px-4 py-3 border border-blue-100">
+                          <p className="text-xs uppercase tracking-[0.18em] text-blue-700/70">Veiculo associado</p>
+                          <p className="mt-2 font-semibold text-slate-900">{selectedEmpresaUso.placa} - {selectedEmpresaUso.modelo}</p>
+                        </div>
+                        <div className="rounded-xl bg-white/90 px-4 py-3 border border-blue-100">
+                          <p className="text-xs uppercase tracking-[0.18em] text-blue-700/70">KM permitida no periodo</p>
+                          <p className="mt-2 font-semibold text-slate-900">{Number(selectedEmpresaUso.km_referencia || 0).toLocaleString('pt-BR')} km</p>
+                        </div>
+                        <div className="rounded-xl bg-white/90 px-4 py-3 border border-blue-100">
+                          <p className="text-xs uppercase tracking-[0.18em] text-blue-700/70">Valor mensal / periodo</p>
+                          <p className="mt-2 font-semibold text-slate-900">{formatCurrency(Number(selectedEmpresaUso.valor_diaria_empresa || 0))}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div><label className="input-label">Data Inicio *</label><input type="date" value={formData.data_inicio} onChange={(event) => setFormData({ ...formData, data_inicio: event.target.value })} className="input-field" /></div>
-                  <div><label className="input-label">Data Fim *</label><input type="date" value={formData.data_fim} onChange={(event) => setFormData({ ...formData, data_fim: event.target.value })} className="input-field" /></div>
+                  <div>
+                    <label className="input-label">{formData.vigencia_indeterminada ? 'Data base de revisao' : 'Data Fim *'}</label>
+                    <input
+                      type="date"
+                      value={formData.data_fim}
+                      onChange={(event) => setFormData({ ...formData, data_fim: event.target.value })}
+                      className="input-field"
+                      disabled={formData.vigencia_indeterminada}
+                    />
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -723,12 +863,24 @@ const Contratos: React.FC = () => {
                   <div><label className="input-label">KM Livres</label><input type="number" value={formData.km_livres} onChange={(event) => setFormData({ ...formData, km_livres: Number(event.target.value) || 0 })} className="input-field" /></div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div><label className="input-label">Valor Diaria *</label><input type="number" step="0.01" value={formData.valor_diaria} onChange={(event) => setFormData({ ...formData, valor_diaria: Number(event.target.value) || 0 })} className="input-field" /></div>
-                  <div><label className="input-label">Valor KM Excedente</label><input type="number" step="0.01" value={formData.valor_km_excedente} onChange={(event) => setFormData({ ...formData, valor_km_excedente: Number(event.target.value) || 0 })} className="input-field" /></div>
-                  <div><label className="input-label">Desconto</label><input type="number" step="0.01" value={formData.desconto} onChange={(event) => setFormData({ ...formData, desconto: Number(event.target.value) || 0 })} className="input-field" /></div>
+                  <CurrencyInput
+                    label={formData.tipo === 'empresa' ? 'Valor mensal / periodo *' : 'Valor Diaria *'}
+                    value={formData.valor_diaria}
+                    onChange={(valor_diaria) => setFormData({ ...formData, valor_diaria })}
+                  />
+                  <CurrencyInput
+                    label="Valor KM Excedente"
+                    value={formData.valor_km_excedente}
+                    onChange={(valor_km_excedente) => setFormData({ ...formData, valor_km_excedente })}
+                  />
+                  <CurrencyInput
+                    label="Desconto"
+                    value={formData.desconto}
+                    onChange={(desconto) => setFormData({ ...formData, desconto })}
+                  />
                 </div>
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm space-y-2">
-                  <div className="flex justify-between"><span>Periodo</span><strong>{dias} dia(s)</strong></div>
+                  <div className="flex justify-between"><span>Periodo</span><strong>{formData.vigencia_indeterminada ? 'Indeterminado' : `${dias} dia(s)`}</strong></div>
                   <div className="flex justify-between"><span>Valor previsto</span><strong>{formatCurrency(valorPreview)}</strong></div>
                 </div>
                 <div><label className="input-label">Observacoes</label><textarea value={formData.observacoes} onChange={(event) => setFormData({ ...formData, observacoes: event.target.value })} rows={3} className="input-field" /></div>
@@ -795,7 +947,10 @@ const Contratos: React.FC = () => {
                       </div>
                       <div>
                         <label className="input-label">Desconto Final</label>
-                        <input type="number" step="0.01" value={closeoutData.desconto} onChange={(event) => setCloseoutData({ ...closeoutData, desconto: Number(event.target.value) || 0 })} className="input-field" />
+                        <CurrencyInput
+                          value={closeoutData.desconto}
+                          onChange={(desconto) => setCloseoutData({ ...closeoutData, desconto })}
+                        />
                       </div>
                     </div>
 
@@ -859,13 +1014,10 @@ const Contratos: React.FC = () => {
                           <div key={field.key} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
                             <label className="input-label">{field.label}</label>
                             <p className="mb-3 text-xs text-slate-500">{field.hint}</p>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
+                            <CurrencyInput
                               value={closeoutData[field.key]}
-                              onChange={(event) => setCloseoutData({ ...closeoutData, [field.key]: Number(event.target.value) || 0 })}
-                              className="input-field bg-white"
+                              onChange={(nextValue) => setCloseoutData({ ...closeoutData, [field.key]: nextValue })}
+                              className="bg-white"
                             />
                           </div>
                         ))}
@@ -940,13 +1092,9 @@ const Contratos: React.FC = () => {
                         </div>
                         <div>
                           <label className="input-label">Valor recebido</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
+                          <CurrencyInput
                             value={closeoutData.valor_recebido}
-                            onChange={(event) => setCloseoutData({ ...closeoutData, valor_recebido: Number(event.target.value) || 0 })}
-                            className="input-field"
+                            onChange={(valor_recebido) => setCloseoutData({ ...closeoutData, valor_recebido })}
                           />
                         </div>
                       </div>

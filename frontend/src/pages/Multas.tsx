@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 
 import AppLayout from '@/components/layout/AppLayout'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
+import CurrencyInput from '@/components/shared/CurrencyInput'
 import DataTable from '@/components/shared/DataTable'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import api from '@/services/api'
@@ -427,19 +428,12 @@ const Multas: React.FC = () => {
                       disabled={createMutation.isPending || updateMutation.isPending}
                     />
                   </div>
-                  <div>
-                    <label className="input-label">Valor *</label>
-                    <input
-                      type="number"
-                      value={formData.valor}
-                      onChange={(event) => setFormData({ ...formData, valor: parseFloat(event.target.value || '0') })}
-                      step="0.01"
-                      min="0"
-                      className="input-field"
-                      placeholder="0,00"
-                      disabled={createMutation.isPending || updateMutation.isPending}
-                    />
-                  </div>
+                  <CurrencyInput
+                    label="Valor *"
+                    value={formData.valor}
+                    onChange={(valor) => setFormData({ ...formData, valor })}
+                    disabled={createMutation.isPending || updateMutation.isPending}
+                  />
                   <div>
                     <label className="input-label">Status</label>
                     <select

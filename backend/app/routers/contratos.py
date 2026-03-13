@@ -41,7 +41,7 @@ class ContratoBase(BaseModel):
     cliente_id: int
     veiculo_id: int
     data_inicio: datetime
-    data_fim: datetime
+    data_fim: Optional[datetime] = None
     km_inicial: Optional[float] = None
     quilometragem_inicial: Optional[float] = None
     km_atual_veiculo: Optional[float] = None
@@ -73,6 +73,8 @@ class ContratoBase(BaseModel):
     data_pagamento: Optional[date] = None
     valor_recebido: Optional[float] = None
     tipo: Optional[str] = "cliente"
+    vigencia_indeterminada: Optional[bool] = False
+    empresa_uso_id: Optional[int] = None
 
 
 class ContratoCreate(ContratoBase):
@@ -118,6 +120,8 @@ class ContratoUpdate(BaseModel):
     data_pagamento: Optional[date] = None
     valor_recebido: Optional[float] = None
     tipo: Optional[str] = None
+    vigencia_indeterminada: Optional[bool] = None
+    empresa_uso_id: Optional[int] = None
 
 
 class ContratoFinalizeRequest(BaseModel):
@@ -186,6 +190,25 @@ def _validar_datas(data_inicio: datetime, data_fim: datetime):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Data de inicio deve ser anterior a data de fim",
         )
+
+
+def _resolver_data_fim(
+    data_inicio: datetime,
+    data_fim: Optional[datetime],
+    *,
+    tipo: Optional[str] = None,
+    vigencia_indeterminada: bool = False,
+) -> datetime:
+    if data_fim:
+        return data_fim
+
+    if vigencia_indeterminada or str(tipo or "").lower() == "empresa":
+        return data_inicio + timedelta(days=3650)
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Data final obrigatoria para contratos com prazo definido",
+    )
 
 
 def _calcular_qtd_diarias(data_inicio: datetime, data_fim: datetime) -> int:
@@ -380,13 +403,82 @@ def _append_observacao(existing_value: Optional[str], extra_value: Optional[str]
     return "{}\n{}".format(existing_value.strip(), bloco)
 
 
-def _ensure_cliente_exists(db: Session, cliente_id: int):
+def _ensure_cliente_exists(db: Session, cliente_id: int) -> Cliente:
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Cliente nao encontrado",
         )
+    return cliente
+
+
+def _sincronizar_uso_empresa(
+    db: Session,
+    contrato: Contrato,
+    cliente: Cliente,
+    *,
+    empresa_uso_id: Optional[int] = None,
+    encerrar: bool = False,
+):
+    empresa_id = getattr(cliente, "empresa_id", None)
+    if contrato.tipo != "empresa" or not empresa_id:
+        return
+
+    uso = None
+    if empresa_uso_id:
+        uso = (
+            db.query(UsoVeiculoEmpresa)
+            .filter(
+                UsoVeiculoEmpresa.id == empresa_uso_id,
+                UsoVeiculoEmpresa.empresa_id == empresa_id,
+            )
+            .first()
+        )
+    if not uso and contrato.id:
+        uso = (
+            db.query(UsoVeiculoEmpresa)
+            .filter(UsoVeiculoEmpresa.contrato_id == contrato.id)
+            .first()
+        )
+    if not uso:
+        uso = (
+            db.query(UsoVeiculoEmpresa)
+            .filter(
+                UsoVeiculoEmpresa.empresa_id == empresa_id,
+                UsoVeiculoEmpresa.veiculo_id == contrato.veiculo_id,
+                UsoVeiculoEmpresa.status == "ativo",
+            )
+            .order_by(UsoVeiculoEmpresa.data_criacao.desc())
+            .first()
+        )
+
+    if not uso:
+        uso = UsoVeiculoEmpresa(
+            empresa_id=empresa_id,
+            veiculo_id=contrato.veiculo_id,
+            status="ativo",
+        )
+        db.add(uso)
+
+    uso.empresa_id = empresa_id
+    uso.veiculo_id = contrato.veiculo_id
+    uso.contrato_id = contrato.id
+    uso.km_inicial = float(contrato.km_inicial or 0)
+    uso.km_referencia = float(contrato.km_livres or 0) if contrato.km_livres is not None else uso.km_referencia
+    uso.valor_km_extra = contrato.valor_km_excedente
+    uso.valor_diaria_empresa = contrato.valor_diaria
+    uso.data_inicio = contrato.data_inicio
+
+    if encerrar:
+        uso.km_final = float(contrato.km_final or uso.km_final or contrato.km_inicial or 0)
+        if uso.km_inicial is not None and uso.km_final is not None:
+            uso.km_percorrido = max(float(uso.km_final) - float(uso.km_inicial), 0.0)
+        uso.data_fim = contrato.data_finalizacao or contrato.data_fim
+        uso.status = "finalizado"
+    else:
+        uso.data_fim = None if contrato.status == "ativo" else (contrato.data_finalizacao or contrato.data_fim)
+        uso.status = "ativo" if contrato.status == "ativo" else "finalizado"
 
 
 def _ensure_veiculo_available(
@@ -517,9 +609,18 @@ def create_contrato(
     request: Request = None,
 ):
     """Create a new contract."""
+    raw_payload = contrato.model_dump(exclude_unset=True)
+    vigencia_indeterminada = bool(raw_payload.pop("vigencia_indeterminada", False))
+    empresa_uso_id = raw_payload.pop("empresa_uso_id", None)
     contrato_data = _normalize_contrato_payload(
-        contrato.model_dump(exclude_unset=True),
+        raw_payload,
         is_create=True,
+    )
+    contrato_data["data_fim"] = _resolver_data_fim(
+        contrato_data["data_inicio"],
+        contrato_data.get("data_fim"),
+        tipo=contrato_data.get("tipo"),
+        vigencia_indeterminada=vigencia_indeterminada,
     )
     _validar_datas(contrato_data["data_inicio"], contrato_data["data_fim"])
 
@@ -530,7 +631,7 @@ def create_contrato(
             detail="Numero de contrato ja existe",
         )
 
-    _ensure_cliente_exists(db, contrato_data["cliente_id"])
+    cliente = _ensure_cliente_exists(db, contrato_data["cliente_id"])
     veiculo = _ensure_veiculo_available(db, contrato_data["veiculo_id"])
 
     if contrato_data.get("km_inicial") is None:
@@ -581,6 +682,12 @@ def create_contrato(
         )
     )
     veiculo.status = "alugado"
+    _sincronizar_uso_empresa(
+        db,
+        db_contrato,
+        cliente,
+        empresa_uso_id=empresa_uso_id,
+    )
 
     db.commit()
     db.refresh(db_contrato)
@@ -630,7 +737,10 @@ def update_contrato(
             detail="Contrato nao encontrado",
         )
 
-    update_data = _normalize_contrato_payload(contrato_data.model_dump(exclude_unset=True))
+    raw_payload = contrato_data.model_dump(exclude_unset=True)
+    vigencia_indeterminada = raw_payload.pop("vigencia_indeterminada", None)
+    empresa_uso_id = raw_payload.pop("empresa_uso_id", None)
+    update_data = _normalize_contrato_payload(raw_payload)
 
     if "numero" in update_data and update_data["numero"]:
         existing = db.query(Contrato).filter(
@@ -650,8 +760,15 @@ def update_contrato(
     novo_status = update_data.get("status", contrato.status)
     novo_valor_diaria = update_data.get("valor_diaria", contrato.valor_diaria)
 
+    nova_data_fim = _resolver_data_fim(
+        nova_data_inicio,
+        nova_data_fim,
+        tipo=update_data.get("tipo", contrato.tipo),
+        vigencia_indeterminada=bool(vigencia_indeterminada),
+    )
+    update_data["data_fim"] = nova_data_fim
     _validar_datas(nova_data_inicio, nova_data_fim)
-    _ensure_cliente_exists(db, novo_cliente_id)
+    cliente = _ensure_cliente_exists(db, novo_cliente_id)
 
     veiculo_destino = None
     if novo_status == "ativo":
@@ -719,6 +836,13 @@ def update_contrato(
     )
 
     db.flush()
+    _sincronizar_uso_empresa(
+        db,
+        contrato,
+        cliente,
+        empresa_uso_id=empresa_uso_id,
+        encerrar=contrato.status != "ativo",
+    )
     _recalcular_status_veiculo(db, veiculo_antigo_id)
     _recalcular_status_veiculo(db, contrato.veiculo_id)
 
@@ -854,6 +978,8 @@ def finalizar_contrato(
             avarias=finalize_data.get("observacoes"),
         )
     )
+    cliente = _ensure_cliente_exists(db, contrato.cliente_id)
+    _sincronizar_uso_empresa(db, contrato, cliente, encerrar=True)
     _recalcular_status_veiculo(db, contrato.veiculo_id)
 
     db.commit()

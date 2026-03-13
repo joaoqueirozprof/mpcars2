@@ -8,37 +8,53 @@ interface CurrencyInputProps {
   disabled?: boolean
   label?: string
   error?: string
+  className?: string
+  emptyWhenZero?: boolean
 }
 
 const CurrencyInput: React.FC<CurrencyInputProps> = ({
   value,
   onChange,
-  placeholder = 'R$ 0,00',
+  placeholder = 'Digite o valor',
   disabled = false,
   label,
   error,
+  className = '',
+  emptyWhenZero = true,
 }) => {
-  const [displayValue, setDisplayValue] = React.useState(formatCurrency(value))
+  const formatDisplay = React.useCallback(
+    (nextValue: number) => {
+      if (emptyWhenZero && (!nextValue || Number(nextValue) === 0)) {
+        return ''
+      }
+      return formatCurrency(nextValue)
+    },
+    [emptyWhenZero],
+  )
+
+  const [displayValue, setDisplayValue] = React.useState(() => formatDisplay(value))
+
+  React.useEffect(() => {
+    setDisplayValue(formatDisplay(value))
+  }, [formatDisplay, value])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let inputValue = e.target.value.replace(/\D/g, '')
+    const rawDigits = e.target.value.replace(/\D/g, '')
 
-    if (inputValue.length === 0) {
+    if (rawDigits.length === 0) {
       setDisplayValue('')
       onChange(0)
       return
     }
 
-    inputValue = inputValue.padStart(3, '0')
-    const numValue = parseInt(inputValue) / 100
-
+    const numValue = parseCurrency(rawDigits)
     setDisplayValue(formatCurrency(numValue))
     onChange(numValue)
   }
 
   const handleBlur = () => {
     if (displayValue === '') {
-      setDisplayValue(formatCurrency(0))
+      setDisplayValue(formatDisplay(0))
       onChange(0)
     }
   }
@@ -53,7 +69,8 @@ const CurrencyInput: React.FC<CurrencyInputProps> = ({
         onBlur={handleBlur}
         placeholder={placeholder}
         disabled={disabled}
-        className={`input-field ${error ? 'border-danger' : ''}`}
+        inputMode="numeric"
+        className={`input-field ${error ? 'border-danger' : ''} ${className}`.trim()}
       />
       {error && <p className="text-danger text-sm mt-1">{error}</p>}
     </div>

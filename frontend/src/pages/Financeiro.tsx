@@ -18,6 +18,7 @@ import {
 import { useSearchParams } from 'react-router-dom'
 import api from '@/services/api'
 import AppLayout from '@/components/layout/AppLayout'
+import CurrencyInput from '@/components/shared/CurrencyInput'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -72,6 +73,8 @@ const FinanceiroPage: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<'todos' | 'receita' | 'despesa'>('todos')
   const [statusFilter, setStatusFilter] = useState<'todos' | 'pendente' | 'pago' | 'cancelado'>('todos')
   const [searchTerm, setSearchTerm] = useState('')
+  const [periodStart, setPeriodStart] = useState('')
+  const [periodEnd, setPeriodEnd] = useState('')
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
     tipo: 'receita' as 'receita' | 'despesa',
@@ -90,7 +93,7 @@ const FinanceiroPage: React.FC = () => {
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['financeiro', pagination, typeFilter, statusFilter],
+    queryKey: ['financeiro', pagination, typeFilter, statusFilter, searchTerm, periodStart, periodEnd],
     queryFn: async () => {
       const { data } = await api.get<PaginatedResponse<Financeiro>>('/financeiro', {
         params: {
@@ -98,6 +101,9 @@ const FinanceiroPage: React.FC = () => {
           limit: pagination.limit,
           tipo: typeFilter !== 'todos' ? typeFilter : undefined,
           status: statusFilter !== 'todos' ? statusFilter : undefined,
+          search: searchTerm || undefined,
+          data_inicio: periodStart || undefined,
+          data_fim: periodEnd || undefined,
         },
       })
       return data
@@ -276,17 +282,7 @@ const FinanceiroPage: React.FC = () => {
     }
   }, [summaryData])
 
-  const filteredRecords = useMemo(() => {
-    return records.filter((record) => {
-      if (searchTerm === '') return true
-      const searchLower = searchTerm.toLowerCase()
-      return (
-        record.descricao.toLowerCase().includes(searchLower) ||
-        record.categoria.toLowerCase().includes(searchLower) ||
-        record.id.toLowerCase().includes(searchLower)
-      )
-    })
-  }, [records, searchTerm])
+  const filteredRecords = useMemo(() => records, [records])
 
   const getStatusBadgeClass = (status: string): string => {
     switch (status) {
@@ -476,9 +472,55 @@ const FinanceiroPage: React.FC = () => {
                   type="text"
                   placeholder="Buscar por descrição, categoria ou ID..."
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value)
+                    setPagination((current) => ({ ...current, page: 1 }))
+                  }}
                   className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
                 />
+              </div>
+            </div>
+
+            <div className="border-t border-slate-200 pt-4">
+              <p className="text-sm font-semibold text-slate-900 mb-3">Periodo</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="input-label">Data inicial</label>
+                  <input
+                    type="date"
+                    value={periodStart}
+                    onChange={(e) => {
+                      setPeriodStart(e.target.value)
+                      setPagination((current) => ({ ...current, page: 1 }))
+                    }}
+                    className="input-field"
+                  />
+                </div>
+                <div>
+                  <label className="input-label">Data final</label>
+                  <input
+                    type="date"
+                    value={periodEnd}
+                    onChange={(e) => {
+                      setPeriodEnd(e.target.value)
+                      setPagination((current) => ({ ...current, page: 1 }))
+                    }}
+                    className="input-field"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPeriodStart('')
+                      setPeriodEnd('')
+                      setPagination((current) => ({ ...current, page: 1 }))
+                    }}
+                    className="btn-secondary w-full"
+                  >
+                    Limpar periodo
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -567,21 +609,35 @@ const FinanceiroPage: React.FC = () => {
                       </td>
                       <td className="table-cell text-center">
                         <div className="flex items-center justify-center gap-2">
+                          {(() => {
+                            const canManageFromFinance = record.id.startsWith('fm-') || record.id.startsWith('c-')
+                            const canDeleteFromFinance =
+                              canManageFromFinance ||
+                              record.id.startsWith('dc-') ||
+                              record.id.startsWith('dv-') ||
+                              record.id.startsWith('dl-')
+
+                            return (
+                              <>
                           <button
                             onClick={() => handleOpenModal(record)}
                             className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                            title={record.id.startsWith('c-') ? 'Atualizar recebimento' : 'Editar'}
-                            disabled={!record.id.startsWith('fm-') && !record.id.startsWith('c-')}
+                            title={record.id.startsWith('c-') ? 'Atualizar recebimento' : canManageFromFinance ? 'Editar' : 'Edite no modulo de origem'}
+                            disabled={!canManageFromFinance}
                           >
                             <Edit size={18} />
                           </button>
                           <button
                             onClick={() => setDeleteConfirm({ isOpen: true, id: record.id })}
                             className="p-2 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Deletar"
+                            title={canDeleteFromFinance ? 'Deletar' : 'Exclusao disponivel no modulo de origem'}
+                            disabled={!canDeleteFromFinance}
                           >
                             <Trash2 size={18} />
                           </button>
+                              </>
+                            )
+                          })()}
                         </div>
                       </td>
                     </tr>
@@ -752,25 +808,12 @@ const FinanceiroPage: React.FC = () => {
               </div>
 
               {/* Valor - Currency Input */}
-              <div>
-                <label htmlFor="valor" className="input-label">
-                  Valor *
-                </label>
-                <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
-                  <span className="text-slate-600 flex-shrink-0">R$</span>
-                  <input
-                    id="valor"
-                    type="number"
-                    value={formData.valor}
-                    onChange={(e) => setFormData({ ...formData, valor: parseFloat(e.target.value) || 0 })}
-                    step="0.01"
-                    min="0"
-                    placeholder="0,00"
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
-                    disabled={createMutation.isPending || updateMutation.isPending}
-                  />
-                </div>
-              </div>
+              <CurrencyInput
+                label="Valor *"
+                value={formData.valor}
+                onChange={(valor) => setFormData({ ...formData, valor })}
+                disabled={createMutation.isPending || updateMutation.isPending}
+              />
 
               {/* Data */}
               <div>
@@ -906,13 +949,9 @@ const FinanceiroPage: React.FC = () => {
                 </div>
                 <div>
                   <label className="input-label">Valor recebido</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                  <CurrencyInput
                     value={paymentFormData.valor_recebido}
-                    onChange={(e) => setPaymentFormData({ ...paymentFormData, valor_recebido: parseFloat(e.target.value) || 0 })}
-                    className="input-field"
+                    onChange={(valor_recebido) => setPaymentFormData({ ...paymentFormData, valor_recebido })}
                     disabled={paymentMutation.isPending}
                   />
                 </div>

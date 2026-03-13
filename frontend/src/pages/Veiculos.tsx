@@ -14,11 +14,14 @@ import {
   Wrench,
   XCircle,
   Camera,
+  CircleDollarSign,
   Upload,
   Image as ImageIcon,
+  Loader2,
 } from 'lucide-react'
 import api from '@/services/api'
 import AppLayout from '@/components/layout/AppLayout'
+import CurrencyInput from '@/components/shared/CurrencyInput'
 import { Veiculo } from '@/types'
 import toast from 'react-hot-toast'
 
@@ -44,6 +47,7 @@ const Veiculos: React.FC = () => {
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [viewingPhoto, setViewingPhoto] = useState<{ isOpen: boolean; url?: string; placa?: string }>({ isOpen: false })
+  const [historyVehicle, setHistoryVehicle] = useState<Veiculo | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
@@ -60,6 +64,15 @@ const Veiculos: React.FC = () => {
   })
 
   const currentYear = new Date().getFullYear()
+
+  const { data: financialHistory, isLoading: isLoadingFinancialHistory } = useQuery({
+    queryKey: ['veiculo-financial-history', historyVehicle?.id],
+    enabled: Boolean(historyVehicle?.id),
+    queryFn: async () => {
+      const { data } = await api.get(`/veiculos/historico-financeiro/${historyVehicle?.id}`)
+      return data
+    },
+  })
 
   // Fetch all vehicles
   const { data: vehiclesData, isLoading: isLoadingVehicles } = useQuery({
@@ -524,6 +537,13 @@ const Veiculos: React.FC = () => {
                       <td className="table-cell text-center">
                         <div className="flex items-center justify-center gap-2">
                           <button
+                            onClick={() => setHistoryVehicle(vehicle)}
+                            className="btn-icon transition-colors duration-200"
+                            title="Historico financeiro do veiculo"
+                          >
+                            <CircleDollarSign size={18} />
+                          </button>
+                          <button
                             onClick={() => handleOpenModal(vehicle)}
                             className="btn-icon transition-colors duration-200"
                             title="Editar"
@@ -736,19 +756,12 @@ const Veiculos: React.FC = () => {
                 </div>
 
                 {/* Valor Aquisicao */}
-                <div>
-                  <label className="input-label">Valor Aquisicao</label>
-                  <input
-                    type="number"
-                    value={formData.valor_aquisicao}
-                    onChange={(e) => setFormData({ ...formData, valor_aquisicao: parseFloat(e.target.value) || 0 })}
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    className="input-field"
-                    disabled={isMutating}
-                  />
-                </div>
+                <CurrencyInput
+                  label="Valor Aquisicao"
+                  value={formData.valor_aquisicao}
+                  onChange={(valor_aquisicao) => setFormData({ ...formData, valor_aquisicao })}
+                  disabled={isMutating}
+                />
 
                 {/* Data Compra */}
                 <div>
@@ -844,6 +857,78 @@ const Veiculos: React.FC = () => {
                 alt={`Veiculo ${viewingPhoto.placa}`}
                 className="max-w-full max-h-[60vh] rounded-xl object-contain"
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {historyVehicle && (
+        <div className="modal-overlay" onClick={() => setHistoryVehicle(null)}>
+          <div className="modal-content max-w-5xl w-full flex flex-col max-h-[92vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-lg font-display font-bold text-slate-900">Historico financeiro do veiculo</h3>
+                <p className="text-sm text-slate-500">{historyVehicle.placa} - {historyVehicle.marca} {historyVehicle.modelo}</p>
+              </div>
+              <button onClick={() => setHistoryVehicle(null)} className="btn-icon">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 overflow-y-auto space-y-5">
+              {isLoadingFinancialHistory ? (
+                <div className="flex items-center justify-center py-16 text-slate-500">
+                  <Loader2 size={22} className="animate-spin mr-2" />
+                  Carregando historico financeiro...
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Receita acumulada</p>
+                      <p className="mt-2 text-2xl font-display font-bold text-emerald-600">{formatCurrency(Number(financialHistory?.total_receita || 0))}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Despesa acumulada</p>
+                      <p className="mt-2 text-2xl font-display font-bold text-rose-600">{formatCurrency(Number(financialHistory?.total_despesa || 0))}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Saldo do veiculo</p>
+                      <p className="mt-2 text-2xl font-display font-bold text-blue-700">{formatCurrency(Number(financialHistory?.saldo || 0))}</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                    <div className="grid grid-cols-[140px_120px_1fr_140px] gap-4 border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      <span>Data</span>
+                      <span>Tipo</span>
+                      <span>Descricao</span>
+                      <span className="text-right">Valor</span>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {(financialHistory?.records || []).length === 0 ? (
+                        <div className="px-5 py-10 text-center text-slate-500">Nenhum lancamento encontrado para este veiculo.</div>
+                      ) : (
+                        (financialHistory?.records || []).map((record: any) => (
+                          <div key={record.id} className="grid grid-cols-[140px_120px_1fr_140px] gap-4 px-5 py-4 text-sm">
+                            <span className="text-slate-600">{formatDate(record.data)}</span>
+                            <span className={`font-medium ${record.tipo === 'receita' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {record.tipo === 'receita' ? 'Receita' : 'Despesa'}
+                            </span>
+                            <div>
+                              <p className="font-medium text-slate-900">{record.descricao}</p>
+                              <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-400">{record.categoria}</p>
+                            </div>
+                            <span className={`text-right font-semibold ${record.tipo === 'receita' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {record.tipo === 'receita' ? '+' : '-'} {formatCurrency(Number(record.valor || 0))}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

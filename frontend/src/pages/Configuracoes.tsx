@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import AppLayout from '@/components/layout/AppLayout'
+import CurrencyInput from '@/components/shared/CurrencyInput'
 import api from '@/services/api'
 import toast from 'react-hot-toast'
 import { Settings, Building2, User, Sliders, HardDriveDownload, ShieldCheck } from 'lucide-react'
@@ -463,12 +464,10 @@ const Configuracoes: React.FC = () => {
 
                 <div>
                   <label className="input-label">Valor Diária Padrão (R$)</label>
-                  <input
-                    type="number"
+                  <CurrencyInput
                     value={systemForm.valor_diaria_padrao}
-                    onChange={(e) => setSystemForm({ ...systemForm, valor_diaria_padrao: parseFloat(e.target.value) })}
-                    min="0"
-                    step="0.01"
+                    onChange={(valor_diaria_padrao) => setSystemForm({ ...systemForm, valor_diaria_padrao })}
+                    emptyWhenZero
                     className="input-field"
                     placeholder="150,00"
                   />

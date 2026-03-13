@@ -7,6 +7,7 @@ import toast from 'react-hot-toast'
 
 import AppLayout from '@/components/layout/AppLayout'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
+import CurrencyInput from '@/components/shared/CurrencyInput'
 import DataTable from '@/components/shared/DataTable'
 import { useConfig } from '@/contexts/ConfigContext'
 import { calculateDays, formatCurrency, formatDate } from '@/lib/utils'
@@ -584,8 +585,11 @@ const Reservas: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="input-label">Valor Diaria *</label>
-                    <input type="number" step="0.01" value={convertForm.valor_diaria} onChange={(event) => setConvertForm({ ...convertForm, valor_diaria: Number(event.target.value) || 0 })} className="input-field" />
+                    <CurrencyInput
+                      label="Valor Diaria *"
+                      value={convertForm.valor_diaria}
+                      onChange={(valor_diaria) => setConvertForm({ ...convertForm, valor_diaria })}
+                    />
                   </div>
                 </div>
 
@@ -609,12 +613,18 @@ const Reservas: React.FC = () => {
                     <input type="number" value={convertForm.km_livres} onChange={(event) => setConvertForm({ ...convertForm, km_livres: Number(event.target.value) || 0 })} className="input-field" />
                   </div>
                   <div>
-                    <label className="input-label">Valor KM Excedente</label>
-                    <input type="number" step="0.01" value={convertForm.valor_km_excedente} onChange={(event) => setConvertForm({ ...convertForm, valor_km_excedente: Number(event.target.value) || 0 })} className="input-field" />
+                    <CurrencyInput
+                      label="Valor KM Excedente"
+                      value={convertForm.valor_km_excedente}
+                      onChange={(valor_km_excedente) => setConvertForm({ ...convertForm, valor_km_excedente })}
+                    />
                   </div>
                   <div>
-                    <label className="input-label">Desconto</label>
-                    <input type="number" step="0.01" value={convertForm.desconto} onChange={(event) => setConvertForm({ ...convertForm, desconto: Number(event.target.value) || 0 })} className="input-field" />
+                    <CurrencyInput
+                      label="Desconto"
+                      value={convertForm.desconto}
+                      onChange={(desconto) => setConvertForm({ ...convertForm, desconto })}
+                    />
                   </div>
                 </div>
 

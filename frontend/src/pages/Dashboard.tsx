@@ -504,49 +504,6 @@ const Dashboard: React.FC = () => {
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 animate-fade-in-up" style={{ animationDelay: '70ms' }}>
-          <div className="card bg-slate-50 border border-slate-200 dashboard-lift">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Veiculos Disponiveis</p>
-            {isLoading ? (
-              <div className="h-8 w-20 bg-slate-200 rounded animate-pulse mt-2" />
-            ) : (
-              <CountUpValue value={stats?.veiculos_disponiveis || 0} className="mt-2 text-2xl font-bold text-slate-900" />
-            )}
-          </div>
-          <div className="card bg-slate-50 border border-slate-200 dashboard-lift">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Taxa de Ocupacao</p>
-            {isLoading ? (
-              <div className="h-8 w-24 bg-slate-200 rounded animate-pulse mt-2" />
-            ) : (
-              <>
-                <CountUpValue value={stats?.taxa_ocupacao || 0} formatter={(value) => `${formatPercent(value)}%`} className="mt-2 text-2xl font-bold text-slate-900" />
-                <div className="metric-progress-track mt-3">
-                  <div className="metric-progress-fill bg-blue-500" style={{ width: `${stats?.taxa_ocupacao || 0}%` }} />
-                </div>
-              </>
-            )}
-          </div>
-          <div className="card bg-slate-50 border border-slate-200 dashboard-lift">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Veiculos em Manutencao</p>
-            {isLoading ? (
-              <div className="h-8 w-20 bg-slate-200 rounded animate-pulse mt-2" />
-            ) : (
-              <>
-                <CountUpValue value={stats?.veiculos_manutencao || 0} className="mt-2 text-2xl font-bold text-slate-900" />
-                <p className="mt-2 text-xs text-slate-500">{stats?.manutencoes_abertas || 0} ordem(ns) aberta(s)</p>
-              </>
-            )}
-          </div>
-          <div className="card bg-slate-50 border border-slate-200 dashboard-lift">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Clientes Ativos</p>
-            {isLoading ? (
-              <div className="h-8 w-20 bg-slate-200 rounded animate-pulse mt-2" />
-            ) : (
-              <CountUpValue value={stats?.total_clientes || 0} className="mt-2 text-2xl font-bold text-slate-900" />
-            )}
-          </div>
-        </div>
-
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] animate-fade-in-up" style={{ animationDelay: '120ms' }}>
           <div className="card">
             <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">

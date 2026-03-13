@@ -3,6 +3,7 @@ import { Store, Plus, Pencil, Trash2, Search, X, DollarSign, TrendingDown } from
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import AppLayout from '@/components/layout/AppLayout'
+import CurrencyInput from '@/components/shared/CurrencyInput'
 import toast from 'react-hot-toast'
 import api from '@/services/api'
 
@@ -424,19 +425,11 @@ const DespesasLoja: React.FC = () => {
                   required
                 />
               </div>
-              <div>
-                <label className="input-label">Valor (R$)</label>
-                <input
-                  type="number"
-                  value={formData.valor}
-                  onChange={(e) => setFormData({...formData, valor: e.target.value})}
-                  className="input-field"
-                  placeholder="0,00"
-                  min="0.01"
-                  step="0.01"
-                  required
-                />
-              </div>
+              <CurrencyInput
+                label="Valor (R$)"
+                value={parseFloat(formData.valor) || 0}
+                onChange={(valor) => setFormData({ ...formData, valor: String(valor) })}
+              />
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowModal(false)} className="btn-secondary flex-1">
                   Cancelar

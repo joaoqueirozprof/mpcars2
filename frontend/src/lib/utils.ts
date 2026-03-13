@@ -16,7 +16,10 @@ export function formatCurrency(value: number | null | undefined): string {
 }
 
 export function parseCurrency(value: string): number {
-  return parseFloat(value.replace(/\D/g, '')) / 100
+  if (!value) return 0
+  const digits = value.replace(/\D/g, '')
+  if (!digits) return 0
+  return parseFloat(digits) / 100
 }
 
 export function formatDate(date: string | Date | null | undefined): string {

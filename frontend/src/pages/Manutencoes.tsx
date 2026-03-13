@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import api from '@/services/api'
 import toast from 'react-hot-toast'
 import AppLayout from '@/components/layout/AppLayout'
+import CurrencyInput from '@/components/shared/CurrencyInput'
 import DataTable from '@/components/shared/DataTable'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import { Manutencao, Veiculo, PaginatedResponse, PaginationParams } from '@/types'
@@ -576,20 +577,17 @@ const Manutencoes: React.FC = () => {
     {
       key: 'tipo' as const,
       label: 'Tipo',
-      render: (tipo: string) => (
-        <div className="flex items-center gap-1">
-          {tipo === 'preventiva' ? (
-            <span className="badge-info text-xs px-2 py-1">Preventiva</span>
-          ) : (
-            <span className="badge-danger text-xs px-2 py-1">Corretiva</span>
-          )}
-        </div>
-      ),
+      render: (tipo: string) =>
+        tipo === 'preventiva' ? (
+          <span className="badge-info text-xs px-2 py-1">Preventiva</span>
+        ) : (
+          <span className="badge-danger text-xs px-2 py-1">Corretiva</span>
+        ),
     },
     {
-      key: 'data_manutencao' as const,
+      key: 'data_realizada' as const,
       label: 'Data',
-      render: (date: string) => <span className="text-slate-700">{formatDate(date)}</span>,
+      render: (_: string, row: any) => <span className="text-slate-700">{formatDate(row.data_realizada || row.data_proxima)}</span>,
     },
     {
       key: 'oficina' as const,
@@ -597,21 +595,14 @@ const Manutencoes: React.FC = () => {
       render: (oficina: string) => <span className="text-slate-700">{oficina || '-'}</span>,
     },
     {
-      key: 'valor' as const,
-      label: 'Valor',
-      render: (value: number) => <span className="font-semibold text-slate-900">{formatCurrency(value)}</span>,
+      key: 'custo' as const,
+      label: 'Custo',
+      render: (value: number, row: any) => <span className="font-semibold text-slate-900">{formatCurrency(value ?? row.valor ?? 0)}</span>,
     },
-    {
+        {
       key: 'status' as const,
       label: 'Status',
-      render: (status: string) => (
-        <div className="flex items-center gap-1">
-          {status === 'pendente' && <span className="badge-warning text-xs px-2 py-1">Pendente</span>}
-          {status === 'em_progresso' && <span className="badge-info text-xs px-2 py-1">Em Progresso</span>}
-          {status === 'concluida' && <span className="badge-success text-xs px-2 py-1">Concluída</span>}
-          {status === 'cancelada' && <span className="badge-danger text-xs px-2 py-1">Cancelada</span>}
-        </div>
-      ),
+      render: (status: string) => <span className={cn('inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold', statusClass(status))}>{statusLabel(status)}</span>,
     },
     {
       key: 'id' as const,
@@ -911,7 +902,11 @@ const Manutencoes: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(92vh-130px)] space-y-4">
+            <form
+              id="manutencao-form"
+              onSubmit={handleSubmit}
+              className="px-6 py-5 overflow-y-auto max-h-[calc(92vh-130px)] space-y-4"
+            >
               <div>
                 <label className="input-label">Veículo *</label>
                 <select
@@ -941,18 +936,6 @@ const Manutencoes: React.FC = () => {
                   <option value="corretiva">Corretiva</option>
                 </select>
               </div>
-
-              <div>
-                <label className="input-label">Data da Manutenção</label>
-                <input
-                  type="date"
-                  value={formData.data_manutencao}
-                  onChange={(e) => setFormData({ ...formData, data_manutencao: e.target.value })}
-                  className="input-field"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                />
-              </div>
-
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <label className="input-label">Data da execucao</label>
@@ -987,34 +970,12 @@ const Manutencoes: React.FC = () => {
                   disabled={createMutation.isPending || updateMutation.isPending}
                 />
               </div>
-
-              <div>
-                <label className="input-label">Valor *</label>
-                <input
-                  type="number"
-                  value={formData.valor}
-                  onChange={(e) => setFormData({ ...formData, valor: parseFloat(e.target.value) })}
-                  step="0.01"
-                  min="0"
-                  className="input-field"
-                  placeholder="0,00"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                />
-              </div>
-
-              <div>
-                <label className="input-label">Custo previsto</label>
-                <input
-                  type="number"
-                  value={formData.custo}
-                  onChange={(e) => setFormData({ ...formData, custo: Number(e.target.value) || 0 })}
-                  step="0.01"
-                  min="0"
-                  className="input-field"
-                  placeholder="0,00"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                />
-              </div>
+              <CurrencyInput
+                label="Custo da manutencao"
+                value={formData.custo}
+                onChange={(custo) => setFormData({ ...formData, custo })}
+                disabled={createMutation.isPending || updateMutation.isPending}
+              />
 
               <div>
                 <label className="input-label">Oficina</label>
@@ -1027,20 +988,6 @@ const Manutencoes: React.FC = () => {
                   disabled={createMutation.isPending || updateMutation.isPending}
                 />
               </div>
-
-              <div>
-                <label className="input-label">Quilometragem</label>
-                <input
-                  type="number"
-                  value={formData.quilometragem}
-                  onChange={(e) => setFormData({ ...formData, quilometragem: parseInt(e.target.value) })}
-                  min="0"
-                  className="input-field"
-                  placeholder="Quilometragem do veículo"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                />
-              </div>
-
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <label className="input-label">KM da execucao</label>
@@ -1126,9 +1073,9 @@ const Manutencoes: React.FC = () => {
               </button>
               <button
                 type="submit"
+                form="manutencao-form"
                 className="btn-primary"
                 disabled={createMutation.isPending || updateMutation.isPending}
-                onClick={handleSubmit}
               >
                 {createMutation.isPending || updateMutation.isPending ? 'Processando...' : editingMaintenance ? 'Atualizar' : 'Criar'} Manutenção
               </button>
@@ -1153,3 +1100,5 @@ const Manutencoes: React.FC = () => {
 }
 
 export default Manutencoes
+
+
