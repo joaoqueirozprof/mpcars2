@@ -90,19 +90,20 @@ class PDFContratoService:
     @staticmethod
     def generate_contrato_empresa_pdf(db, contrato_id):
         """
-        Generate a rental contract PDF for empresa (company) contracts.
-        Uses the SAME visual layout as the PF contract, adapted for empresa data.
+        Generate empresa contract PDF.
+        Page 1: EXACT same layout as original PF contract (all sections).
+        Page 1+: Extra page with empresa details + periods for each vehicle.
+        Last page: Contract clauses.
         """
         contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
         if not contrato:
-            raise ValueError(f"Contract {contrato_id} not found")
+            raise ValueError("Contract {} not found".format(contrato_id))
 
         cliente = contrato.cliente
         veiculo = contrato.veiculo
         empresa_id = cliente.empresa_id if cliente else None
         empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first() if empresa_id else None
 
-        # Get all vehicle usages for this contract
         usos = db.query(UsoVeiculoEmpresa).filter(
             UsoVeiculoEmpresa.contrato_id == contrato_id
         ).all()
@@ -116,14 +117,17 @@ class PDFContratoService:
         c = canvas.Canvas(buffer, pagesize=A4)
         service = PDFContratoService()
 
-        # --- PAGE 1: For each vehicle, one page (front) ---
+        # --- PAGE 1: Original contract layout (same as PF) ---
+        service._draw_page1(c, contrato, cliente, veiculo)
+        c.showPage()
+
+        # --- PAGE 2+: Empresa details for each vehicle ---
         for v_idx, uso in enumerate(usos):
             veic = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
             relatorios = db.query(RelatorioNF).filter(
                 RelatorioNF.uso_id == uso.id
             ).order_by(RelatorioNF.periodo_inicio.desc()).all()
-
-            service._draw_empresa_page1(c, contrato, cliente, empresa, veic, uso, relatorios, v_idx + 1, len(usos))
+            service._draw_empresa_details_page(c, contrato, empresa, veic, uso, relatorios, v_idx + 1, len(usos))
             c.showPage()
 
         # --- LAST PAGE: Contract clauses ---
@@ -134,200 +138,132 @@ class PDFContratoService:
         buffer.seek(0)
         return buffer
 
-    def _draw_empresa_page1(self, c, contrato, cliente, empresa, veiculo, uso, relatorios, v_num, v_total):
-        """Draw page 1 for an empresa vehicle — same layout as PF contract."""
-
-        def _safe(val):
-            """Return empty string for None/falsy values."""
-            if val is None:
-                return ""
-            return str(val)
-
+    def _draw_empresa_details_page(self, c, contrato, empresa, veiculo, uso, relatorios, v_num, v_total):
+        """Draw empresa-specific details page (additional page after the standard contract page)."""
         y = self.PAGE_HEIGHT - self.MARGIN
 
         # Header
-        y = self._draw_header_empresa(c, y, v_num, v_total)
-
-        # --- LEFT COLUMN ---
-        y_left = y - 0.8 * cm
-
-        # EMPRESA block (replaces LOCATÁRIO) — vertical layout, 1 field per row
-        y_left = self._draw_block_title(c, y_left, "EMPRESA - LOCATARIO")
-        empresa_fields = [
-            ("NOME DA EMPRESA:", _safe(empresa.nome) if empresa else ""),
-            ("RAZAO SOCIAL:", _safe(empresa.razao_social) if empresa else ""),
-            ("CNPJ:", _safe(empresa.cnpj) if empresa else _safe(cliente.cpf if cliente else "")),
-            ("CONTATO:", _safe(empresa.email) if empresa else ""),
-            ("TELEFONE:", _safe(cliente.telefone) if cliente else ""),
-        ]
-        for label, value in empresa_fields:
-            c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
-            c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm, label)
-            c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
-            c.drawString(self.COL1_X + 3.8 * cm, y_left - 0.3 * cm, value)
-            # Underline
-            c.line(self.COL1_X + 3.7 * cm, y_left - 0.38 * cm, self.COL1_X + 9.3 * cm, y_left - 0.38 * cm)
-            y_left -= 0.45 * cm
-
-        y_left -= 0.15 * cm
-
-        # DADOS DO CONTRATO block — vertical layout
-        y_left = self._draw_block_title(c, y_left, "DADOS DO CONTRATO")
-        contrato_fields = [
-            ("CONTRATO No:", _safe(contrato.numero)),
-            ("STATUS:", _safe(contrato.status)),
-            ("DATA INICIO:", self._format_date(contrato.data_inicio)),
-            ("DATA FIM:", self._format_date(contrato.data_fim)),
-        ]
-        for label, value in contrato_fields:
-            c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
-            c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm, label)
-            c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
-            c.drawString(self.COL1_X + 3.8 * cm, y_left - 0.3 * cm, value)
-            c.line(self.COL1_X + 3.7 * cm, y_left - 0.38 * cm, self.COL1_X + 9.3 * cm, y_left - 0.38 * cm)
-            y_left -= 0.45 * cm
-
-        y_left -= 0.15 * cm
-
-        # CARRO block — same line for marca and placa
-        y_left = self._draw_block_title(c, y_left, "CARRO - CAR")
-        marca_modelo = "{} {}".format(_safe(veiculo.marca), _safe(veiculo.modelo)).strip() if veiculo else "N/A"
-        placa = _safe(veiculo.placa) if veiculo else "N/A"
-
-        c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
-        c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm, "MARCA/TIPO:")
-        c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
-        c.drawString(self.COL1_X + 2.8 * cm, y_left - 0.3 * cm, marca_modelo)
-
-        c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
-        c.drawString(self.COL1_X + 6.0 * cm, y_left - 0.3 * cm, "PLACA:")
-        c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
-        c.drawString(self.COL1_X + 7.3 * cm, y_left - 0.3 * cm, placa)
-        y_left -= 0.6 * cm
-
-        # PERÍODOS DE FATURAMENTO block
-        y_left = self._draw_block_title(c, y_left, "PERIODOS DE FATURAMENTO")
-        if relatorios:
-            y_left = self._draw_periodos_table(c, y_left, uso, relatorios)
-        else:
-            c.setFont(self.FONT_REGULAR, self.SIZE_LABEL)
-            c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm, "Nenhum periodo registrado.")
-            y_left -= 0.5 * cm
-
-        # Observações in left column
-        c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
-        c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm, "Observacoes:")
-        y_left -= 0.45 * cm
-        obs = _safe(contrato.observacoes)
-        if obs:
-            c.setFont(self.FONT_REGULAR, self.SIZE_LABEL)
-            for line in self._wrap_text(obs, 60):
-                c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.15 * cm, line)
-                y_left -= 0.3 * cm
-
-        # --- RIGHT COLUMN ---
-        y_right = y - 0.8 * cm
-
-        # QUILOMETRAGEM block
-        y_right = self._draw_block_title(c, y_right, "QUILOMETRAGEM", x_pos=self.COL2_X)
-        km_ref = float(uso.km_referencia or 0)
-        km_saida = float(veiculo.km_atual or contrato.km_inicial or 0) if veiculo else 0
-
-        km_fields = [
-            ("DATA SAIDA:", self._format_date(contrato.data_inicio)),
-            ("DATA ENTRADA:", self._format_date(contrato.data_fim)),
-            ("KM SAIDA:", self._format_km(km_saida)),
-            ("KM ENTRADA:", ""),
-            ("KM REF/MES:", self._format_km(km_ref)),
-            ("VAL. KM EXTRA:", self._format_currency(float(uso.valor_km_extra or 0))),
-        ]
-        for label, value in km_fields:
-            c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
-            c.drawString(self.COL2_X + 0.2 * cm, y_right - 0.3 * cm, label)
-            c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
-            c.drawString(self.COL2_X + 3.2 * cm, y_right - 0.3 * cm, value)
-            c.line(self.COL2_X + 3.1 * cm, y_right - 0.38 * cm, self.COL2_X + 9.0 * cm, y_right - 0.38 * cm)
-            y_right -= 0.45 * cm
-
-        y_right -= 0.15 * cm
-
-        # DISCRIMINAÇÃO block
-        y_right = self._draw_block_title(c, y_right, "DISCRIMINACAO", x_pos=self.COL2_X)
-        valor_mensal = float(uso.valor_diaria_empresa or 0)
-        total_km_extra = sum(float(r.valor_total_extra or 0) for r in relatorios)
-        total_geral = valor_mensal + total_km_extra
-
-        rows = [
-            ("VALOR MENSAL", "1", self._format_currency(valor_mensal), self._format_currency(valor_mensal)),
-            ("KM EXCEDENTE", "", "", self._format_currency(total_km_extra)),
-            ("SUB-TOTAL", "-", "-", self._format_currency(total_geral)),
-            ("AVARIAS", "-", "-", ""),
-            ("DESCONTO", "-", "-", ""),
-            ("TOTAL R$", "-", "-", self._format_currency(total_geral)),
-        ]
-        y_right = self._draw_valores_table(c, y_right, rows)
-
-        # PROTEÇÃO VEICULAR block
-        y_right = self._draw_block_title(c, y_right, "PROTECAO VEICULAR", x_pos=self.COL2_X)
-        protecao = "Sim" if getattr(uso, 'protecao_veiculo', False) else "Nao"
-        c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
-        c.drawString(self.COL2_X + 0.2 * cm, y_right - 0.3 * cm, "PROTECAO ATIVA: {}".format(protecao))
-        y_right -= 0.6 * cm
-
-        # Assinatura do Cliente
-        c.setFont(self.FONT_REGULAR, self.SIZE_LABEL)
-        c.drawString(self.COL2_X + 0.2 * cm, y_right - 0.3 * cm, "Assinatura do Cliente: ___________________________________")
-        y_right -= 0.8 * cm
-
-        # Footer
-        y_footer = min(y_left, y_right) - 0.3 * cm
-        self._draw_page1_footer(c, y_footer)
-
-    def _draw_header_empresa(self, c, y, v_num, v_total):
-        """Draw header for empresa contract."""
-        # Company name - large
         c.setFont(self.FONT_BOLD, 24)
         c.drawString(self.COL1_X + 0.2 * cm, y - 0.8 * cm, "MPCARS")
         c.setFont(self.FONT_REGULAR, 8)
         c.drawString(self.COL1_X + 0.2 * cm, y - 1.1 * cm, "VEICULOS E LOCACOES")
-
-        # Title right-aligned
-        c.setFont(self.FONT_BOLD, 16)
-        c.drawRightString(self.PAGE_WIDTH - self.MARGIN, y - 0.6 * cm, "CONTRATO DE LOCACAO")
-        c.setFont(self.FONT_BOLD, 10)
-        c.drawRightString(self.PAGE_WIDTH - self.MARGIN, y - 1.0 * cm, "EMPRESARIAL")
-
-        # Company info line
-        c.setFont(self.FONT_REGULAR, 7)
-        c.drawString(self.COL1_X + 0.2 * cm, y - 1.45 * cm, "CNPJ.: 52.471.526/0001-53    84 99911-0504")
-        c.drawString(self.COL1_X + 0.2 * cm, y - 1.7 * cm, "RUA MANOEL ALEXANDRE 1048 - LJ 02 - EDIFICIO COMERCIAL E RESIDENCIAL")
-        c.drawString(self.COL1_X + 0.2 * cm, y - 1.95 * cm, "PRINCESINHA DO OESTE - CEP 59900-000 - PAU DOS FERROS-RN")
-
-        # Vehicle indicator
+        c.setFont(self.FONT_BOLD, 14)
+        c.drawRightString(self.PAGE_WIDTH - self.MARGIN, y - 0.7 * cm, "ANEXO EMPRESARIAL")
         if v_total > 1:
             c.setFont(self.FONT_BOLD, 9)
-            c.drawRightString(self.PAGE_WIDTH - self.MARGIN, y - 1.45 * cm, f"VEICULO {v_num} DE {v_total}")
+            c.drawRightString(self.PAGE_WIDTH - self.MARGIN, y - 1.1 * cm,
+                              "VEICULO {} DE {}".format(v_num, v_total))
 
-        # Separator line
+        c.setFont(self.FONT_REGULAR, 7)
+        c.drawString(self.COL1_X + 0.2 * cm, y - 1.4 * cm,
+                     "Contrato No: {}".format(contrato.numero or ""))
         c.setStrokeColor(colors.black)
         c.setLineWidth(1)
-        c.line(self.COL1_X, y - 2.1 * cm, self.PAGE_WIDTH - self.MARGIN, y - 2.1 * cm)
+        c.line(self.COL1_X, y - 1.6 * cm, self.PAGE_WIDTH - self.MARGIN, y - 1.6 * cm)
+        y -= 2.0 * cm
 
-        return y - 2.3 * cm
+        # --- LEFT COLUMN: Empresa Info + Vehicle ---
+        y_left = y
+
+        # DADOS DA EMPRESA
+        y_left = self._draw_block_title(c, y_left, "DADOS DA EMPRESA")
+        emp_fields = [
+            ("EMPRESA:", (empresa.nome or "") if empresa else ""),
+            ("RAZAO SOCIAL:", (empresa.razao_social or "") if empresa else ""),
+            ("CNPJ:", (empresa.cnpj or "") if empresa else ""),
+            ("CONTATO:", (empresa.email or "") if empresa else ""),
+        ]
+        for label, value in emp_fields:
+            c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
+            c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm, label)
+            c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
+            c.drawString(self.COL1_X + 3.5 * cm, y_left - 0.3 * cm, str(value))
+            c.line(self.COL1_X + 3.4 * cm, y_left - 0.38 * cm,
+                   self.COL1_X + 9.3 * cm, y_left - 0.38 * cm)
+            y_left -= 0.45 * cm
+        y_left -= 0.2 * cm
+
+        # VEICULO
+        y_left = self._draw_block_title(c, y_left, "VEICULO")
+        marca = "{} {}".format(veiculo.marca or "", veiculo.modelo or "").strip() if veiculo else "N/A"
+        placa = (veiculo.placa or "N/A") if veiculo else "N/A"
+        veh_fields = [
+            ("MARCA/MODELO:", marca),
+            ("PLACA:", placa),
+            ("KM REF. MENSAL:", "{} km".format(self._format_km(float(uso.km_referencia or 0)))),
+            ("VALOR KM EXTRA:", self._format_currency(float(uso.valor_km_extra or 0))),
+            ("VALOR MENSAL:", self._format_currency(float(uso.valor_diaria_empresa or 0))),
+        ]
+        for label, value in veh_fields:
+            c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
+            c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm, label)
+            c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
+            c.drawString(self.COL1_X + 3.5 * cm, y_left - 0.3 * cm, value)
+            c.line(self.COL1_X + 3.4 * cm, y_left - 0.38 * cm,
+                   self.COL1_X + 9.3 * cm, y_left - 0.38 * cm)
+            y_left -= 0.45 * cm
+        y_left -= 0.2 * cm
+
+        # PROTECAO VEICULAR
+        y_left = self._draw_block_title(c, y_left, "PROTECAO VEICULAR")
+        protecao = "SIM" if getattr(uso, 'protecao_veiculo', False) else "NAO"
+        c.setFont(self.FONT_BOLD, self.SIZE_VALUE)
+        c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm,
+                     "PROTECAO ATIVA: {}".format(protecao))
+        y_left -= 0.6 * cm
+
+        # --- RIGHT COLUMN: Periods Table ---
+        y_right = y
+
+        y_right = self._draw_block_title(c, y_right, "PERIODOS DE FATURAMENTO", x_pos=self.COL2_X)
+        if relatorios:
+            y_right = self._draw_periodos_table(c, y_right, uso, relatorios)
+        else:
+            c.setFont(self.FONT_REGULAR, self.SIZE_LABEL)
+            c.drawString(self.COL2_X + 0.2 * cm, y_right - 0.3 * cm, "Nenhum periodo registrado.")
+            y_right -= 0.5 * cm
+
+        # RESUMO FINANCEIRO in right column
+        y_right -= 0.2 * cm
+        y_right = self._draw_block_title(c, y_right, "RESUMO FINANCEIRO", x_pos=self.COL2_X)
+        valor_mensal = float(uso.valor_diaria_empresa or 0)
+        total_km_extra_val = sum(
+            float(r.km_excedente or 0) * float(uso.valor_km_extra or 0) for r in relatorios
+        )
+        total_geral = valor_mensal + total_km_extra_val
+
+        resumo = [
+            ("VALOR MENSAL:", self._format_currency(valor_mensal)),
+            ("TOTAL KM EXTRA:", self._format_currency(total_km_extra_val)),
+            ("TOTAL GERAL:", self._format_currency(total_geral)),
+        ]
+        for label, value in resumo:
+            c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
+            c.drawString(self.COL2_X + 0.2 * cm, y_right - 0.3 * cm, label)
+            c.setFont(self.FONT_BOLD, self.SIZE_VALUE)
+            c.drawString(self.COL2_X + 3.2 * cm, y_right - 0.3 * cm, value)
+            c.line(self.COL2_X + 3.1 * cm, y_right - 0.38 * cm,
+                   self.COL2_X + 9.0 * cm, y_right - 0.38 * cm)
+            y_right -= 0.45 * cm
+
+        # Footer
+        y_footer = min(y_left, y_right) - 1 * cm
+        c.setFont(self.FONT_REGULAR, self.SIZE_FOOTER)
+        now = datetime.now()
+        c.drawCentredString(self.PAGE_WIDTH / 2, max(y_footer, self.MARGIN),
+                            "Documento gerado em {} as {} | MPCARS Sistema de Gestao".format(
+                                now.strftime("%d/%m/%Y"), now.strftime("%H:%M:%S")))
 
     def _draw_periodos_table(self, c, y, uso, relatorios):
-        """Draw periods table in the left column."""
-        # Header
+        """Draw periods table."""
         headers = ["PERIODO", "KM PERC.", "KM EXC.", "VAL. EXTRA", "TOTAL"]
         col_widths = [3.2 * cm, 1.5 * cm, 1.3 * cm, 1.7 * cm, 1.7 * cm]
         row_height = 0.4 * cm
-        x_start = self.COL1_X + 0.1 * cm
+        x_start = self.COL2_X + 0.1 * cm
 
-        # Draw header background
         total_w = sum(col_widths)
         c.setFillColor(self.COLOR_HEADER_BG)
         c.rect(x_start, y - row_height, total_w, row_height, fill=1)
-
         c.setFont(self.FONT_BOLD, 6)
         c.setFillColor(self.COLOR_TEXT_LIGHT)
         for i, h in enumerate(headers):
@@ -336,74 +272,53 @@ class PDFContratoService:
         c.setFillColor(self.COLOR_TEXT)
         y -= row_height
 
-        # Data rows
-        total_km_perc = 0.0
-        total_km_exc = 0.0
-        total_val_extra = 0.0
-        total_periodo = 0.0
+        t_km_perc = 0.0
+        t_km_exc = 0.0
+        t_val_extra = 0.0
+        t_total = 0.0
 
         for r_idx, rel in enumerate(relatorios):
             km_perc = float(rel.km_percorrida or 0)
             km_exc = float(rel.km_excedente or 0)
-            val_km_extra = float(uso.valor_km_extra or 0)
-            val_extra = km_exc * val_km_extra
-            val_mensal = float(uso.valor_diaria_empresa or 0)
-            val_total = val_mensal + val_extra
+            val_extra = km_exc * float(uso.valor_km_extra or 0)
+            val_total = float(uso.valor_diaria_empresa or 0) + val_extra
 
-            total_km_perc += km_perc
-            total_km_exc += km_exc
-            total_val_extra += val_extra
-            total_periodo += val_total
+            t_km_perc += km_perc
+            t_km_exc += km_exc
+            t_val_extra += val_extra
+            t_total += val_total
 
-            # Alternating row bg
             if r_idx % 2 == 0:
                 c.setFillColor(self.COLOR_LIGHT_BG)
                 c.rect(x_start, y - row_height, total_w, row_height, fill=1)
                 c.setFillColor(self.COLOR_TEXT)
 
-            periodo_str = ""
+            p_str = ""
             if rel.periodo_inicio and rel.periodo_fim:
-                periodo_str = f"{rel.periodo_inicio.strftime('%d/%m/%y')} a {rel.periodo_fim.strftime('%d/%m/%y')}"
+                p_str = "{} a {}".format(
+                    rel.periodo_inicio.strftime("%d/%m/%y"),
+                    rel.periodo_fim.strftime("%d/%m/%y"))
 
-            row_data = [
-                periodo_str,
-                self._format_km(km_perc),
-                self._format_km(km_exc),
-                self._format_currency(val_extra),
-                self._format_currency(val_total),
-            ]
-
+            row = [p_str, self._format_km(km_perc), self._format_km(km_exc),
+                   self._format_currency(val_extra), self._format_currency(val_total)]
             c.setFont(self.FONT_REGULAR, 6)
-            for i, val in enumerate(row_data):
-                x = x_start + sum(col_widths[:i]) + 0.1 * cm
-                c.drawString(x, y - 0.28 * cm, val)
-
+            for i, val in enumerate(row):
+                c.drawString(x_start + sum(col_widths[:i]) + 0.1 * cm, y - 0.28 * cm, val)
             y -= row_height
-
-            # Page break if too low
             if y < 3 * cm:
                 break
 
-        # Totals row
+        # Totals
         c.setFillColor(colors.HexColor("#333333"))
         c.rect(x_start, y - row_height, total_w, row_height, fill=1)
         c.setFont(self.FONT_BOLD, 6)
         c.setFillColor(self.COLOR_TEXT_LIGHT)
-
-        totals = [
-            "TOTAL",
-            self._format_km(total_km_perc),
-            self._format_km(total_km_exc),
-            self._format_currency(total_val_extra),
-            self._format_currency(total_periodo),
-        ]
+        totals = ["TOTAL", self._format_km(t_km_perc), self._format_km(t_km_exc),
+                  self._format_currency(t_val_extra), self._format_currency(t_total)]
         for i, val in enumerate(totals):
-            x = x_start + sum(col_widths[:i]) + 0.1 * cm
-            c.drawString(x, y - 0.28 * cm, val)
-
+            c.drawString(x_start + sum(col_widths[:i]) + 0.1 * cm, y - 0.28 * cm, val)
         c.setFillColor(self.COLOR_TEXT)
         y -= row_height + 0.2 * cm
-
         return y
 
     @staticmethod
