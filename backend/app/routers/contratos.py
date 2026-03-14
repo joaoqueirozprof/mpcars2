@@ -20,6 +20,7 @@ from app.models import (
     Multa,
     ProrrogacaoContrato,
     Quilometragem,
+    RelatorioNF,
     UsoVeiculoEmpresa,
     Veiculo,
 )
@@ -77,6 +78,8 @@ class ContratoBase(BaseModel):
     vigencia_indeterminada: Optional[bool] = False
     empresa_uso_id: Optional[int] = None
     empresa_id: Optional[int] = None
+    force_override: Optional[bool] = False
+    force_motivo: Optional[str] = None
 
 
 class ContratoCreate(ContratoBase):
@@ -161,6 +164,26 @@ class ContratoPaymentUpdate(BaseModel):
     data_vencimento_pagamento: Optional[date] = None
     data_pagamento: Optional[date] = None
     valor_recebido: Optional[float] = None
+
+
+class ContratoEmpresaCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    empresa_id: int
+    uso_ids: List[int]
+    data_inicio: datetime
+    observacoes: Optional[str] = None
+    force_override: bool = False
+    force_motivo: Optional[str] = None
+
+
+class EmpresaPeriodoCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    uso_id: int
+    periodo_inicio: date
+    periodo_fim: date
+    km_percorrida: float
 
 
 class ContratoResponse(ContratoBase):
@@ -682,6 +705,8 @@ def create_contrato(
     vigencia_indeterminada = bool(raw_payload.pop("vigencia_indeterminada", False))
     empresa_uso_id = raw_payload.pop("empresa_uso_id", None)
     empresa_id = raw_payload.pop("empresa_id", None)
+    force_override = bool(raw_payload.pop("force_override", False))
+    force_motivo = raw_payload.pop("force_motivo", None)
     contrato_data = _normalize_contrato_payload(
         raw_payload,
         is_create=True,
@@ -709,6 +734,28 @@ def create_contrato(
     )
     contrato_data["cliente_id"] = cliente.id
     veiculo = _ensure_veiculo_available(db, contrato_data["veiculo_id"])
+
+    # Check empresa uso conflict for PF contracts
+    if str(contrato_data.get("tipo") or "").lower() != "empresa":
+        uso_empresa_ativo = db.query(UsoVeiculoEmpresa).filter(
+            UsoVeiculoEmpresa.veiculo_id == contrato_data["veiculo_id"],
+            UsoVeiculoEmpresa.status == "ativo"
+        ).first()
+        if uso_empresa_ativo:
+            if not force_override:
+                empresa_info = db.query(Empresa).filter(Empresa.id == uso_empresa_ativo.empresa_id).first()
+                raise HTTPException(
+                    status_code=409,
+                    detail="Veiculo vinculado a empresa {} com uso ativo. Envie force_override=true com motivo para prosseguir.".format(
+                        empresa_info.nome if empresa_info else uso_empresa_ativo.empresa_id
+                    )
+                )
+            if force_motivo:
+                contrato_data["observacoes"] = _append_observacao(
+                    contrato_data.get("observacoes"),
+                    force_motivo,
+                    "OVERRIDE - Veiculo com vinculo empresa"
+                )
 
     if contrato_data.get("km_inicial") is None:
         contrato_data["km_inicial"] = float(veiculo.km_atual or 0)
@@ -782,6 +829,365 @@ def create_contrato(
         request,
     )
     return db_contrato
+
+
+@router.get("/verificar-veiculo/{veiculo_id}")
+def verificar_veiculo_disponibilidade(
+    veiculo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Check if a vehicle has active empresa links or contracts."""
+    del current_user
+    veiculo = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
+    if not veiculo:
+        raise HTTPException(status_code=404, detail="Veiculo nao encontrado")
+
+    # Check active empresa uso
+    uso_ativo = db.query(UsoVeiculoEmpresa).filter(
+        UsoVeiculoEmpresa.veiculo_id == veiculo_id,
+        UsoVeiculoEmpresa.status == "ativo"
+    ).first()
+
+    # Check active contrato
+    contrato_ativo = db.query(Contrato).filter(
+        Contrato.veiculo_id == veiculo_id,
+        Contrato.status == "ativo"
+    ).first()
+
+    # Also check if vehicle is linked to empresa contracts via UsoVeiculoEmpresa.contrato_id
+    uso_com_contrato = None
+    if uso_ativo and uso_ativo.contrato_id:
+        uso_com_contrato = db.query(Contrato).filter(
+            Contrato.id == uso_ativo.contrato_id,
+            Contrato.status == "ativo"
+        ).first()
+
+    empresa_nome = None
+    if uso_ativo:
+        empresa = db.query(Empresa).filter(Empresa.id == uso_ativo.empresa_id).first()
+        empresa_nome = empresa.nome if empresa else None
+
+    return {
+        "veiculo_id": veiculo_id,
+        "placa": veiculo.placa,
+        "disponivel": uso_ativo is None and contrato_ativo is None,
+        "uso_empresa_ativo": {
+            "uso_id": uso_ativo.id,
+            "empresa_id": uso_ativo.empresa_id,
+            "empresa_nome": empresa_nome,
+            "contrato_id": uso_ativo.contrato_id,
+            "data_inicio": uso_ativo.data_inicio.isoformat() if uso_ativo and uso_ativo.data_inicio else None,
+        } if uso_ativo else None,
+        "contrato_ativo": {
+            "contrato_id": contrato_ativo.id,
+            "numero": contrato_ativo.numero,
+            "tipo": contrato_ativo.tipo,
+            "cliente_id": contrato_ativo.cliente_id,
+        } if contrato_ativo else None,
+        "contrato_empresa_ativo": {
+            "contrato_id": uso_com_contrato.id,
+            "numero": uso_com_contrato.numero,
+        } if uso_com_contrato else None,
+    }
+
+
+@router.post("/empresa", response_model=ContratoResponse)
+def create_contrato_empresa(
+    payload: ContratoEmpresaCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
+):
+    """Create an empresa contract with multiple vehicles."""
+    if not payload.uso_ids:
+        raise HTTPException(400, "Selecione pelo menos um veiculo")
+
+    empresa = db.query(Empresa).filter(Empresa.id == payload.empresa_id).first()
+    if not empresa:
+        raise HTTPException(404, "Empresa nao encontrada")
+
+    # Validate all usos exist and belong to this empresa
+    usos = []
+    total_valor_mensal = 0.0
+    primary_veiculo = None
+
+    for uso_id in payload.uso_ids:
+        uso = db.query(UsoVeiculoEmpresa).filter(
+            UsoVeiculoEmpresa.id == uso_id,
+            UsoVeiculoEmpresa.empresa_id == payload.empresa_id,
+            UsoVeiculoEmpresa.status == "ativo"
+        ).first()
+        if not uso:
+            raise HTTPException(400, "Uso de veiculo {} nao encontrado ou nao pertence a empresa".format(uso_id))
+
+        veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+        if not veiculo:
+            raise HTTPException(404, "Veiculo nao encontrado para uso {}".format(uso_id))
+
+        # Check if vehicle already has an active non-empresa contract
+        if not payload.force_override:
+            contrato_conflito = db.query(Contrato).filter(
+                Contrato.veiculo_id == uso.veiculo_id,
+                Contrato.status == "ativo",
+                Contrato.tipo != "empresa"
+            ).first()
+            if contrato_conflito:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Veiculo {} ({}) possui contrato ativo #{} para pessoa fisica. Use force_override=true com motivo.".format(
+                        veiculo.placa, veiculo.marca + " " + veiculo.modelo, contrato_conflito.numero
+                    )
+                )
+
+        usos.append((uso, veiculo))
+        total_valor_mensal += float(uso.valor_diaria_empresa or 0)
+        if primary_veiculo is None:
+            primary_veiculo = veiculo
+
+    # Resolve/create client for empresa
+    cliente = _resolve_cliente_contrato(db, tipo="empresa", empresa_id=payload.empresa_id)
+
+    # Build observacoes with force motivo if applicable
+    obs = payload.observacoes or ""
+    if payload.force_override and payload.force_motivo:
+        obs = "[OVERRIDE] {}\n{}".format(payload.force_motivo, obs).strip()
+
+    # Create the contract
+    contrato = Contrato(
+        numero=_generate_numero_contrato(),
+        cliente_id=cliente.id,
+        veiculo_id=primary_veiculo.id,  # Primary vehicle (first selected)
+        data_inicio=payload.data_inicio,
+        data_fim=payload.data_inicio + timedelta(days=3650),  # Indeterminate
+        km_inicial=float(primary_veiculo.km_atual or 0),
+        valor_diaria=total_valor_mensal,
+        valor_total=total_valor_mensal,
+        tipo="empresa",
+        status="ativo",
+        qtd_diarias=1,
+        observacoes=obs or None,
+        status_pagamento="pendente",
+    )
+    db.add(contrato)
+    db.flush()
+
+    # Link all UsoVeiculoEmpresa to this contrato
+    for uso, veiculo in usos:
+        uso.contrato_id = contrato.id
+        veiculo.status = "alugado"
+
+    # Create checkin record
+    db.add(CheckinCheckout(
+        contrato_id=contrato.id,
+        tipo="retirada",
+        km=contrato.km_inicial,
+        nivel_combustivel=None,
+        itens_checklist=primary_veiculo.checklist or {},
+    ))
+
+    db.commit()
+    db.refresh(contrato)
+    log_activity(db, current_user, "CRIAR", "Contrato", "Contrato empresa {} criado com {} veiculo(s)".format(contrato.numero, len(usos)), contrato.id, request)
+    return contrato
+
+
+@router.get("/{contrato_id}/empresa-detalhes")
+def get_contrato_empresa_detalhes(
+    contrato_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get full empresa contract details with all vehicles and periods."""
+    del current_user
+    contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    if not contrato:
+        raise HTTPException(404, "Contrato nao encontrado")
+    if contrato.tipo != "empresa":
+        raise HTTPException(400, "Este contrato nao e do tipo empresa")
+
+    cliente = contrato.cliente
+    empresa_id = cliente.empresa_id if cliente else None
+    empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first() if empresa_id else None
+
+    # Get all UsoVeiculoEmpresa linked to this contract
+    usos = db.query(UsoVeiculoEmpresa).filter(
+        UsoVeiculoEmpresa.contrato_id == contrato_id
+    ).all()
+
+    # If no usos found via contrato_id, try via empresa_id + active status
+    if not usos and empresa_id:
+        usos = db.query(UsoVeiculoEmpresa).filter(
+            UsoVeiculoEmpresa.empresa_id == empresa_id,
+            UsoVeiculoEmpresa.veiculo_id == contrato.veiculo_id,
+        ).all()
+
+    veiculos_detalhes = []
+    total_mensal = 0.0
+    total_km_extra_geral = 0.0
+
+    for uso in usos:
+        veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+
+        # Get all RelatorioNF (periods) for this uso
+        relatorios = db.query(RelatorioNF).filter(
+            RelatorioNF.uso_id == uso.id
+        ).order_by(RelatorioNF.periodo_inicio.desc()).all()
+
+        periodos = []
+        for rel in relatorios:
+            km_percorrida = float(rel.km_percorrida or 0)
+            km_excedente = float(rel.km_excedente or 0)
+            valor_km_extra = float(uso.valor_km_extra or 0)
+            valor_extra_periodo = km_excedente * valor_km_extra
+
+            periodos.append({
+                "id": rel.id,
+                "periodo_inicio": rel.periodo_inicio.isoformat() if rel.periodo_inicio else None,
+                "periodo_fim": rel.periodo_fim.isoformat() if rel.periodo_fim else None,
+                "km_percorrida": km_percorrida,
+                "km_referencia": float(uso.km_referencia or 0),
+                "km_excedente": km_excedente,
+                "valor_km_extra_unitario": valor_km_extra,
+                "valor_extra_periodo": round(valor_extra_periodo, 2),
+                "valor_total_extra_registrado": float(rel.valor_total_extra or 0),
+                "valor_mensal": float(uso.valor_diaria_empresa or 0),
+                "valor_total_periodo": round(float(uso.valor_diaria_empresa or 0) + valor_extra_periodo, 2),
+            })
+
+        total_km_extra_uso = sum(p["valor_extra_periodo"] for p in periodos)
+        total_mensal += float(uso.valor_diaria_empresa or 0)
+        total_km_extra_geral += total_km_extra_uso
+
+        veiculos_detalhes.append({
+            "uso_id": uso.id,
+            "veiculo_id": uso.veiculo_id,
+            "placa": veiculo.placa if veiculo else None,
+            "marca": veiculo.marca if veiculo else None,
+            "modelo": veiculo.modelo if veiculo else None,
+            "ano": veiculo.ano if veiculo else None,
+            "km_atual": float(veiculo.km_atual or 0) if veiculo else 0,
+            "km_inicial": float(uso.km_inicial or 0),
+            "km_referencia": float(uso.km_referencia or 0),
+            "valor_km_extra": float(uso.valor_km_extra or 0),
+            "valor_mensal": float(uso.valor_diaria_empresa or 0),
+            "status_uso": uso.status,
+            "data_inicio_uso": uso.data_inicio.isoformat() if uso.data_inicio else None,
+            "data_fim_uso": uso.data_fim.isoformat() if uso.data_fim else None,
+            "total_periodos": len(periodos),
+            "total_km_extra_valor": round(total_km_extra_uso, 2),
+            "periodos": periodos,
+        })
+
+    return {
+        "contrato": {
+            "id": contrato.id,
+            "numero": contrato.numero,
+            "status": contrato.status,
+            "data_inicio": contrato.data_inicio.isoformat() if contrato.data_inicio else None,
+            "data_criacao": contrato.data_criacao.isoformat() if contrato.data_criacao else None,
+            "observacoes": contrato.observacoes,
+            "status_pagamento": contrato.status_pagamento,
+        },
+        "empresa": {
+            "id": empresa.id,
+            "nome": empresa.nome,
+            "cnpj": empresa.cnpj,
+            "razao_social": empresa.razao_social,
+            "telefone": empresa.telefone,
+            "email": empresa.email,
+            "endereco": empresa.endereco,
+            "cidade": empresa.cidade,
+            "estado": empresa.estado,
+        } if empresa else None,
+        "veiculos": veiculos_detalhes,
+        "resumo": {
+            "total_veiculos": len(veiculos_detalhes),
+            "valor_mensal_total": round(total_mensal, 2),
+            "total_km_extra_valor": round(total_km_extra_geral, 2),
+            "valor_total_geral": round(total_mensal + total_km_extra_geral, 2),
+        },
+    }
+
+
+@router.post("/{contrato_id}/empresa-periodo")
+def add_empresa_periodo(
+    contrato_id: int,
+    payload: EmpresaPeriodoCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
+):
+    """Add a new period entry for a vehicle in an empresa contract."""
+    contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    if not contrato:
+        raise HTTPException(404, "Contrato nao encontrado")
+    if contrato.tipo != "empresa":
+        raise HTTPException(400, "Este contrato nao e do tipo empresa")
+
+    uso = db.query(UsoVeiculoEmpresa).filter(
+        UsoVeiculoEmpresa.id == payload.uso_id,
+        UsoVeiculoEmpresa.contrato_id == contrato_id
+    ).first()
+    if not uso:
+        raise HTTPException(404, "Veiculo nao vinculado a este contrato")
+
+    # Calculate km excedente
+    km_referencia = float(uso.km_referencia or 0)
+    km_excedente = max(payload.km_percorrida - km_referencia, 0)
+    valor_km_extra = float(uso.valor_km_extra or 0)
+    valor_total_extra = round(km_excedente * valor_km_extra, 2)
+
+    relatorio = RelatorioNF(
+        veiculo_id=uso.veiculo_id,
+        empresa_id=uso.empresa_id,
+        uso_id=uso.id,
+        periodo_inicio=payload.periodo_inicio,
+        periodo_fim=payload.periodo_fim,
+        km_percorrida=payload.km_percorrida,
+        km_excedente=km_excedente,
+        valor_total_extra=valor_total_extra,
+    )
+    db.add(relatorio)
+
+    # Update vehicle km if this period's km is higher
+    veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+    if veiculo:
+        new_km = float(uso.km_inicial or 0) + payload.km_percorrida
+        if new_km > float(veiculo.km_atual or 0):
+            veiculo.km_atual = new_km
+
+    # Update contrato valor_total with accumulated km extras
+    all_relatorios = db.query(RelatorioNF).filter(
+        RelatorioNF.uso_id.in_(
+            db.query(UsoVeiculoEmpresa.id).filter(UsoVeiculoEmpresa.contrato_id == contrato_id)
+        )
+    ).all()
+    total_extras = sum(float(r.valor_total_extra or 0) for r in all_relatorios) + valor_total_extra
+
+    # Get all usos for this contract to sum monthly values
+    all_usos = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.contrato_id == contrato_id).all()
+    total_mensal = sum(float(u.valor_diaria_empresa or 0) for u in all_usos)
+
+    contrato.valor_total = round(total_mensal + total_extras, 2)
+
+    db.commit()
+    db.refresh(relatorio)
+
+    log_activity(db, current_user, "CRIAR", "Contrato", "Periodo adicionado ao contrato empresa {}".format(contrato.numero), contrato.id, request)
+
+    return {
+        "id": relatorio.id,
+        "periodo_inicio": relatorio.periodo_inicio.isoformat(),
+        "periodo_fim": relatorio.periodo_fim.isoformat(),
+        "km_percorrida": payload.km_percorrida,
+        "km_referencia": km_referencia,
+        "km_excedente": km_excedente,
+        "valor_km_extra_unitario": valor_km_extra,
+        "valor_total_extra": valor_total_extra,
+        "valor_mensal": float(uso.valor_diaria_empresa or 0),
+        "valor_total_periodo": round(float(uso.valor_diaria_empresa or 0) + valor_total_extra, 2),
+    }
 
 
 @router.get("/{contrato_id}", response_model=ContratoResponse)

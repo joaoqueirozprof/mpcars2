@@ -226,6 +226,12 @@ const Contratos: React.FC = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState<ContractForm>(buildForm())
+  const [selectedUsoIds, setSelectedUsoIds] = useState<number[]>([])
+  const [empresaDetalhes, setEmpresaDetalhes] = useState<any>(null)
+  const [addingPeriodo, setAddingPeriodo] = useState<any>(null)
+  const [periodoForm, setPeriodoForm] = useState({ periodo_inicio: '', periodo_fim: '', km_percorrida: 0 })
+  const [veiculoWarning, setVeiculoWarning] = useState<any>(null)
+  const [forceMotivo, setForceMotivo] = useState('')
   const [closeoutData, setCloseoutData] = useState<CloseoutForm>({
     km_atual_veiculo: 0,
     combustivel_retorno: '',
@@ -412,6 +418,40 @@ const Contratos: React.FC = () => {
     onError: (error: any) => toast.error(getErrorMessage(error, 'Erro ao deletar contrato')),
   })
 
+  const createEmpresaMutation = useMutation({
+    mutationFn: (payload: any) => api.post('/contratos/empresa', payload),
+    onSuccess: () => {
+      invalidateCoreQueries()
+      setIsModalOpen(false)
+      setEditingContract(null)
+      setFormData(buildForm())
+      setSelectedUsoIds([])
+      toast.success('Contrato empresa criado com sucesso!')
+    },
+    onError: (error: any) => toast.error(getErrorMessage(error, 'Erro ao criar contrato empresa')),
+  })
+
+  const { data: empresaDetalhesData, refetch: refetchEmpresaDetalhes } = useQuery({
+    queryKey: ['contrato-empresa-detalhes', empresaDetalhes?.id],
+    enabled: !!empresaDetalhes?.id,
+    queryFn: async () => {
+      const { data } = await api.get(`/contratos/${empresaDetalhes.id}/empresa-detalhes`)
+      return data
+    },
+  })
+
+  const addPeriodoMutation = useMutation({
+    mutationFn: (payload: any) => api.post(`/contratos/${empresaDetalhes?.id}/empresa-periodo`, payload),
+    onSuccess: () => {
+      refetchEmpresaDetalhes()
+      setAddingPeriodo(null)
+      setPeriodoForm({ periodo_inicio: '', periodo_fim: '', km_percorrida: 0 })
+      invalidateCoreQueries()
+      toast.success('Periodo adicionado com sucesso!')
+    },
+    onError: (error: any) => toast.error(getErrorMessage(error, 'Erro ao adicionar periodo')),
+  })
+
   const handlePdf = async (contratoId: string, numero: string, print = false) => {
     setDownloadingPdf(contratoId)
     try {
@@ -442,6 +482,9 @@ const Contratos: React.FC = () => {
   const openCreate = () => {
     setEditingContract(null)
     setFormData(buildForm())
+    setSelectedUsoIds([])
+    setVeiculoWarning(null)
+    setForceMotivo('')
     setIsModalOpen(true)
   }
 
@@ -478,6 +521,9 @@ const Contratos: React.FC = () => {
       desconto: contrato.desconto || 0,
       observacoes: contrato.observacoes || '',
     })
+    setSelectedUsoIds([])
+    setVeiculoWarning(null)
+    setForceMotivo('')
     setIsModalOpen(true)
   }
 
@@ -518,6 +564,16 @@ const Contratos: React.FC = () => {
           ? Number(usoEmpresa?.valor_diaria_empresa || veiculo?.valor_diaria || 0)
           : current.valor_diaria || veiculo?.valor_diaria || config.valor_diaria_padrao || 0,
     }))
+
+    if (formData.tipo === 'cliente' && veiculoId) {
+      api.get(`/contratos/verificar-veiculo/${veiculoId}`).then(({ data }) => {
+        if (data.uso_empresa_ativo) {
+          setVeiculoWarning(data)
+        } else {
+          setVeiculoWarning(null)
+        }
+      }).catch(() => {})
+    }
   }
 
   useEffect(() => {
@@ -615,6 +671,31 @@ const Contratos: React.FC = () => {
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault()
+
+    if (formData.tipo === 'empresa') {
+      if (!formData.cliente_id) {
+        toast.error('Selecione a empresa.')
+        return
+      }
+      if (selectedUsoIds.length === 0) {
+        toast.error('Selecione pelo menos um veiculo.')
+        return
+      }
+      if (!formData.data_inicio) {
+        toast.error('Informe a data de inicio.')
+        return
+      }
+
+      const empresaPayload = {
+        empresa_id: Number(formData.cliente_id),
+        uso_ids: selectedUsoIds,
+        data_inicio: formData.data_inicio,
+        observacoes: formData.observacoes || undefined,
+      }
+      createEmpresaMutation.mutate(empresaPayload)
+      return
+    }
+
     if (!formData.cliente_id || !formData.veiculo_id || !formData.data_inicio) {
       toast.error('Preencha cliente, veiculo e a data inicial.')
       return
@@ -627,14 +708,11 @@ const Contratos: React.FC = () => {
       toast.error('A data final precisa ser maior que a inicial.')
       return
     }
-    if (formData.tipo === 'empresa' && !selectedEmpresaId) {
-      toast.error('Escolha um cliente vinculado a uma empresa para criar contrato corporativo.')
-      return
-    }
 
     const payload = {
       ...formData,
-      empresa_id: formData.tipo === 'empresa' ? Number(formData.cliente_id) || undefined : undefined,
+      force_override: forceMotivo ? true : undefined,
+      force_motivo: forceMotivo || undefined,
       data_fim: formData.vigencia_indeterminada ? undefined : formData.data_fim,
       qtd_diarias: diasPreview,
       valor_total: valorPreview,
@@ -746,8 +824,17 @@ const Contratos: React.FC = () => {
                         <td className="table-cell font-semibold text-slate-900">{contrato.numero}</td>
                         <td className="table-cell text-slate-700">{contrato.cliente?.nome || '-'}</td>
                         <td className="table-cell text-slate-700">
-                          {contrato.veiculo ? `${contrato.veiculo.marca} ${contrato.veiculo.modelo}` : '-'}
-                          <div className="text-xs text-slate-500">{contrato.veiculo?.placa || '-'}</div>
+                          {contrato.tipo === 'empresa' ? (
+                            <div>
+                              <span className="inline-block px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 mb-1">Empresa</span>
+                              <div className="text-xs text-slate-500">{contrato.veiculo ? `${contrato.veiculo.marca} ${contrato.veiculo.modelo}` : '-'}</div>
+                            </div>
+                          ) : (
+                            <>
+                              {contrato.veiculo ? `${contrato.veiculo.marca} ${contrato.veiculo.modelo}` : '-'}
+                              <div className="text-xs text-slate-500">{contrato.veiculo?.placa || '-'}</div>
+                            </>
+                          )}
                         </td>
                         <td className="table-cell text-slate-600 text-sm">
                           {formatDate(contrato.data_inicio)} a {formatDate(contrato.data_fim)}
@@ -768,6 +855,11 @@ const Contratos: React.FC = () => {
                         </td>
                         <td className="table-cell text-center">
                           <div className="flex items-center justify-center gap-1">
+                            {contrato.tipo === 'empresa' && (
+                              <button onClick={() => setEmpresaDetalhes(contrato)} className="p-1.5 hover:text-blue-600" title="Detalhes empresa">
+                                <FileText size={16} />
+                              </button>
+                            )}
                             <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-1.5 hover:text-green-600" disabled={downloadingPdf === contrato.id}>
                               {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                             </button>
@@ -813,14 +905,15 @@ const Contratos: React.FC = () => {
                     <label className="input-label">{formData.tipo === 'empresa' ? 'Empresa cliente *' : 'Cliente *'}</label>
                     <select
                       value={formData.cliente_id}
-                      onChange={(event) =>
+                      onChange={(event) => {
                         setFormData({
                           ...formData,
                           cliente_id: event.target.value,
                           veiculo_id: '',
                           empresa_uso_id: '',
                         })
-                      }
+                        setSelectedUsoIds([])
+                      }}
                       className="input-field"
                     >
                       <option value="">Selecione</option>
@@ -831,13 +924,16 @@ const Contratos: React.FC = () => {
                     <label className="input-label">Tipo</label>
                     <select
                       value={formData.tipo}
-                      onChange={(event) =>
+                      onChange={(event) => {
                         setFormData({
                           ...buildForm(),
                           tipo: event.target.value as 'cliente' | 'empresa',
                           valor_diaria: config.valor_diaria_padrao || 0,
                         })
-                      }
+                        setSelectedUsoIds([])
+                        setVeiculoWarning(null)
+                        setForceMotivo('')
+                      }}
                       className="input-field"
                     >
                       <option value="cliente">Cliente</option>
@@ -845,17 +941,148 @@ const Contratos: React.FC = () => {
                     </select>
                   </div>
                 </div>
-                <div>
-                  <label className="input-label">{formData.tipo === 'empresa' ? 'Veiculo vinculado a empresa *' : 'Veiculo *'}</label>
-                  <select value={formData.veiculo_id} onChange={(event) => handleVehicleChange(event.target.value)} className="input-field">
-                    <option value="">Selecione</option>
-                    {availableVehicles.map((veiculo: any) => <option key={veiculo.id} value={veiculo.id}>{veiculo.placa} - {veiculo.marca} {veiculo.modelo}</option>)}
-                  </select>
-                </div>
-                {selectedPartyName && selectedVeiculo && (
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-700">
-                    {selectedPartyName} | {selectedVeiculo.marca} {selectedVeiculo.modelo} | KM atual {selectedVeiculo.km_atual || 0}
-                  </div>
+                {formData.tipo === 'empresa' ? (
+                  <>
+                    {selectedEmpresaId && (empresaUsos || []).length > 0 && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="input-label">Veiculos vinculados a empresa *</label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (selectedUsoIds.length === (empresaUsos || []).length) {
+                                setSelectedUsoIds([])
+                              } else {
+                                setSelectedUsoIds((empresaUsos || []).map((u: any) => u.id))
+                              }
+                            }}
+                            className="text-xs text-blue-600 hover:text-blue-800"
+                          >
+                            {selectedUsoIds.length === (empresaUsos || []).length ? 'Desmarcar todos' : 'Selecionar todos'}
+                          </button>
+                        </div>
+                        <p className="text-xs text-slate-500">Selecione os veiculos que farao parte deste contrato.</p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {(empresaUsos || []).map((uso: any) => {
+                            const isSelected = selectedUsoIds.includes(uso.id)
+                            return (
+                              <label
+                                key={uso.id}
+                                className={`flex items-start gap-3 rounded-xl border p-4 cursor-pointer transition-colors ${
+                                  isSelected ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedUsoIds([...selectedUsoIds, uso.id])
+                                    } else {
+                                      setSelectedUsoIds(selectedUsoIds.filter(id => id !== uso.id))
+                                    }
+                                  }}
+                                  className="mt-1 h-4 w-4 rounded border-slate-300"
+                                />
+                                <div className="flex-1">
+                                  <p className="text-sm font-semibold text-slate-900">{uso.placa} - {uso.marca} {uso.modelo}</p>
+                                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                                    <div>
+                                      <span className="text-slate-500">Valor mensal</span>
+                                      <p className="font-semibold text-slate-800">{formatCurrency(Number(uso.valor_diaria_empresa || 0))}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-500">KM referencia</span>
+                                      <p className="font-semibold text-slate-800">{Number(uso.km_referencia || 0).toLocaleString('pt-BR')} km</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-slate-500">Valor KM extra</span>
+                                      <p className="font-semibold text-slate-800">{formatCurrency(Number(uso.valor_km_extra || 0))}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </label>
+                            )
+                          })}
+                        </div>
+                        {selectedUsoIds.length > 0 && (
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-blue-900">Veiculos selecionados: {selectedUsoIds.length}</span>
+                              <strong className="text-blue-950">
+                                Valor mensal total: {formatCurrency(
+                                  (empresaUsos || [])
+                                    .filter((u: any) => selectedUsoIds.includes(u.id))
+                                    .reduce((sum: number, u: any) => sum + Number(u.valor_diaria_empresa || 0), 0)
+                                )}
+                              </strong>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className="input-label">Veiculo *</label>
+                      <select value={formData.veiculo_id} onChange={(event) => handleVehicleChange(event.target.value)} className="input-field">
+                        <option value="">Selecione</option>
+                        {availableVehicles.map((veiculo: any) => <option key={veiculo.id} value={veiculo.id}>{veiculo.placa} - {veiculo.marca} {veiculo.modelo}</option>)}
+                      </select>
+                    </div>
+                    {selectedPartyName && selectedVeiculo && (
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-700">
+                        {selectedPartyName} | {selectedVeiculo.marca} {selectedVeiculo.modelo} | KM atual {selectedVeiculo.km_atual || 0}
+                      </div>
+                    )}
+                    {veiculoWarning && (
+                      <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-4">
+                        <div className="flex items-start gap-3">
+                          <AlertCircle className="text-amber-600 mt-0.5 flex-shrink-0" size={20} />
+                          <div className="flex-1 space-y-3">
+                            <div>
+                              <p className="text-sm font-semibold text-amber-900">Atencao: Veiculo vinculado a empresa</p>
+                              <p className="text-sm text-amber-800 mt-1">
+                                Este veiculo esta vinculado a empresa <strong>{veiculoWarning.uso_empresa_ativo?.empresa_nome}</strong> com contrato/uso ativo.
+                              </p>
+                            </div>
+                            <div>
+                              <label className="input-label text-xs text-amber-800">Motivo para prosseguir *</label>
+                              <textarea
+                                value={forceMotivo}
+                                onChange={(e) => setForceMotivo(e.target.value)}
+                                rows={2}
+                                className="input-field text-sm"
+                                placeholder="Explique por que deseja criar este contrato mesmo com o veiculo vinculado a empresa..."
+                              />
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFormData({ ...formData, veiculo_id: '' })
+                                  setVeiculoWarning(null)
+                                  setForceMotivo('')
+                                }}
+                                className="btn-secondary btn-sm"
+                              >
+                                Escolher outro veiculo
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setVeiculoWarning(null)}
+                                disabled={!forceMotivo.trim()}
+                                className="btn-sm bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                              >
+                                Prosseguir mesmo assim
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
                 {formData.tipo === 'empresa' && (
                   <div className="space-y-3 rounded-2xl border border-blue-200 bg-blue-50/80 p-4">
@@ -1267,6 +1494,163 @@ const Contratos: React.FC = () => {
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
               <button onClick={() => setDeleteConfirm({ isOpen: false })} className="btn-secondary" disabled={deleteMutation.isPending}>Cancelar</button>
               <button onClick={() => deleteConfirm.id && deleteMutation.mutate(deleteConfirm.id)} className="btn-danger" disabled={deleteMutation.isPending}>{deleteMutation.isPending ? 'Deletando...' : 'Deletar'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {empresaDetalhes && empresaDetalhesData && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setEmpresaDetalhes(null)}>
+          <div className="modal-content max-w-6xl w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-lg font-display font-bold text-slate-900">Contrato Empresa - {empresaDetalhesData.contrato?.numero}</h3>
+                <p className="text-sm text-slate-500">{empresaDetalhesData.empresa?.nome} | CNPJ: {empresaDetalhesData.empresa?.cnpj}</p>
+              </div>
+              <button onClick={() => setEmpresaDetalhes(null)} className="btn-icon"><X size={20} /></button>
+            </div>
+            <div className="modal-scroll-body space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-xs uppercase tracking-wide text-blue-700">Veiculos</p>
+                  <p className="text-2xl font-bold text-blue-950 mt-2">{empresaDetalhesData.resumo?.total_veiculos}</p>
+                </div>
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <p className="text-xs uppercase tracking-wide text-green-700">Valor Mensal Total</p>
+                  <p className="text-2xl font-bold text-green-950 mt-2">{formatCurrency(empresaDetalhesData.resumo?.valor_mensal_total)}</p>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <p className="text-xs uppercase tracking-wide text-amber-700">Total KM Extra</p>
+                  <p className="text-2xl font-bold text-amber-950 mt-2">{formatCurrency(empresaDetalhesData.resumo?.total_km_extra_valor)}</p>
+                </div>
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                  <p className="text-xs uppercase tracking-wide text-purple-700">Valor Total Geral</p>
+                  <p className="text-2xl font-bold text-purple-950 mt-2">{formatCurrency(empresaDetalhesData.resumo?.valor_total_geral)}</p>
+                </div>
+              </div>
+
+              {(empresaDetalhesData.veiculos || []).map((veiculo: any) => (
+                <div key={veiculo.uso_id} className="border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="bg-slate-50 px-4 py-3 flex items-center justify-between">
+                    <div>
+                      <h4 className="font-semibold text-slate-900">{veiculo.placa} - {veiculo.marca} {veiculo.modelo}</h4>
+                      <p className="text-xs text-slate-500 mt-1">
+                        KM ref: {Number(veiculo.km_referencia || 0).toLocaleString('pt-BR')} km |
+                        Valor mensal: {formatCurrency(veiculo.valor_mensal)} |
+                        KM extra: {formatCurrency(veiculo.valor_km_extra)}/km
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setAddingPeriodo(veiculo)
+                        setPeriodoForm({ periodo_inicio: '', periodo_fim: '', km_percorrida: 0 })
+                      }}
+                      className="btn-primary btn-sm flex items-center gap-1"
+                    >
+                      <Plus size={14} /> Novo Periodo
+                    </button>
+                  </div>
+
+                  {addingPeriodo?.uso_id === veiculo.uso_id && (
+                    <div className="bg-blue-50 border-b border-blue-200 px-4 py-4">
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <div>
+                          <label className="input-label text-xs">Inicio do periodo</label>
+                          <input type="date" value={periodoForm.periodo_inicio} onChange={(e) => setPeriodoForm({...periodoForm, periodo_inicio: e.target.value})} className="input-field text-sm" />
+                        </div>
+                        <div>
+                          <label className="input-label text-xs">Fim do periodo</label>
+                          <input type="date" value={periodoForm.periodo_fim} onChange={(e) => setPeriodoForm({...periodoForm, periodo_fim: e.target.value})} className="input-field text-sm" />
+                        </div>
+                        <div>
+                          <label className="input-label text-xs">KM percorrida no periodo</label>
+                          <input type="number" value={periodoForm.km_percorrida} onChange={(e) => setPeriodoForm({...periodoForm, km_percorrida: Number(e.target.value) || 0})} className="input-field text-sm" />
+                        </div>
+                        <div className="flex items-end gap-2">
+                          <button
+                            onClick={() => {
+                              if (!periodoForm.periodo_inicio || !periodoForm.periodo_fim || periodoForm.km_percorrida <= 0) {
+                                toast.error('Preencha todos os campos do periodo')
+                                return
+                              }
+                              addPeriodoMutation.mutate({
+                                uso_id: veiculo.uso_id,
+                                periodo_inicio: periodoForm.periodo_inicio,
+                                periodo_fim: periodoForm.periodo_fim,
+                                km_percorrida: periodoForm.km_percorrida,
+                              })
+                            }}
+                            className="btn-primary btn-sm"
+                            disabled={addPeriodoMutation.isPending}
+                          >
+                            {addPeriodoMutation.isPending ? 'Salvando...' : 'Salvar'}
+                          </button>
+                          <button onClick={() => setAddingPeriodo(null)} className="btn-secondary btn-sm">Cancelar</button>
+                        </div>
+                      </div>
+                      {periodoForm.km_percorrida > 0 && (
+                        <div className="mt-3 bg-white rounded-lg border border-blue-100 px-4 py-3 text-sm">
+                          <div className="flex flex-wrap gap-4">
+                            <span>KM percorrida: <strong>{periodoForm.km_percorrida.toLocaleString('pt-BR')}</strong></span>
+                            <span>KM referencia: <strong>{Number(veiculo.km_referencia || 0).toLocaleString('pt-BR')}</strong></span>
+                            <span>KM excedente: <strong className={periodoForm.km_percorrida > veiculo.km_referencia ? 'text-red-600' : 'text-green-600'}>{Math.max(periodoForm.km_percorrida - (veiculo.km_referencia || 0), 0).toLocaleString('pt-BR')}</strong></span>
+                            <span>Valor extra: <strong className="text-red-600">{formatCurrency(Math.max(periodoForm.km_percorrida - (veiculo.km_referencia || 0), 0) * (veiculo.valor_km_extra || 0))}</strong></span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {(veiculo.periodos || []).length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200">
+                            <th className="px-4 py-2 text-left text-xs font-semibold text-slate-600">Periodo</th>
+                            <th className="px-4 py-2 text-right text-xs font-semibold text-slate-600">KM Percorrida</th>
+                            <th className="px-4 py-2 text-right text-xs font-semibold text-slate-600">KM Referencia</th>
+                            <th className="px-4 py-2 text-right text-xs font-semibold text-slate-600">KM Excedente</th>
+                            <th className="px-4 py-2 text-right text-xs font-semibold text-slate-600">Valor KM Extra</th>
+                            <th className="px-4 py-2 text-right text-xs font-semibold text-slate-600">Valor Mensal</th>
+                            <th className="px-4 py-2 text-right text-xs font-semibold text-slate-600">Total Periodo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {veiculo.periodos.map((periodo: any) => (
+                            <tr key={periodo.id} className="border-b border-slate-100 hover:bg-slate-50">
+                              <td className="px-4 py-2 text-slate-700">{formatDate(periodo.periodo_inicio)} a {formatDate(periodo.periodo_fim)}</td>
+                              <td className="px-4 py-2 text-right text-slate-700">{Number(periodo.km_percorrida || 0).toLocaleString('pt-BR')} km</td>
+                              <td className="px-4 py-2 text-right text-slate-500">{Number(periodo.km_referencia || 0).toLocaleString('pt-BR')} km</td>
+                              <td className="px-4 py-2 text-right">
+                                <span className={periodo.km_excedente > 0 ? 'text-red-600 font-semibold' : 'text-green-600'}>
+                                  {Number(periodo.km_excedente || 0).toLocaleString('pt-BR')} km
+                                </span>
+                              </td>
+                              <td className="px-4 py-2 text-right">
+                                <span className={periodo.valor_extra_periodo > 0 ? 'text-red-600 font-semibold' : 'text-slate-500'}>
+                                  {formatCurrency(periodo.valor_extra_periodo || 0)}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2 text-right text-slate-700">{formatCurrency(periodo.valor_mensal || 0)}</td>
+                              <td className="px-4 py-2 text-right font-semibold text-slate-900">{formatCurrency(periodo.valor_total_periodo || 0)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="px-4 py-8 text-center text-sm text-slate-400">
+                      Nenhum periodo registrado ainda. Clique em "Novo Periodo" para adicionar.
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setEmpresaDetalhes(null)} className="btn-secondary">Fechar</button>
+              <button onClick={() => handlePdf(empresaDetalhes.id, empresaDetalhesData.contrato?.numero || '')} className="btn-primary flex items-center gap-2">
+                <Download size={16} /> Baixar PDF
+              </button>
             </div>
           </div>
         </div>
