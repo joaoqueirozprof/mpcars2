@@ -454,11 +454,10 @@ const Contratos: React.FC = () => {
     onError: (error: any) => toast.error(getErrorMessage(error, 'Erro ao adicionar periodo')),
   })
 
-  const handlePdf = async (contratoId: string, numero: string, print = false, usoId?: number) => {
+  const handlePdf = async (contratoId: string, numero: string, print = false) => {
     setDownloadingPdf(contratoId)
     try {
-      const params = usoId ? `?uso_id=${usoId}` : ''
-      const response = await api.get(`/relatorios/contrato/${contratoId}/pdf${params}`, { responseType: 'blob' })
+      const response = await api.get(`/relatorios/contrato/${contratoId}/pdf`, { responseType: 'blob' })
       const blob = new Blob([response.data], { type: 'application/pdf' })
       const url = window.URL.createObjectURL(blob)
       if (print) {
@@ -475,6 +474,31 @@ const Contratos: React.FC = () => {
       window.URL.revokeObjectURL(url)
     } catch {
       toast.error('Erro ao gerar PDF do contrato')
+    } finally {
+      setDownloadingPdf(null)
+    }
+  }
+
+  const handleNfReport = async (contratoId: string, numero: string, usoId: number, placa: string, print = false) => {
+    setDownloadingPdf(contratoId)
+    try {
+      const response = await api.get(`/relatorios/contrato/${contratoId}/nf-report?uso_id=${usoId}`, { responseType: 'blob' })
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+      if (print) {
+        const printWindow = window.open(url, '_blank')
+        if (printWindow) printWindow.onload = () => printWindow.print()
+      } else {
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `relatorio_nf_${numero}_${placa}.pdf`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+      }
+      window.URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Erro ao gerar Relatório NF')
     } finally {
       setDownloadingPdf(null)
       setPdfDropdown(null)
@@ -891,32 +915,41 @@ const Contratos: React.FC = () => {
                                 <FileText size={16} />
                               </button>
                             )}
-                            {contrato.tipo === 'empresa' ? (
+                            {/* Contract PDF - available for all types */}
+                            <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-1.5 hover:text-green-600" disabled={downloadingPdf === contrato.id} title="Baixar Contrato PDF">
+                              {downloadingPdf === contrato.id && !pdfDropdown ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                            </button>
+                            <button onClick={() => handlePdf(contrato.id, contrato.numero, true)} className="p-1.5 hover:text-purple-600" title="Imprimir Contrato"><Printer size={16} /></button>
+                            {/* NF Report dropdown - only for empresa */}
+                            {contrato.tipo === 'empresa' && (
                               <div className="relative">
                                 <button
                                   onClick={() => loadPdfVeiculos(contrato.id)}
-                                  className="p-1.5 hover:text-green-600 flex items-center gap-0.5"
+                                  className="p-1.5 hover:text-orange-600 flex items-center gap-0.5 text-xs font-semibold"
                                   disabled={downloadingPdf === contrato.id}
-                                  title="Escolher veículo para PDF"
+                                  title="Baixar Relatório Nota Fiscal por veículo"
                                 >
-                                  {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <><Download size={16} /><ChevronDown size={12} /></>}
+                                  {downloadingPdf === contrato.id && pdfDropdown ? <Loader2 size={16} className="animate-spin" /> : <><FileText size={16} /><ChevronDown size={12} /></>}
                                 </button>
                                 {pdfDropdown === contrato.id && (
-                                  <div className="absolute right-0 top-8 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[220px]">
-                                    <div className="px-3 py-1.5 text-xs font-semibold text-slate-500 border-b">Selecione o veículo:</div>
+                                  <div className="absolute right-0 top-8 z-50 bg-white border border-orange-200 rounded-lg shadow-lg py-1 min-w-[260px]">
+                                    <div className="px-3 py-1.5 text-xs font-bold text-orange-600 border-b border-orange-100 flex items-center gap-1">
+                                      <FileText size={12} /> Relatório Nota Fiscal
+                                    </div>
+                                    <div className="px-3 py-1 text-[10px] text-slate-400 border-b">Selecione o veículo para baixar o relatório NF:</div>
                                     {pdfVeiculos.map((v: any) => (
-                                      <div key={v.uso_id} className="flex items-center gap-1 px-2 py-1 hover:bg-slate-50">
-                                        <Car size={14} className="text-slate-400 shrink-0" />
+                                      <div key={v.uso_id} className="flex items-center gap-1 px-2 py-1.5 hover:bg-orange-50">
+                                        <Car size={14} className="text-orange-400 shrink-0" />
                                         <span className="text-xs text-slate-700 flex-1 truncate">{v.marca} {v.modelo} - {v.placa}</span>
                                         <button
-                                          onClick={() => handlePdf(contrato.id, contrato.numero, false, v.uso_id)}
-                                          className="p-1 hover:text-green-600" title="Baixar PDF"
+                                          onClick={() => handleNfReport(contrato.id, contrato.numero, v.uso_id, v.placa, false)}
+                                          className="p-1 hover:text-orange-600" title="Baixar Relatório NF"
                                         >
                                           <Download size={14} />
                                         </button>
                                         <button
-                                          onClick={() => handlePdf(contrato.id, contrato.numero, true, v.uso_id)}
-                                          className="p-1 hover:text-purple-600" title="Imprimir PDF"
+                                          onClick={() => handleNfReport(contrato.id, contrato.numero, v.uso_id, v.placa, true)}
+                                          className="p-1 hover:text-purple-600" title="Imprimir Relatório NF"
                                         >
                                           <Printer size={14} />
                                         </button>
@@ -928,13 +961,6 @@ const Contratos: React.FC = () => {
                                   </div>
                                 )}
                               </div>
-                            ) : (
-                              <>
-                                <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-1.5 hover:text-green-600" disabled={downloadingPdf === contrato.id}>
-                                  {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                                </button>
-                                <button onClick={() => handlePdf(contrato.id, contrato.numero, true)} className="p-1.5 hover:text-purple-600"><Printer size={16} /></button>
-                              </>
                             )}
                             {contrato.status === 'ativo' && <button onClick={() => openCloseout(contrato)} className="p-1.5 hover:text-emerald-600"><CheckCircle size={16} /></button>}
                             <button onClick={() => openEdit(contrato)} className="p-1.5 hover:text-blue-600"><Edit size={16} /></button>
@@ -1720,15 +1746,22 @@ const Contratos: React.FC = () => {
             </div>
             <div className="modal-footer">
               <button onClick={() => setEmpresaDetalhes(null)} className="btn-secondary">Fechar</button>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => handlePdf(empresaDetalhes.id, empresaDetalhesData.contrato?.numero || '')}
+                  className="btn-secondary flex items-center gap-2 text-sm"
+                  disabled={downloadingPdf === empresaDetalhes.id}
+                >
+                  <Download size={14} /> Contrato PDF
+                </button>
                 {empresaDetalhesData?.veiculos?.map((v: any) => (
                   <button
                     key={v.uso_id}
-                    onClick={() => handlePdf(empresaDetalhes.id, empresaDetalhesData.contrato?.numero || '', false, v.uso_id)}
-                    className="btn-primary flex items-center gap-2 text-sm"
+                    onClick={() => handleNfReport(empresaDetalhes.id, empresaDetalhesData.contrato?.numero || '', v.uso_id, v.placa)}
+                    className="btn-primary flex items-center gap-2 text-sm bg-orange-500 hover:bg-orange-600"
                     disabled={downloadingPdf === empresaDetalhes.id}
                   >
-                    <Download size={14} /> PDF {v.placa}
+                    <FileText size={14} /> Relatório NF - {v.placa}
                   </button>
                 ))}
               </div>

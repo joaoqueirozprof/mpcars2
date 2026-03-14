@@ -1648,13 +1648,8 @@ def get_contrato_pdf(
             detail="Contrato nao encontrado",
         )
 
-    # Check contract type and generate appropriate PDF
-    tipo_clean = str(contrato.tipo or "").strip("'\"").lower()
-    if tipo_clean == "empresa":
-        from app.services.pdf_contrato import PDFContratoService
-        pdf_buffer = PDFContratoService.generate_contrato_empresa_pdf(db, contrato_id, uso_id=None)
-    else:
-        pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
+    # Always use original contract layout for all contract types
+    pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
 
     pdf_buffer.seek(0)
     return StreamingResponse(

@@ -716,6 +716,326 @@ class PDFService:
         return buffer
 
     @staticmethod
+    def generate_nf_report_pdf(db: Session, contrato_id: int, uso_id: int) -> BytesIO:
+        """Generate NF report PDF for a specific vehicle in an empresa contract.
+        Uses the SAME original contract layout but replaces DIARIA with PERIODO data.
+        Each period (RelatorioNF) is listed as a row in the DISCRIMINACAO table.
+        """
+        from reportlab.pdfgen import canvas as pdfcanvas
+        from reportlab.platypus import Paragraph as RLParagraph
+        from reportlab.lib.styles import ParagraphStyle as RLParagraphStyle
+        from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER as TA_C
+
+        contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+        if not contrato:
+            raise ValueError("Contrato nao encontrado")
+
+        uso = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id == uso_id).first()
+        if not uso:
+            raise ValueError("Uso veiculo nao encontrado")
+
+        cliente = db.query(Cliente).filter(Cliente.id == contrato.cliente_id).first()
+        veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+        empresa = None
+        if cliente and cliente.empresa_id:
+            empresa = db.query(Empresa).filter(Empresa.id == cliente.empresa_id).first()
+
+        relatorios = db.query(RelatorioNF).filter(
+            RelatorioNF.uso_id == uso.id
+        ).order_by(RelatorioNF.periodo_inicio.asc()).all()
+
+        # Helper: format BRL
+        def fmt_brl(v):
+            if not v:
+                return ""
+            return "R$ {:,.2f}".format(float(v)).replace(",", "X").replace(".", ",").replace("X", ".")
+
+        def fmt_km(v):
+            if not v:
+                return ""
+            return "{:,.0f}".format(float(v)).replace(",", ".")
+
+        buffer = BytesIO()
+        c = pdfcanvas.Canvas(buffer, pagesize=A4)
+        w, h = A4
+        margin = 28
+        col_left_w = w / 2 - margin
+        col_right_w = w / 2 - margin
+        y_start = h - margin
+
+        # --- HEADER ---
+        c.setFillColor(colors.HexColor("#1a1a1a"))
+        c.setFont("Helvetica-Bold", 28)
+        c.drawString(margin, y_start - 10, "MPCARS")
+        c.setFont("Helvetica", 8)
+        c.drawString(margin, y_start - 22, "VEICULOS E LOCACOES")
+        c.setFont("Helvetica-Bold", 16)
+        c.drawRightString(w - margin, y_start - 6, "RELATORIO NOTA FISCAL")
+        c.setFont("Helvetica", 7)
+        c.drawString(margin, y_start - 36, "CNPJ.: 52.471.526/0001-53       84 99911-0504")
+        c.drawString(margin, y_start - 46, "RUA MANOEL ALEXANDRE 1048 - LJ 02 - EDIFICIO COMERCIAL E RESIDENCIAL")
+        c.drawString(margin, y_start - 54, "PRINCESINHA DO OESTE - CEP 59900-000 - PAU DOS FERROS-RN")
+        c.setStrokeColor(colors.black)
+        c.setLineWidth(1)
+        y_line = y_start - 60
+        c.line(margin, y_line, w - margin, y_line)
+
+        # Helper functions (same as original)
+        fh = 18  # field height
+
+        def draw_section_title(y, title, sec_x=None, sec_w=None):
+            sx = sec_x if sec_x is not None else margin
+            sw = sec_w if sec_w is not None else (w - 2 * margin)
+            c.setFillColor(colors.HexColor("#1a1a1a"))
+            c.setFont("Helvetica-Bold", 9)
+            box_h = 16
+            c.rect(sx, y - box_h, sw, box_h, fill=0)
+            c.drawCentredString(sx + sw / 2, y - box_h + 4, title)
+            return y - box_h - 4
+
+        def draw_field_box(x, y, label, value, width, height=14):
+            c.setStrokeColor(colors.black)
+            c.setLineWidth(0.5)
+            c.rect(x, y - height, width, height)
+            c.setFont("Helvetica-Bold", 5.5)
+            c.setFillColor(colors.black)
+            c.drawString(x + 2, y - 5, label)
+            c.setFont("Helvetica", 7)
+            c.drawString(x + 2, y - height + 3, str(value or ""))
+            return y - height
+
+        # --- LEFT COLUMN: LOCATARIO (same as original, with empresa data merged) ---
+        lx = margin
+        lw = col_left_w
+
+        nome_cli = ""
+        cpf_cnpj = ""
+        end_res = ""
+        num_res = ""
+        cep_res = ""
+        cidade = ""
+        estado = ""
+        fones = ""
+        email_cli = ""
+        cnh_num = ""
+        cnh_cat = ""
+        cnh_val = ""
+        rg = ""
+
+        if cliente:
+            nome_cli = cliente.nome or ""
+            cpf_cnpj = cliente.cpf or ""
+            end_res = cliente.endereco_residencial or ""
+            num_res = cliente.numero_residencial or ""
+            cep_res = cliente.cep_residencial or ""
+            cidade = cliente.cidade_residencial or ""
+            estado = cliente.estado_residencial or ""
+            fones = cliente.telefone or ""
+            email_cli = cliente.email or ""
+            cnh_num = cliente.numero_cnh or ""
+            cnh_cat = cliente.categoria_cnh or ""
+            cnh_val = cliente.validade_cnh.strftime("%d/%m/%Y") if cliente.validade_cnh else ""
+            rg = cliente.rg or ""
+
+        # Merge empresa data for empty fields
+        if empresa:
+            if not nome_cli:
+                nome_cli = empresa.razao_social or empresa.nome or ""
+            if not cpf_cnpj:
+                cpf_cnpj = empresa.cnpj or ""
+            if not end_res:
+                end_res = empresa.endereco or ""
+            if not cidade:
+                cidade = empresa.cidade or ""
+            if not estado:
+                estado = empresa.estado or ""
+            if not fones:
+                fones = empresa.telefone or ""
+            if not email_cli:
+                email_cli = empresa.email or ""
+
+        y = y_line - 4
+        y = draw_section_title(y, "LOCATARIO - RENTER", sec_x=lx, sec_w=lw)
+        y = draw_field_box(lx, y, "NOME DO CLIENTE:", nome_cli, lw, fh)
+        y = draw_field_box(lx, y, "ENDERECO:", end_res, lw, fh)
+        hw = lw / 3
+        yt = y
+        draw_field_box(lx, yt, "No:", num_res, hw, fh)
+        draw_field_box(lx + hw, yt, "CIDADE:", cidade, hw, fh)
+        y = draw_field_box(lx + 2 * hw, yt, "ESTADO:", estado, hw, fh)
+        y = draw_field_box(lx, y, "FONES:", fones, lw, fh)
+        y = draw_field_box(lx, y, "E-MAIL:", email_cli, lw, fh)
+
+        # IDENTIFICACAO
+        y -= 2
+        y = draw_section_title(y, "IDENTIFICACAO", sec_x=lx, sec_w=lw)
+        y = draw_field_box(lx, y, "CPF/CNPJ:", cpf_cnpj, lw, fh)
+        y = draw_field_box(lx, y, "CNH:", cnh_num, lw, fh)
+        yt = y
+        draw_field_box(lx, yt, "CATEGORIA:", cnh_cat, lw * 0.5, fh)
+        y = draw_field_box(lx + lw * 0.5, yt, "VALIDADE:", cnh_val, lw * 0.5, fh)
+        y = draw_field_box(lx, y, "RG:", rg, lw, fh)
+
+        # CARRO
+        y -= 2
+        y = draw_section_title(y, "CARRO - CAR", sec_x=lx, sec_w=lw)
+        marca_tipo = "{} {}".format(veiculo.marca, veiculo.modelo) if veiculo else ""
+        placa = veiculo.placa if veiculo else ""
+        yt = y
+        draw_field_box(lx, yt, "MARCA/TIPO:", marca_tipo, lw * 0.6, fh)
+        y = draw_field_box(lx + lw * 0.6, yt, "PLACA:", placa, lw * 0.4, fh)
+
+        # EMPRESA (if applicable)
+        if empresa:
+            y -= 2
+            y = draw_section_title(y, "EMPRESA", sec_x=lx, sec_w=lw)
+            y = draw_field_box(lx, y, "RAZAO SOCIAL:", empresa.razao_social or "", lw, fh)
+            y = draw_field_box(lx, y, "CNPJ:", empresa.cnpj or "", lw, fh)
+
+        # Observacoes
+        c.setFont("Helvetica-Bold", 6)
+        c.setFillColor(colors.black)
+        c.drawString(lx + 4, y - 8, "Contrato: {}".format(contrato.numero or ""))
+        y -= 16
+
+        # === RIGHT COLUMN ===
+        rx = w / 2 + 4
+        rw = col_right_w
+        ry = y_line - 4
+
+        # --- QUILOMETRAGEM ---
+        c.setFont("Helvetica-Bold", 9)
+        c.rect(rx, ry - 16, rw, 16)
+        c.drawCentredString(rx + rw / 2, ry - 12, "QUILOMETRAGEM")
+        ry -= 20
+
+        km_saida = fmt_km(uso.km_inicial) if uso.km_inicial else ""
+        km_entrada = fmt_km(uso.km_final) if uso.km_final else ""
+        total_km_perc = sum(float(r.km_percorrida or 0) for r in relatorios)
+        total_km_exc = sum(float(r.km_excedente or 0) for r in relatorios)
+        if not km_entrada and uso.km_inicial and total_km_perc > 0:
+            km_entrada = fmt_km(float(uso.km_inicial) + total_km_perc)
+
+        data_saida = contrato.data_inicio.strftime("%d/%m/%Y") if contrato.data_inicio else ""
+        data_entrada = contrato.data_fim.strftime("%d/%m/%Y") if contrato.data_fim and contrato.status == "finalizado" else ""
+
+        qh = 16
+        hw2 = rw / 2
+        fields_km = [
+            ("DATA SAIDA:", data_saida, "DATA ENTRADA:", data_entrada),
+            ("KM REF. MENSAL:", fmt_km(uso.km_referencia), "VAL. KM EXTRA:", fmt_brl(uso.valor_km_extra)),
+            ("KM SAIDA:", km_saida, "KM ENTRADA:", km_entrada),
+            ("KM PERCORRIDA:", fmt_km(total_km_perc), "KM EXCEDENTE:", fmt_km(total_km_exc)),
+        ]
+        for f1l, f1v, f2l, f2v in fields_km:
+            draw_field_box(rx, ry, f1l, f1v, hw2, qh)
+            ry = draw_field_box(rx + hw2, ry, f2l, f2v, hw2, qh)
+
+        # --- PERIODOS DE FATURAMENTO (replaces DISCRIMINACAO/DIARIA) ---
+        ry -= 4
+        c.setFont("Helvetica-Bold", 9)
+        c.rect(rx, ry - 16, rw, 16)
+        c.drawCentredString(rx + rw / 2, ry - 12, "PERIODOS DE FATURAMENTO")
+        ry -= 16
+
+        # Table header
+        cols = [rw * 0.30, rw * 0.15, rw * 0.15, rw * 0.20, rw * 0.20]
+        headers = ["PERIODO", "KM PERC.", "KM EXC.", "VAL. EXTRA", "TOTAL"]
+        c.setFont("Helvetica-Bold", 5.5)
+        cx = rx
+        for i, hd in enumerate(headers):
+            c.rect(cx, ry - 14, cols[i], 14)
+            c.drawCentredString(cx + cols[i] / 2, ry - 10, hd)
+            cx += cols[i]
+        ry -= 14
+
+        # Period rows
+        valor_mensal = float(uso.valor_diaria_empresa or 0)
+        total_val_extra = 0.0
+        total_geral = 0.0
+
+        c.setFont("Helvetica", 5.5)
+        for rel in relatorios:
+            periodo_str = ""
+            if rel.periodo_inicio and rel.periodo_fim:
+                periodo_str = "{} a {}".format(
+                    rel.periodo_inicio.strftime("%d/%m/%y"),
+                    rel.periodo_fim.strftime("%d/%m/%y"))
+            km_p = float(rel.km_percorrida or 0)
+            km_e = float(rel.km_excedente or 0)
+            val_extra = km_e * float(uso.valor_km_extra or 0)
+            val_total = valor_mensal + val_extra
+            total_val_extra += val_extra
+            total_geral += val_total
+
+            row_data = [periodo_str, fmt_km(km_p), fmt_km(km_e), fmt_brl(val_extra), fmt_brl(val_total)]
+            cx = rx
+            for i, val in enumerate(row_data):
+                c.rect(cx, ry - 14, cols[i], 14)
+                c.drawCentredString(cx + cols[i] / 2, ry - 10, str(val))
+                cx += cols[i]
+            ry -= 14
+
+            if ry < margin + 120:
+                break
+
+        # TOTALS row
+        c.setFont("Helvetica-Bold", 6)
+        totals = ["TOTAL", fmt_km(total_km_perc), fmt_km(total_km_exc), fmt_brl(total_val_extra), fmt_brl(total_geral)]
+        cx = rx
+        for i, val in enumerate(totals):
+            c.setFillColor(colors.HexColor("#e5e7eb"))
+            c.rect(cx, ry - 14, cols[i], 14, fill=1)
+            c.setFillColor(colors.black)
+            c.drawCentredString(cx + cols[i] / 2, ry - 10, str(val))
+            cx += cols[i]
+        ry -= 18
+
+        # RESUMO FINANCEIRO
+        c.setFont("Helvetica-Bold", 9)
+        c.rect(rx, ry - 16, rw, 16)
+        c.drawCentredString(rx + rw / 2, ry - 12, "RESUMO FINANCEIRO")
+        ry -= 20
+
+        resumo_rows = [
+            ("VALOR MENSAL:", fmt_brl(valor_mensal)),
+            ("QTD. PERIODOS:", str(len(relatorios))),
+            ("SUBTOTAL MENSAL:", fmt_brl(valor_mensal * len(relatorios))),
+            ("TOTAL KM EXTRA:", fmt_brl(total_val_extra)),
+            ("TOTAL GERAL:", fmt_brl(total_geral)),
+        ]
+        c.setFont("Helvetica", 7)
+        for label, value in resumo_rows:
+            c.setFont("Helvetica-Bold", 6)
+            c.drawString(rx + 4, ry - 8, label)
+            c.setFont("Helvetica-Bold", 7)
+            c.drawString(rx + rw * 0.55, ry - 8, value)
+            ry -= 14
+
+        # Assinatura
+        ry -= 20
+        c.setFont("Helvetica", 6)
+        c.line(rx, ry, rx + rw * 0.8, ry)
+        ry -= 10
+        c.drawCentredString(rx + rw * 0.4, ry, "Assinatura do Responsavel")
+
+        # --- FOOTER ---
+        c.setFont("Helvetica", 5.5)
+        c.drawCentredString(w / 2, margin - 5, "RUA MANOEL ALEXANDRE 1048 - LJ 02 - EDIFICIO COMERCIAL E RESIDENCIAL")
+        c.drawCentredString(w / 2, margin - 13, "PRINCESINHA DO OESTE - CEP 59900-000 - PAU DOS FERROS-RN")
+        c.drawCentredString(w / 2, margin - 21, "CNPJ.: 52.471.526/0001-53  84 99911-0504")
+
+        # Generation date
+        c.setFont("Helvetica", 6)
+        c.drawCentredString(w / 2, margin + 5,
+                            "Documento gerado em {} | MPCARS Sistema de Gestao".format(
+                                datetime.now().strftime("%d/%m/%Y as %H:%M:%S")))
+
+        c.save()
+        buffer.seek(0)
+        return buffer
+
+    @staticmethod
     def generate_relatorio_contratos_pdf(db: Session, data_inicio: str, data_fim: str) -> BytesIO:
         """Generate contracts report PDF."""
         di = datetime.strptime(data_inicio, "%Y-%m-%d")

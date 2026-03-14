@@ -147,13 +147,10 @@ def _parse_optional_export_dates(
 @router.get("/contrato/{contrato_id}/pdf")
 def get_contrato_pdf(
     contrato_id: int,
-    uso_id: Optional[int] = Query(None, description="ID do uso de veiculo para gerar PDF individual"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate contract PDF report (uses original layout matching physical form).
-    For empresa contracts, pass uso_id to generate PDF for a specific vehicle.
-    """
+    """Generate contract PDF report (uses original layout for ALL contract types)."""
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contrato nao encontrado")
@@ -166,12 +163,8 @@ def get_contrato_pdf(
     data_str = datetime.now().strftime("%Y%m%d")
 
     try:
-        # Route to empresa PDF if contract type is empresa
-        tipo_clean = str(contrato.tipo or "").strip("'\"").lower()
-        if tipo_clean == "empresa":
-            pdf_buffer = PDFContratoService.generate_contrato_empresa_pdf(db, contrato_id, uso_id=uso_id)
-        else:
-            pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
+        # Always use original contract layout
+        pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Erro ao gerar PDF do contrato: {}".format(str(e)))
 
@@ -189,7 +182,7 @@ def get_contrato_veiculos(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List vehicles linked to an empresa contract (for PDF dropdown)."""
+    """List vehicles linked to an empresa contract (for NF report dropdown)."""
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(status_code=404, detail="Contrato nao encontrado")
@@ -201,6 +194,8 @@ def get_contrato_veiculos(
     result = []
     for uso in usos:
         veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+        # Count periods
+        num_periodos = db.query(RelatorioNF).filter(RelatorioNF.uso_id == uso.id).count()
         result.append({
             "uso_id": uso.id,
             "veiculo_id": uso.veiculo_id,
@@ -209,8 +204,37 @@ def get_contrato_veiculos(
             "modelo": veiculo.modelo if veiculo else "",
             "valor_mensal": float(uso.valor_diaria_empresa or 0),
             "km_referencia": float(uso.km_referencia or 0),
+            "num_periodos": num_periodos,
         })
     return result
+
+
+@router.get("/contrato/{contrato_id}/nf-report")
+def get_nf_report_pdf(
+    contrato_id: int,
+    uso_id: int = Query(..., description="ID do uso de veiculo para gerar relatorio NF"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate NF (Nota Fiscal) report PDF for a specific vehicle in an empresa contract.
+    Uses the same original contract layout but replaces DIARIA with PERIODO DE FATURAMENTO.
+    """
+    contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    if not contrato:
+        raise HTTPException(status_code=404, detail="Contrato nao encontrado")
+
+    try:
+        pdf_buffer = PDFService.generate_nf_report_pdf(db, contrato_id, uso_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Erro ao gerar relatorio NF: {}".format(str(e)))
+
+    data_str = datetime.now().strftime("%Y%m%d")
+    filename = "relatorio_nf_{}_uso{}_{}".format(contrato_id, uso_id, data_str)
+    return StreamingResponse(
+        iter([pdf_buffer.getvalue()]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="{}.pdf"'.format(filename)},
+    )
 
 
 # ============================================================
