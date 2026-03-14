@@ -1,5 +1,4 @@
 import math
-import traceback
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
@@ -901,17 +900,6 @@ def create_contrato_empresa(
     request: Request = None,
 ):
     """Create an empresa contract with multiple vehicles."""
-    try:
-        return _create_contrato_empresa_impl(db, payload, current_user, request)
-    except HTTPException:
-        raise
-    except Exception as e:
-        tb = traceback.format_exc()
-        print(f"EMPRESA CONTRACT ERROR: {e}\n{tb}")
-        raise HTTPException(500, f"Erro interno: {str(e)}\n{tb[:500]}")
-
-
-def _create_contrato_empresa_impl(db, payload, current_user, request):
     if not payload.uso_ids:
         raise HTTPException(400, "Selecione pelo menos um veiculo")
 
