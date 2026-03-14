@@ -1310,10 +1310,19 @@ class PDFService:
             ).order_by(RelatorioNF.periodo_inicio.desc()).all()
 
             if relatorios:
-                # Periods table header
-                periodo_style = ParagraphStyle("PeriodoStyle", parent=styles["Normal"], fontSize=9, textColor=DARK)
-                periodo_header = ["Período", "KM Percorrida", "KM Referência", "KM Excedente",
-                                 "Valor KM Extra", "Valor Mensal", "Total Período"]
+                # Periods table header — use Paragraph for word-wrap in narrow columns
+                _hdr_style = ParagraphStyle("TblHdr", parent=styles["Normal"],
+                                            fontSize=8, textColor=WHITE,
+                                            fontName="Helvetica-Bold", leading=10)
+                periodo_header = [
+                    Paragraph("Período", _hdr_style),
+                    Paragraph("KM Percorr.", _hdr_style),
+                    Paragraph("KM Refer.", _hdr_style),
+                    Paragraph("KM Exced.", _hdr_style),
+                    Paragraph("Val. KM Extra", _hdr_style),
+                    Paragraph("Val. Mensal", _hdr_style),
+                    Paragraph("Total Período", _hdr_style),
+                ]
 
                 periodo_data = [periodo_header]
                 periodo_totals = {
