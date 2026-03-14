@@ -1174,6 +1174,14 @@ class PDFService:
     @staticmethod
     def generate_contrato_empresa_pdf(db: Session, contrato_id: int) -> BytesIO:
         """Generate contract PDF for empresa (company) contracts with detailed vehicle and period breakdown."""
+        def _fmt_brl(value):
+            """Format currency as R$ 3.500,00 (Brazilian standard)."""
+            return "R$ {:,.2f}".format(value).replace(",", "X").replace(".", ",").replace("X", ".")
+
+        def _fmt_km(value):
+            """Format km as 2.222 (Brazilian thousands separator)."""
+            return "{:,.0f}".format(value).replace(",", ".")
+
         contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
         if not contrato:
             raise ValueError("Contrato nao encontrado")
@@ -1251,9 +1259,9 @@ class PDFService:
         # Summary table with 4 metrics
         summary_data = [
             ["TOTAL VEÍCULOS", str(total_veiculos)],
-            ["VALOR MENSAL TOTAL", "R$ {:,.2f}".format(total_mensal)],
-            ["TOTAL KM EXTRA", "R$ {:,.2f}".format(total_km_extra_geral)],
-            ["VALOR TOTAL GERAL", "R$ {:,.2f}".format(total_geral)],
+            ["VALOR MENSAL TOTAL", _fmt_brl(total_mensal)],
+            ["TOTAL KM EXTRA", _fmt_brl(total_km_extra_geral)],
+            ["VALOR TOTAL GERAL", _fmt_brl(total_geral)],
         ]
         summary_table = Table(summary_data, colWidths=[2.5*inch, 2.5*inch])
         summary_table.setStyle(TableStyle([
@@ -1289,9 +1297,9 @@ class PDFService:
             veiculo_data = [
                 ["Placa:", placa],
                 ["Marca/Modelo:", marca_modelo],
-                ["KM Referência (mensal):", "{:,.0f} km".format(float(uso.km_referencia or 0))],
-                ["Valor KM Extra:", "R$ {:.2f}".format(float(uso.valor_km_extra or 0))],
-                ["Valor Mensal:", "R$ {:,.2f}".format(float(uso.valor_diaria_empresa or 0))],
+                ["KM Referência (mensal):", "{} km".format(_fmt_km(float(uso.km_referencia or 0)))],
+                ["Valor KM Extra:", _fmt_brl(float(uso.valor_km_extra or 0))],
+                ["Valor Mensal:", _fmt_brl(float(uso.valor_diaria_empresa or 0))],
             ]
             story.append(_info_table(veiculo_data))
             story.append(Spacer(1, 8))
@@ -1330,12 +1338,12 @@ class PDFService:
                             rel.periodo_inicio.strftime("%d/%m/%Y") if rel.periodo_inicio else "",
                             rel.periodo_fim.strftime("%d/%m/%Y") if rel.periodo_fim else ""
                         ),
-                        "{:,.0f}".format(km_percorrida),
-                        "{:,.0f}".format(float(uso.km_referencia or 0)),
-                        "{:,.0f}".format(km_excedente),
-                        "R$ {:,.2f}".format(valor_extra_periodo),
-                        "R$ {:,.2f}".format(valor_mensal),
-                        "R$ {:,.2f}".format(valor_total_periodo),
+                        _fmt_km(km_percorrida),
+                        _fmt_km(float(uso.km_referencia or 0)),
+                        _fmt_km(km_excedente),
+                        _fmt_brl(valor_extra_periodo),
+                        _fmt_brl(valor_mensal),
+                        _fmt_brl(valor_total_periodo),
                     ])
 
                     # Accumulate totals
@@ -1349,17 +1357,17 @@ class PDFService:
                 # Add totals row
                 periodo_data.append([
                     "TOTAL",
-                    "{:,.0f}".format(periodo_totals["km_perc"]),
-                    "{:,.0f}".format(periodo_totals["km_ref"]),
-                    "{:,.0f}".format(periodo_totals["km_exc"]),
-                    "R$ {:,.2f}".format(periodo_totals["valor_extra"]),
-                    "R$ {:,.2f}".format(periodo_totals["valor_mensal"]),
-                    "R$ {:,.2f}".format(periodo_totals["valor_total"]),
+                    _fmt_km(periodo_totals["km_perc"]),
+                    _fmt_km(periodo_totals["km_ref"]),
+                    _fmt_km(periodo_totals["km_exc"]),
+                    _fmt_brl(periodo_totals["valor_extra"]),
+                    _fmt_brl(periodo_totals["valor_mensal"]),
+                    _fmt_brl(periodo_totals["valor_total"]),
                 ])
 
                 # Create periods table
-                periodo_table = _styled_table(periodo_data, col_widths=[1.1*inch, 1*inch, 1*inch, 0.95*inch,
-                                                                         1.1*inch, 1.1*inch, 1.1*inch], has_header=True)
+                periodo_table = _styled_table(periodo_data, col_widths=[1.6*inch, 0.85*inch, 0.85*inch, 0.8*inch,
+                                                                         0.95*inch, 0.95*inch, 1.0*inch], has_header=True)
                 story.append(periodo_table)
             else:
                 story.append(Paragraph("Nenhum período registrado para este veículo.", styles["Normal"]))
