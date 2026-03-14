@@ -441,10 +441,11 @@ class PDFService:
         ry_sec -= 16
 
         if uso and periodos:
-            # === EMPRESA PER-VEHICLE: show periods instead of daily rates ===
-            cols = [rw * 0.30, rw * 0.20, rw * 0.25, rw * 0.25]
-            headers = ["PERIODO", "VALOR MENSAL", "KM EXTRA", "TOTAL"]
-            c.setFont("Helvetica-Bold", 5.5)
+            # === EMPRESA PER-VEHICLE: show periods with full KM breakdown ===
+            # 6 columns: PERIODO | KM PERMIT. | KM PERCORR. | KM EXTRA | VALOR MENSAL | TOTAL
+            cols = [rw * 0.18, rw * 0.13, rw * 0.13, rw * 0.20, rw * 0.16, rw * 0.20]
+            headers = ["PERIODO", "KM PERMIT.", "KM PERCORR.", "KM EXTRA", "VLR MENSAL", "TOTAL"]
+            c.setFont("Helvetica-Bold", 4.8)
             cx = rx
             for i, hd in enumerate(headers):
                 c.rect(cx, ry_sec - 14, cols[i], 14)
@@ -457,29 +458,37 @@ class PDFService:
             val_km_extra = float(uso.valor_km_extra or 0)
 
             soma_total = 0.0
+            soma_km_perc = 0.0
             soma_km_exc = 0.0
+            soma_val_extra = 0.0
             for p in periodos:
                 p_inicio = p.periodo_inicio.strftime("%d/%m") if p.periodo_inicio else ""
                 p_fim = p.periodo_fim.strftime("%d/%m/%y") if p.periodo_fim else ""
                 periodo_str = "{} a {}".format(p_inicio, p_fim)
+                km_perc = float(p.km_percorrida or 0)
                 km_exc = float(p.km_excedente or 0)
                 val_extra = float(p.valor_total_extra or 0)
                 total_periodo = valor_mensal + val_extra
                 soma_total += total_periodo
+                soma_km_perc += km_perc
                 soma_km_exc += km_exc
+                soma_val_extra += val_extra
 
-                # Only show KM extra column if there's exceedance
-                km_extra_str = ""
+                # KM extra column: show qty + value, or dash if none
                 if km_exc > 0:
-                    km_extra_str = "{:,.0f}km = R$ {:,.2f}".format(km_exc, val_extra)
+                    km_extra_str = "{:,.0f}km x R${:,.2f}".format(km_exc, val_km_extra)
+                else:
+                    km_extra_str = "-"
 
                 row = [
                     periodo_str,
-                    "R$ {:,.2f}".format(valor_mensal),
+                    "{:,.0f} km".format(km_ref),
+                    "{:,.0f} km".format(km_perc),
                     km_extra_str,
+                    "R$ {:,.2f}".format(valor_mensal),
                     "R$ {:,.2f}".format(total_periodo),
                 ]
-                c.setFont("Helvetica", 5.5)
+                c.setFont("Helvetica", 4.8)
                 cx = rx
                 for i, val in enumerate(row):
                     c.rect(cx, ry_sec - 14, cols[i], 14)
@@ -487,35 +496,47 @@ class PDFService:
                     cx += cols[i]
                 ry_sec -= 14
 
-            # SUB-TOTAL row
-            c.setFont("Helvetica-Bold", 6)
+            # TOTALS row
+            c.setFont("Helvetica-Bold", 5)
             cx = rx
-            sub_row = ["SUB-TOTAL", "", "", "R$ {:,.2f}".format(soma_total)]
-            for i, val in enumerate(sub_row):
+            totals_row = [
+                "TOTAIS",
+                "{:,.0f} km".format(km_ref * len(periodos)),
+                "{:,.0f} km".format(soma_km_perc),
+                "{:,.0f} km".format(soma_km_exc) if soma_km_exc > 0 else "-",
+                "R$ {:,.2f}".format(valor_mensal * len(periodos)),
+                "R$ {:,.2f}".format(soma_total),
+            ]
+            for i, val in enumerate(totals_row):
                 c.rect(cx, ry_sec - 14, cols[i], 14)
                 c.drawCentredString(cx + cols[i] / 2, ry_sec - 10, str(val))
                 cx += cols[i]
             ry_sec -= 14
 
-            # KM EXCEDENTE TOTAL row (only if there's exceedance)
+            # KM EXCEDENTE detail row (only if there's exceedance)
             if soma_km_exc > 0:
+                c.setFont("Helvetica", 4.8)
                 cx = rx
-                km_row = ["KM EXCEDENTE TOTAL", "{:,.0f} km".format(soma_km_exc), "R$ {:,.2f}/km".format(val_km_extra), "R$ {:,.2f}".format(soma_km_exc * val_km_extra)]
-                c.setFont("Helvetica", 5.5)
-                for i, val in enumerate(km_row):
-                    c.rect(cx, ry_sec - 14, cols[i], 14)
-                    c.drawCentredString(cx + cols[i] / 2, ry_sec - 10, str(val))
-                    cx += cols[i]
+                # Merge first 4 cols for label, last 2 for values
+                label_w = cols[0] + cols[1] + cols[2] + cols[3]
+                c.rect(cx, ry_sec - 14, label_w, 14)
+                c.drawString(cx + 3, ry_sec - 10, "VALOR KM EXCEDENTE: {:,.0f} km x R$ {:,.2f}/km".format(soma_km_exc, val_km_extra))
+                cx += label_w
+                c.rect(cx, ry_sec - 14, cols[4], 14)
+                cx += cols[4]
+                c.setFont("Helvetica-Bold", 5)
+                c.rect(cx, ry_sec - 14, cols[5], 14)
+                c.drawCentredString(cx + cols[5] / 2, ry_sec - 10, "R$ {:,.2f}".format(soma_val_extra))
                 ry_sec -= 14
 
             # DESCONTO row
+            c.setFont("Helvetica", 4.8)
             cx = rx
-            desc_row = ["DESCONTO", "", "", ""]
-            c.setFont("Helvetica", 5.5)
-            for i, val in enumerate(desc_row):
-                c.rect(cx, ry_sec - 14, cols[i], 14)
-                c.drawCentredString(cx + cols[i] / 2, ry_sec - 10, str(val))
-                cx += cols[i]
+            label_w = cols[0] + cols[1] + cols[2] + cols[3] + cols[4]
+            c.rect(cx, ry_sec - 14, label_w, 14)
+            c.drawString(cx + 3, ry_sec - 10, "DESCONTO")
+            cx += label_w
+            c.rect(cx, ry_sec - 14, cols[5], 14)
             ry_sec -= 14
 
             # TOTAL R$
