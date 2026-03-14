@@ -445,7 +445,7 @@ def _resolve_cliente_contrato(
     db: Session,
     *,
     tipo: Optional[str],
-    cliente_id: Optional[int],
+    cliente_id: Optional[int] = None,
     empresa_id: Optional[int] = None,
 ) -> Cliente:
     if str(tipo or "").lower() != "empresa":
@@ -958,7 +958,7 @@ def _create_contrato_empresa_impl(db, payload, current_user, request):
             primary_veiculo = veiculo
 
     # Resolve/create client for empresa
-    cliente = _resolve_cliente_contrato(db, tipo="empresa", empresa_id=payload.empresa_id)
+    cliente = _resolve_cliente_contrato(db, tipo="empresa", cliente_id=None, empresa_id=payload.empresa_id)
 
     # Build observacoes with force motivo if applicable
     obs = payload.observacoes or ""
