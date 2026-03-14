@@ -136,45 +136,73 @@ class PDFContratoService:
 
     def _draw_empresa_page1(self, c, contrato, cliente, empresa, veiculo, uso, relatorios, v_num, v_total):
         """Draw page 1 for an empresa vehicle — same layout as PF contract."""
+
+        def _safe(val):
+            """Return empty string for None/falsy values."""
+            if val is None:
+                return ""
+            return str(val)
+
         y = self.PAGE_HEIGHT - self.MARGIN
 
         # Header
         y = self._draw_header_empresa(c, y, v_num, v_total)
 
         # --- LEFT COLUMN ---
-        y_left = y - 1 * cm
+        y_left = y - 0.8 * cm
 
-        # EMPRESA block (replaces LOCATÁRIO)
+        # EMPRESA block (replaces LOCATÁRIO) — vertical layout, 1 field per row
         y_left = self._draw_block_title(c, y_left, "EMPRESA - LOCATARIO")
-        field_data = [
-            ("EMPRESA", empresa.nome if empresa else ""),
-            ("RAZAO SOCIAL", empresa.razao_social if empresa else ""),
-            ("CNPJ", empresa.cnpj if empresa else (cliente.cpf if cliente else "")),
-            ("CONTATO", empresa.email if empresa else ""),
-            ("TELEFONE", cliente.telefone if cliente else ""),
-            ("E-MAIL", cliente.email if cliente else ""),
+        empresa_fields = [
+            ("NOME DA EMPRESA:", _safe(empresa.nome) if empresa else ""),
+            ("RAZAO SOCIAL:", _safe(empresa.razao_social) if empresa else ""),
+            ("CNPJ:", _safe(empresa.cnpj) if empresa else _safe(cliente.cpf if cliente else "")),
+            ("CONTATO:", _safe(empresa.email) if empresa else ""),
+            ("TELEFONE:", _safe(cliente.telefone) if cliente else ""),
         ]
-        y_left = self._draw_two_column_fields(c, y_left, field_data, self.COL1_X, self.COL_WIDTH)
+        for label, value in empresa_fields:
+            c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
+            c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm, label)
+            c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
+            c.drawString(self.COL1_X + 3.8 * cm, y_left - 0.3 * cm, value)
+            # Underline
+            c.line(self.COL1_X + 3.7 * cm, y_left - 0.38 * cm, self.COL1_X + 9.3 * cm, y_left - 0.38 * cm)
+            y_left -= 0.45 * cm
 
-        # CONTRATO block (replaces IDENTIFICAÇÃO)
+        y_left -= 0.15 * cm
+
+        # DADOS DO CONTRATO block — vertical layout
         y_left = self._draw_block_title(c, y_left, "DADOS DO CONTRATO")
-        contract_fields = [
-            ("CONTRATO No", contrato.numero or ""),
-            ("STATUS", contrato.status or ""),
-            ("DATA INICIO", self._format_date(contrato.data_inicio)),
-            ("DATA FIM", self._format_date(contrato.data_fim)),
+        contrato_fields = [
+            ("CONTRATO No:", _safe(contrato.numero)),
+            ("STATUS:", _safe(contrato.status)),
+            ("DATA INICIO:", self._format_date(contrato.data_inicio)),
+            ("DATA FIM:", self._format_date(contrato.data_fim)),
         ]
-        y_left = self._draw_two_column_fields(c, y_left, contract_fields, self.COL1_X, self.COL_WIDTH)
+        for label, value in contrato_fields:
+            c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
+            c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm, label)
+            c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
+            c.drawString(self.COL1_X + 3.8 * cm, y_left - 0.3 * cm, value)
+            c.line(self.COL1_X + 3.7 * cm, y_left - 0.38 * cm, self.COL1_X + 9.3 * cm, y_left - 0.38 * cm)
+            y_left -= 0.45 * cm
 
-        # CARRO block
+        y_left -= 0.15 * cm
+
+        # CARRO block — same line for marca and placa
         y_left = self._draw_block_title(c, y_left, "CARRO - CAR")
-        marca_modelo = f"{veiculo.marca} {veiculo.modelo}" if veiculo else "N/A"
-        placa = veiculo.placa if veiculo else "N/A"
+        marca_modelo = "{} {}".format(_safe(veiculo.marca), _safe(veiculo.modelo)).strip() if veiculo else "N/A"
+        placa = _safe(veiculo.placa) if veiculo else "N/A"
 
-        self._draw_field_label(c, y_left, "MARCA/TIPO:", self.COL1_X)
-        self._draw_field_value(c, y_left, marca_modelo, self.COL1_X + 3.5 * cm)
-        self._draw_field_label(c, y_left, "PLACA:", self.COL1_X + 6.5 * cm)
-        self._draw_field_value(c, y_left, placa, self.COL1_X + 8 * cm)
+        c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
+        c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm, "MARCA/TIPO:")
+        c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
+        c.drawString(self.COL1_X + 2.8 * cm, y_left - 0.3 * cm, marca_modelo)
+
+        c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
+        c.drawString(self.COL1_X + 6.0 * cm, y_left - 0.3 * cm, "PLACA:")
+        c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
+        c.drawString(self.COL1_X + 7.3 * cm, y_left - 0.3 * cm, placa)
         y_left -= 0.6 * cm
 
         # PERÍODOS DE FATURAMENTO block
@@ -186,22 +214,42 @@ class PDFContratoService:
             c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm, "Nenhum periodo registrado.")
             y_left -= 0.5 * cm
 
+        # Observações in left column
+        c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
+        c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.3 * cm, "Observacoes:")
+        y_left -= 0.45 * cm
+        obs = _safe(contrato.observacoes)
+        if obs:
+            c.setFont(self.FONT_REGULAR, self.SIZE_LABEL)
+            for line in self._wrap_text(obs, 60):
+                c.drawString(self.COL1_X + 0.2 * cm, y_left - 0.15 * cm, line)
+                y_left -= 0.3 * cm
+
         # --- RIGHT COLUMN ---
-        y_right = y - 1 * cm
+        y_right = y - 0.8 * cm
 
         # QUILOMETRAGEM block
         y_right = self._draw_block_title(c, y_right, "QUILOMETRAGEM", x_pos=self.COL2_X)
         km_ref = float(uso.km_referencia or 0)
         km_saida = float(veiculo.km_atual or contrato.km_inicial or 0) if veiculo else 0
-        data_grid = [
-            ("DATA SAIDA", self._format_date(contrato.data_inicio)),
-            ("DATA ENTRADA", self._format_date(contrato.data_fim)),
-            ("KM SAIDA", self._format_km(km_saida)),
-            ("KM ENTRADA", ""),
-            ("KM REF/MES", self._format_km(km_ref)),
-            ("VAL. KM EXTRA", self._format_currency(float(uso.valor_km_extra or 0))),
+
+        km_fields = [
+            ("DATA SAIDA:", self._format_date(contrato.data_inicio)),
+            ("DATA ENTRADA:", self._format_date(contrato.data_fim)),
+            ("KM SAIDA:", self._format_km(km_saida)),
+            ("KM ENTRADA:", ""),
+            ("KM REF/MES:", self._format_km(km_ref)),
+            ("VAL. KM EXTRA:", self._format_currency(float(uso.valor_km_extra or 0))),
         ]
-        y_right = self._draw_grid_2x4(c, y_right, data_grid, self.COL2_X)
+        for label, value in km_fields:
+            c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
+            c.drawString(self.COL2_X + 0.2 * cm, y_right - 0.3 * cm, label)
+            c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
+            c.drawString(self.COL2_X + 3.2 * cm, y_right - 0.3 * cm, value)
+            c.line(self.COL2_X + 3.1 * cm, y_right - 0.38 * cm, self.COL2_X + 9.0 * cm, y_right - 0.38 * cm)
+            y_right -= 0.45 * cm
+
+        y_right -= 0.15 * cm
 
         # DISCRIMINAÇÃO block
         y_right = self._draw_block_title(c, y_right, "DISCRIMINACAO", x_pos=self.COL2_X)
@@ -223,22 +271,16 @@ class PDFContratoService:
         y_right = self._draw_block_title(c, y_right, "PROTECAO VEICULAR", x_pos=self.COL2_X)
         protecao = "Sim" if getattr(uso, 'protecao_veiculo', False) else "Nao"
         c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
-        c.drawString(self.COL2_X + 0.2 * cm, y_right - 0.3 * cm, f"PROTECAO ATIVA: {protecao}")
+        c.drawString(self.COL2_X + 0.2 * cm, y_right - 0.3 * cm, "PROTECAO ATIVA: {}".format(protecao))
         y_right -= 0.6 * cm
 
-        # Observações
-        c.setFont(self.FONT_BOLD, self.SIZE_LABEL)
-        c.drawString(self.COL2_X + 0.2 * cm, y_right - 0.3 * cm, "Observacoes:")
-        y_right -= 0.5 * cm
-        obs = contrato.observacoes or ""
-        if obs:
-            c.setFont(self.FONT_REGULAR, self.SIZE_LABEL)
-            for line in self._wrap_text(obs, 55):
-                c.drawString(self.COL2_X + 0.2 * cm, y_right - 0.15 * cm, line)
-                y_right -= 0.3 * cm
+        # Assinatura do Cliente
+        c.setFont(self.FONT_REGULAR, self.SIZE_LABEL)
+        c.drawString(self.COL2_X + 0.2 * cm, y_right - 0.3 * cm, "Assinatura do Cliente: ___________________________________")
+        y_right -= 0.8 * cm
 
         # Footer
-        y_footer = min(y_left, y_right) - 0.5 * cm
+        y_footer = min(y_left, y_right) - 0.3 * cm
         self._draw_page1_footer(c, y_footer)
 
     def _draw_header_empresa(self, c, y, v_num, v_total):
