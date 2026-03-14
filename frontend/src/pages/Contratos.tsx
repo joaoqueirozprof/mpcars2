@@ -229,6 +229,8 @@ const Contratos: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState<ContractForm>(buildForm())
   const [selectedUsoIds, setSelectedUsoIds] = useState<number[]>([])
+  const [vehicleOverrides, setVehicleOverrides] = useState<Record<number, { valor_mensal: number; km_referencia: number; valor_km_extra: number }>>({})
+  const [editPreSelectPending, setEditPreSelectPending] = useState(false)
   const [empresaDetalhes, setEmpresaDetalhes] = useState<any>(null)
   const [addingPeriodo, setAddingPeriodo] = useState<any>(null)
   const [periodoForm, setPeriodoForm] = useState({ periodo_inicio: '', periodo_fim: '', km_percorrida: 0 })
@@ -503,6 +505,8 @@ const Contratos: React.FC = () => {
     setEditingContract(null)
     setFormData(buildForm())
     setSelectedUsoIds([])
+    setVehicleOverrides({})
+    setEditPreSelectPending(false)
     setVeiculoWarning(null)
     setForceMotivo('')
     setIsModalOpen(true)
@@ -553,6 +557,8 @@ const Contratos: React.FC = () => {
       observacoes: contrato.observacoes || '',
     })
     setSelectedUsoIds([])
+    setVehicleOverrides({})
+    setEditPreSelectPending((contrato.tipo || 'cliente') === 'empresa')
     setVeiculoWarning(null)
     setForceMotivo('')
     setIsModalOpen(true)
@@ -619,23 +625,42 @@ const Contratos: React.FC = () => {
     }
   }, [formData.tipo, selectedEmpresaId, empresaUsos])
 
+  // Pre-select vehicles when editing an empresa contract
   useEffect(() => {
-    if (formData.tipo !== 'empresa' || !selectedEmpresaUso) return
+    if (!editPreSelectPending || !(empresaUsos || []).length) return
+    // Select all vehicles that have a contrato_id (are linked to contracts)
+    const linked = (empresaUsos || []).filter((u: any) => u.contrato_id)
+    const idsToSelect = linked.length > 0 ? linked.map((u: any) => u.id) : (empresaUsos || []).map((u: any) => u.id)
+    setSelectedUsoIds(idsToSelect)
+    const overrides: Record<number, { valor_mensal: number; km_referencia: number; valor_km_extra: number }> = {}
+    idsToSelect.forEach((id: number) => {
+      const u = (empresaUsos || []).find((uso: any) => uso.id === id)
+      if (u) {
+        overrides[id] = {
+          valor_mensal: Number(u.valor_diaria_empresa || 0),
+          km_referencia: Number(u.km_referencia || 0),
+          valor_km_extra: Number(u.valor_km_extra || 0),
+        }
+      }
+    })
+    setVehicleOverrides(overrides)
+    setEditPreSelectPending(false)
+  }, [editPreSelectPending, empresaUsos])
+
+  useEffect(() => {
+    if (formData.tipo !== 'empresa') return
+    if (selectedUsoIds.length === 0) return
+
+    // Calculate totals from overrides
+    const totalValor = selectedUsoIds.reduce((sum, id) => sum + (vehicleOverrides[id]?.valor_mensal || 0), 0)
 
     setFormData((current) => ({
       ...current,
-      empresa_uso_id: String(selectedEmpresaUso.id),
-      km_atual_veiculo: selectedVeiculo?.km_atual ?? Number(selectedEmpresaUso.km_inicial || 0),
-      km_livres: Number(selectedEmpresaUso.km_referencia || 0),
-      valor_km_excedente: Number(selectedEmpresaUso.valor_km_extra || 0),
-      valor_diaria: Number(selectedEmpresaUso.valor_diaria_empresa || 0),
-      data_inicio: current.data_inicio || toDateInput(selectedEmpresaUso.data_inicio),
-      data_fim:
-        current.vigencia_indeterminada
-          ? ''
-          : (current.data_fim || toDateInput(selectedEmpresaUso.data_fim)),
+      valor_diaria: totalValor,
+      km_livres: 0,
+      valor_km_excedente: 0,
     }))
-  }, [formData.tipo, selectedEmpresaUso, selectedVeiculo])
+  }, [formData.tipo, selectedUsoIds, vehicleOverrides])
 
   const dias = formData.data_inicio && formData.data_fim ? calculateDays(formData.data_inicio, formData.data_fim) : 0
   const diasPreview = formData.tipo === 'empresa' || formData.vigencia_indeterminada ? 1 : dias
@@ -722,6 +747,12 @@ const Contratos: React.FC = () => {
         uso_ids: selectedUsoIds,
         data_inicio: formData.data_inicio,
         observacoes: formData.observacoes || undefined,
+        vehicle_overrides: selectedUsoIds.map(id => ({
+          uso_id: id,
+          valor_mensal: vehicleOverrides[id]?.valor_mensal ?? 0,
+          km_referencia: vehicleOverrides[id]?.km_referencia ?? 0,
+          valor_km_extra: vehicleOverrides[id]?.valor_km_extra ?? 0,
+        })),
       }
       createEmpresaMutation.mutate(empresaPayload)
       return
@@ -872,20 +903,23 @@ const Contratos: React.FC = () => {
                       const empresaContracts = isEmpresa ? (empresaGroups[contrato.cliente!.nome] || [contrato]) : [contrato]
                       const totalValor = empresaContracts.reduce((sum, c) => sum + (c.valor_total || 0), 0)
                       const totalRecebido = empresaContracts.reduce((sum, c) => sum + (c.valor_recebido || 0), 0)
-                      const numVeiculos = empresaContracts.length
+                      // Count unique vehicles (not contracts)
+                      const uniqueVehicles = isEmpresa
+                        ? new Set(empresaContracts.map(c => c.veiculo?.placa).filter(Boolean)).size
+                        : 1
 
                     const status = displayStatus(contrato)
                     return (
                       <tr key={contrato.id} className="table-row hover:bg-slate-50">
                         <td className="table-cell font-semibold text-slate-900">
-                          {isEmpresa ? empresaContracts.map(c => c.numero).join(', ') : contrato.numero}
+                          {isEmpresa ? contrato.numero : contrato.numero}
                         </td>
                         <td className="table-cell text-slate-700">{contrato.cliente?.nome || '-'}</td>
                         <td className="table-cell text-slate-700">
                           {isEmpresa ? (
                             <div>
                               <span className="inline-block px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 mb-1">Empresa</span>
-                              <div className="text-xs text-slate-500">{numVeiculos} veículo{numVeiculos > 1 ? 's' : ''} vinculado{numVeiculos > 1 ? 's' : ''}</div>
+                              <div className="text-xs text-slate-500">{uniqueVehicles} veículo{uniqueVehicles > 1 ? 's' : ''} vinculado{uniqueVehicles > 1 ? 's' : ''}</div>
                             </div>
                           ) : (
                             <>
@@ -1055,8 +1089,19 @@ const Contratos: React.FC = () => {
                             onClick={() => {
                               if (selectedUsoIds.length === (empresaUsos || []).length) {
                                 setSelectedUsoIds([])
+                                setVehicleOverrides({})
                               } else {
-                                setSelectedUsoIds((empresaUsos || []).map((u: any) => u.id))
+                                const allIds = (empresaUsos || []).map((u: any) => u.id)
+                                setSelectedUsoIds(allIds)
+                                const overrides: Record<number, { valor_mensal: number; km_referencia: number; valor_km_extra: number }> = {}
+                                ;(empresaUsos || []).forEach((u: any) => {
+                                  overrides[u.id] = {
+                                    valor_mensal: Number(u.valor_diaria_empresa || 0),
+                                    km_referencia: Number(u.km_referencia || 0),
+                                    valor_km_extra: Number(u.valor_km_extra || 0),
+                                  }
+                                })
+                                setVehicleOverrides(overrides)
                               }
                             }}
                             className="text-xs text-blue-600 hover:text-blue-800"
@@ -1081,8 +1126,21 @@ const Contratos: React.FC = () => {
                                   onChange={(e) => {
                                     if (e.target.checked) {
                                       setSelectedUsoIds([...selectedUsoIds, uso.id])
+                                      setVehicleOverrides(prev => ({
+                                        ...prev,
+                                        [uso.id]: {
+                                          valor_mensal: Number(uso.valor_diaria_empresa || 0),
+                                          km_referencia: Number(uso.km_referencia || 0),
+                                          valor_km_extra: Number(uso.valor_km_extra || 0),
+                                        }
+                                      }))
                                     } else {
                                       setSelectedUsoIds(selectedUsoIds.filter(id => id !== uso.id))
+                                      setVehicleOverrides(prev => {
+                                        const next = { ...prev }
+                                        delete next[uso.id]
+                                        return next
+                                      })
                                     }
                                   }}
                                   className="mt-1 h-4 w-4 rounded border-slate-300"
@@ -1114,9 +1172,7 @@ const Contratos: React.FC = () => {
                               <span className="text-blue-900">Veiculos selecionados: {selectedUsoIds.length}</span>
                               <strong className="text-blue-950">
                                 Valor mensal total: {formatCurrency(
-                                  (empresaUsos || [])
-                                    .filter((u: any) => selectedUsoIds.includes(u.id))
-                                    .reduce((sum: number, u: any) => sum + Number(u.valor_diaria_empresa || 0), 0)
+                                  selectedUsoIds.reduce((sum, id) => sum + (vehicleOverrides[id]?.valor_mensal || 0), 0)
                                 )}
                               </strong>
                             </div>
@@ -1193,7 +1249,7 @@ const Contratos: React.FC = () => {
                       <div>
                         <p className="text-sm font-semibold text-blue-950">Fluxo corporativo</p>
                         <p className="mt-1 text-sm text-blue-900/80">
-                          Contratos de empresa podem operar com vigencia indeterminada e usar a parametrizacao mensal do veiculo associado.
+                          Contratos de empresa podem operar com vigencia indeterminada. Revise os valores de cada veiculo abaixo.
                         </p>
                       </div>
                       <label className="flex items-center gap-2 text-sm font-medium text-blue-950">
@@ -1222,20 +1278,58 @@ const Contratos: React.FC = () => {
                         Essa empresa ainda nao possui veiculos vinculados. Abra o cadastro da empresa e use o botao <strong>Frota</strong> para associar os carros.
                       </div>
                     )}
-                    {selectedEmpresaUso && (
-                      <div className="grid grid-cols-1 gap-3 md:grid-cols-3 text-sm">
-                        <div className="rounded-xl bg-white/90 px-4 py-3 border border-blue-100">
-                          <p className="text-xs uppercase tracking-[0.18em] text-blue-700/70">Veiculo associado</p>
-                          <p className="mt-2 font-semibold text-slate-900">{selectedEmpresaUso.placa} - {selectedEmpresaUso.modelo}</p>
-                        </div>
-                        <div className="rounded-xl bg-white/90 px-4 py-3 border border-blue-100">
-                          <p className="text-xs uppercase tracking-[0.18em] text-blue-700/70">KM permitida no periodo</p>
-                          <p className="mt-2 font-semibold text-slate-900">{Number(selectedEmpresaUso.km_referencia || 0).toLocaleString('pt-BR')} km</p>
-                        </div>
-                        <div className="rounded-xl bg-white/90 px-4 py-3 border border-blue-100">
-                          <p className="text-xs uppercase tracking-[0.18em] text-blue-700/70">Valor mensal / periodo</p>
-                          <p className="mt-2 font-semibold text-slate-900">{formatCurrency(Number(selectedEmpresaUso.valor_diaria_empresa || 0))}</p>
-                        </div>
+                    {selectedUsoIds.length > 0 && (
+                      <div className="space-y-3">
+                        {(empresaUsos || [])
+                          .filter((uso: any) => selectedUsoIds.includes(uso.id))
+                          .map((uso: any) => {
+                            const ov = vehicleOverrides[uso.id] || { valor_mensal: 0, km_referencia: 0, valor_km_extra: 0 }
+                            return (
+                              <div key={uso.id} className="rounded-xl bg-white border border-blue-100 p-4">
+                                <p className="text-sm font-semibold text-slate-900 mb-3">
+                                  <Car size={14} className="inline mr-1 text-blue-600" />
+                                  {uso.placa} - {uso.marca} {uso.modelo}
+                                </p>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                  <div>
+                                    <label className="text-xs text-slate-500">Valor mensal / periodo *</label>
+                                    <CurrencyInput
+                                      label=""
+                                      value={ov.valor_mensal}
+                                      onChange={(val) => setVehicleOverrides(prev => ({
+                                        ...prev,
+                                        [uso.id]: { ...prev[uso.id], valor_mensal: val }
+                                      }))}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-xs text-slate-500">KM permitida / mes</label>
+                                    <input
+                                      type="number"
+                                      value={ov.km_referencia || ''}
+                                      onChange={(e) => setVehicleOverrides(prev => ({
+                                        ...prev,
+                                        [uso.id]: { ...prev[uso.id], km_referencia: Number(e.target.value) || 0 }
+                                      }))}
+                                      className="input-field"
+                                      placeholder="0"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-xs text-slate-500">Valor KM excedente</label>
+                                    <CurrencyInput
+                                      label=""
+                                      value={ov.valor_km_extra}
+                                      onChange={(val) => setVehicleOverrides(prev => ({
+                                        ...prev,
+                                        [uso.id]: { ...prev[uso.id], valor_km_extra: val }
+                                      }))}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })}
                       </div>
                     )}
                   </div>
@@ -1253,43 +1347,54 @@ const Contratos: React.FC = () => {
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <p className="text-xs uppercase tracking-wide text-blue-700">KM Atual do Veiculo</p>
-                    <p className="text-2xl font-bold text-blue-950 mt-2">{formData.km_atual_veiculo.toLocaleString('pt-BR')}</p>
-                  </div>
-                  <div><label className="input-label">Hora de Saida</label><input type="time" value={formData.hora_saida} onChange={(event) => setFormData({ ...formData, hora_saida: event.target.value })} className="input-field" /></div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="input-label">Combustivel na Saida</label>
-                    <select value={formData.combustivel_saida} onChange={(event) => setFormData({ ...formData, combustivel_saida: event.target.value })} className="input-field">
-                      <option value="">Selecione</option>
-                      {fuelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                    </select>
-                  </div>
-                  <div><label className="input-label">KM Livres</label><input type="number" value={formData.km_livres} onChange={(event) => setFormData({ ...formData, km_livres: Number(event.target.value) || 0 })} className="input-field" /></div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <CurrencyInput
-                    label={formData.tipo === 'empresa' ? 'Valor mensal / periodo *' : 'Valor Diaria *'}
-                    value={formData.valor_diaria}
-                    onChange={(valor_diaria) => setFormData({ ...formData, valor_diaria })}
-                  />
-                  <CurrencyInput
-                    label="Valor KM Excedente"
-                    value={formData.valor_km_excedente}
-                    onChange={(valor_km_excedente) => setFormData({ ...formData, valor_km_excedente })}
-                  />
-                  <CurrencyInput
-                    label="Desconto"
-                    value={formData.desconto}
-                    onChange={(desconto) => setFormData({ ...formData, desconto })}
-                  />
-                </div>
+                {formData.tipo !== 'empresa' && (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <p className="text-xs uppercase tracking-wide text-blue-700">KM Atual do Veiculo</p>
+                        <p className="text-2xl font-bold text-blue-950 mt-2">{formData.km_atual_veiculo.toLocaleString('pt-BR')}</p>
+                      </div>
+                      <div><label className="input-label">Hora de Saida</label><input type="time" value={formData.hora_saida} onChange={(event) => setFormData({ ...formData, hora_saida: event.target.value })} className="input-field" /></div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="input-label">Combustivel na Saida</label>
+                        <select value={formData.combustivel_saida} onChange={(event) => setFormData({ ...formData, combustivel_saida: event.target.value })} className="input-field">
+                          <option value="">Selecione</option>
+                          {fuelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                        </select>
+                      </div>
+                      <div><label className="input-label">KM Livres</label><input type="number" value={formData.km_livres} onChange={(event) => setFormData({ ...formData, km_livres: Number(event.target.value) || 0 })} className="input-field" /></div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <CurrencyInput
+                        label="Valor Diaria *"
+                        value={formData.valor_diaria}
+                        onChange={(valor_diaria) => setFormData({ ...formData, valor_diaria })}
+                      />
+                      <CurrencyInput
+                        label="Valor KM Excedente"
+                        value={formData.valor_km_excedente}
+                        onChange={(valor_km_excedente) => setFormData({ ...formData, valor_km_excedente })}
+                      />
+                      <CurrencyInput
+                        label="Desconto"
+                        value={formData.desconto}
+                        onChange={(desconto) => setFormData({ ...formData, desconto })}
+                      />
+                    </div>
+                  </>
+                )}
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm space-y-2">
                   <div className="flex justify-between"><span>Periodo</span><strong>{formData.vigencia_indeterminada ? 'Indeterminado' : `${dias} dia(s)`}</strong></div>
-                  <div className="flex justify-between"><span>Valor previsto</span><strong>{formatCurrency(valorPreview)}</strong></div>
+                  <div className="flex justify-between">
+                    <span>Valor mensal total</span>
+                    <strong>{formatCurrency(
+                      formData.tipo === 'empresa'
+                        ? selectedUsoIds.reduce((sum, id) => sum + (vehicleOverrides[id]?.valor_mensal || 0), 0)
+                        : valorPreview
+                    )}</strong>
+                  </div>
                 </div>
                 <div><label className="input-label">Observacoes</label><textarea value={formData.observacoes} onChange={(event) => setFormData({ ...formData, observacoes: event.target.value })} rows={3} className="input-field" /></div>
               </div>

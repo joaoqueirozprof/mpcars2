@@ -166,6 +166,13 @@ class ContratoPaymentUpdate(BaseModel):
     valor_recebido: Optional[float] = None
 
 
+class VehicleOverride(BaseModel):
+    uso_id: int
+    valor_mensal: Optional[float] = None
+    km_referencia: Optional[float] = None
+    valor_km_extra: Optional[float] = None
+
+
 class ContratoEmpresaCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -175,6 +182,7 @@ class ContratoEmpresaCreate(BaseModel):
     observacoes: Optional[str] = None
     force_override: bool = False
     force_motivo: Optional[str] = None
+    vehicle_overrides: Optional[List[VehicleOverride]] = None
 
 
 class EmpresaPeriodoCreate(BaseModel):
@@ -972,10 +980,30 @@ def create_contrato_empresa(
     db.add(contrato)
     db.flush()
 
-    # Link all UsoVeiculoEmpresa to this contrato
+    # Build overrides map
+    overrides_map = {}
+    if payload.vehicle_overrides:
+        for vo in payload.vehicle_overrides:
+            overrides_map[vo.uso_id] = vo
+
+    # Link all UsoVeiculoEmpresa to this contrato and apply overrides
     for uso, veiculo in usos:
         uso.contrato_id = contrato.id
         veiculo.status = "alugado"
+        # Apply per-vehicle overrides if provided
+        if uso.id in overrides_map:
+            ov = overrides_map[uso.id]
+            if ov.valor_mensal is not None:
+                uso.valor_diaria_empresa = ov.valor_mensal
+            if ov.km_referencia is not None:
+                uso.km_referencia = ov.km_referencia
+            if ov.valor_km_extra is not None:
+                uso.valor_km_extra = ov.valor_km_extra
+
+    # Recalculate total after overrides
+    total_valor_mensal = sum(float(uso.valor_diaria_empresa or 0) for uso, _ in usos)
+    contrato.valor_diaria = total_valor_mensal
+    contrato.valor_total = total_valor_mensal
 
     # Create checkin record
     db.add(CheckinCheckout(
