@@ -1,12 +1,14 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   CheckCircle,
+  ChevronDown,
   Download,
   Edit,
   FileText,
   Loader2,
+  MoreHorizontal,
   Plus,
   Printer,
   Search,
@@ -22,7 +24,7 @@ import CurrencyInput from '@/components/shared/CurrencyInput'
 import { useConfig } from '@/contexts/ConfigContext'
 import { calculateDays, formatCurrency, formatDate } from '@/lib/utils'
 import api from '@/services/api'
-import { Contrato, PaginatedResponse, PaginationParams, Veiculo } from '@/types'
+import { Contrato, EmpresaUso, PaginatedResponse, PaginationParams, Veiculo } from '@/types'
 
 type StatusFilter = 'todos' | 'ativo' | 'finalizado' | 'cancelado' | 'atraso'
 
@@ -226,6 +228,15 @@ const Contratos: React.FC = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState<ContractForm>(buildForm())
+  
+  // Company contract details modal/popover
+  const [companyContractDetails, setCompanyContractDetails] = useState<{
+    isOpen: boolean;
+    contrato: Contrato | null;
+    empresaUsos: EmpresaUso[];
+    loading: boolean;
+  }>({ isOpen: false, contrato: null, empresaUsos: [], loading: false })
+  
   const [closeoutData, setCloseoutData] = useState<CloseoutForm>({
     km_atual_veiculo: 0,
     combustivel_retorno: '',
@@ -438,6 +449,71 @@ const Contratos: React.FC = () => {
   }
 
   const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null)
+  
+  // Open company contract details modal
+  const openCompanyContractDetails = async (contrato: Contrato) => {
+    setCompanyContractDetails({ isOpen: true, contrato, empresaUsos: [], loading: true })
+    try {
+      const { data } = await api.get(`/contratos/${contrato.id}`)
+      setCompanyContractDetails(prev => ({
+        ...prev,
+        empresaUsos: data.empresa_usos || [],
+        loading: false,
+      }))
+    } catch {
+      toast.error('Erro ao carregar detalhes do contrato')
+      setCompanyContractDetails({ isOpen: false, contrato: null, empresaUsos: [], loading: false })
+    }
+  }
+
+  // Download NF report for company contract
+  const downloadNfReport = async (contrato: Contrato, empresaId?: number) => {
+    if (!empresaId) {
+      toast.error('Empresa não encontrada')
+      return
+    }
+    setDownloadingPdf(contrato.id)
+    try {
+      // Get all vehicle usages for this contract
+      const { data } = await api.get(`/contratos/${contrato.id}`)
+      const empresaUsos = data.empresa_usos || []
+      
+      if (empresaUsos.length === 0) {
+        toast.error('Nenhum veículo encontrado no contrato')
+        return
+      }
+      
+      const veiculos = empresaUsos.map((uso: any) => ({
+        uso_id: uso.id,
+        km_percorrido: uso.km_percorrido || 0,
+        km_referencia: uso.km_referencia || 0,
+        valor_km_extra: uso.valor_km_extra || 0,
+      }))
+      
+      const response = await api.post('/relatorios/nf/empresa/pdf', {
+        empresa_id: empresaId,
+        periodo_inicio: new Date().toISOString().slice(0, 10),
+        periodo_fim: new Date().toISOString().slice(0, 10),
+        veiculos,
+      }, { responseType: 'blob' })
+      
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `notas_fiscais_${contrato.numero}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+      toast.success('Relatório de notas fiscais baixado!')
+    } catch (error) {
+      console.error('Error downloading NF report:', error)
+      toast.error('Erro ao baixar relatório de notas fiscais')
+    } finally {
+      setDownloadingPdf(null)
+    }
+  }
 
   const openCreate = () => {
     setEditingContract(null)
@@ -772,6 +848,15 @@ const Contratos: React.FC = () => {
                               {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                             </button>
                             <button onClick={() => handlePdf(contrato.id, contrato.numero, true)} className="p-1.5 hover:text-purple-600"><Printer size={16} /></button>
+                            {contrato.tipo === 'empresa' && (
+                              <button 
+                                onClick={() => openCompanyContractDetails(contrato)} 
+                                className="p-1.5 hover:text-blue-600" 
+                                title="Ver detalhes do contrato de empresa"
+                              >
+                                <FileText size={16} />
+                              </button>
+                            )}
                             {contrato.status === 'ativo' && <button onClick={() => openCloseout(contrato)} className="p-1.5 hover:text-emerald-600"><CheckCircle size={16} /></button>}
                             <button onClick={() => openEdit(contrato)} className="p-1.5 hover:text-blue-600"><Edit size={16} /></button>
                             <button onClick={() => setDeleteConfirm({ isOpen: true, id: contrato.id })} className="p-1.5 hover:text-red-600"><Trash2 size={16} /></button>
@@ -1267,6 +1352,155 @@ const Contratos: React.FC = () => {
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
               <button onClick={() => setDeleteConfirm({ isOpen: false })} className="btn-secondary" disabled={deleteMutation.isPending}>Cancelar</button>
               <button onClick={() => deleteConfirm.id && deleteMutation.mutate(deleteConfirm.id)} className="btn-danger" disabled={deleteMutation.isPending}>{deleteMutation.isPending ? 'Deletando...' : 'Deletar'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Company Contract Details Modal */}
+      {companyContractDetails.isOpen && companyContractDetails.contrato && (
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setCompanyContractDetails({ isOpen: false, contrato: null, empresaUsos: [], loading: false })}>
+          <div className="modal-content max-w-4xl w-full" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">
+                Contrato Empresa - {companyContractDetails.contrato.numero}
+              </h3>
+              <button onClick={() => setCompanyContractDetails({ isOpen: false, contrato: null, empresaUsos: [], loading: false })} className="btn-icon">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="modal-scroll-body">
+              {companyContractDetails.loading ? (
+                <div className="flex items-center justify-center p-8">
+                  <Loader2 className="animate-spin text-blue-600" size={32} />
+                </div>
+              ) : (
+                <>
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Veículos</p>
+                      <p className="text-2xl font-bold text-slate-900">{companyContractDetails.empresaUsos.length}</p>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+                      <p className="text-xs uppercase tracking-wide text-blue-600">Valor Mensal Total</p>
+                      <p className="text-2xl font-bold text-blue-900">
+                        {formatCurrency(companyContractDetails.empresaUsos.reduce((sum, uso) => sum + (uso.valor_diaria_empresa || 0), 0))}
+                      </p>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
+                      <p className="text-xs uppercase tracking-wide text-amber-600">Total KM Extra</p>
+                      <p className="text-2xl font-bold text-amber-900">
+                        {formatCurrency(companyContractDetails.empresaUsos.reduce((sum, uso) => {
+                          const kmPercorrido = uso.km_percorrido || 0
+                          const kmReferencia = uso.km_referencia || 0
+                          const kmExtra = Math.max(kmPercorrido - kmReferencia, 0)
+                          return sum + (kmExtra * (uso.valor_km_extra || 0))
+                        }, 0))}
+                      </p>
+                    </div>
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                      <p className="text-xs uppercase tracking-wide text-green-600">Valor Total Geral</p>
+                      <p className="text-2xl font-bold text-green-900">
+                        {formatCurrency(companyContractDetails.contrato.valor_total || 0)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Vehicle Details */}
+                  <div className="space-y-4">
+                    {companyContractDetails.empresaUsos.map((uso) => {
+                      const kmPercorrido = uso.km_percorrido || 0
+                      const kmReferencia = uso.km_referencia || 0
+                      const kmExtra = Math.max(kmPercorrido - kmReferencia, 0)
+                      const valorKmExtra = kmExtra * (uso.valor_km_extra || 0)
+                      
+                      return (
+                        <div key={uso.id} className="border border-slate-200 rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-lg font-semibold text-slate-900">
+                              {uso.placa || 'Sem placa'} - {uso.marca} {uso.modelo}
+                            </h4>
+                            <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${uso.status === 'ativo' ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>
+                              {uso.status === 'ativo' ? 'Ativo' : uso.status}
+                            </span>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div>
+                              <p className="text-slate-500">Período</p>
+                              <p className="font-medium text-slate-900">
+                                {uso.data_inicio ? formatDate(uso.data_inicio) : '-'} a {uso.data_fim ? formatDate(uso.data_fim) : 'Em andamento'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">KM Percorrida</p>
+                              <p className="font-medium text-slate-900">{kmPercorrido.toLocaleString('pt-BR')} km</p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">KM Excedente</p>
+                              <p className={`font-medium ${kmExtra > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                                {kmExtra.toLocaleString('pt-BR')} km
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">Valor KM Extra</p>
+                              <p className="font-medium text-slate-900">{formatCurrency(valorKmExtra)}</p>
+                            </div>
+                          </div>
+                          
+                          <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                            <div>
+                              <p className="text-slate-500">Valor Mensal</p>
+                              <p className="font-semibold text-slate-900">{formatCurrency(uso.valor_diaria_empresa || 0)}</p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">KM Referência</p>
+                              <p className="font-medium text-slate-900">{kmReferencia.toLocaleString('pt-BR')} km</p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">Valor Total</p>
+                              <p className="font-semibold text-slate-900">
+                                {formatCurrency((uso.valor_diaria_empresa || 0) + valorKmExtra)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {companyContractDetails.empresaUsos.length === 0 && (
+                    <div className="text-center py-8 text-slate-500">
+                      Nenhum veículo encontrado neste contrato.
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button 
+                onClick={() => setCompanyContractDetails({ isOpen: false, contrato: null, empresaUsos: [], loading: false })} 
+                className="btn-secondary"
+              >
+                Fechar
+              </button>
+              {companyContractDetails.contrato.cliente?.empresa_id && (
+                <button 
+                  onClick={() => downloadNfReport(companyContractDetails.contrato!, companyContractDetails.contrato.cliente?.empresa_id)} 
+                  className="btn-primary flex items-center gap-2"
+                  disabled={downloadingPdf === companyContractDetails.contrato.id}
+                >
+                  {downloadingPdf === companyContractDetails.contrato.id ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Download size={16} />
+                  )}
+                  Baixar Relatório de Notas Fiscais
+                </button>
+              )}
             </div>
           </div>
         </div>

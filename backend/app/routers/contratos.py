@@ -798,7 +798,80 @@ def get_contrato(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Contrato nao encontrado",
         )
-    return contrato
+    
+    # Include empresa_usos for company contracts
+    empresa_usos = []
+    if str(contrato.tipo or "").lower() == "empresa" and contrato.cliente and contrato.cliente.empresa_id:
+        usos = db.query(UsoVeiculoEmpresa).options(
+            joinedload(UsoVeiculoEmpresa.veiculo)
+        ).filter(
+            UsoVeiculoEmpresa.empresa_id == contrato.cliente.empresa_id,
+            UsoVeiculoEmpresa.contrato_id == contrato_id
+        ).all()
+        
+        for uso in usos:
+            empresa_usos.append({
+                "id": uso.id,
+                "veiculo_id": uso.veiculo_id,
+                "placa": uso.veiculo.placa if uso.veiculo else None,
+                "marca": uso.veiculo.marca if uso.veiculo else None,
+                "modelo": uso.veiculo.modelo if uso.veiculo else None,
+                "km_inicial": uso.km_inicial,
+                "km_final": uso.km_final,
+                "km_percorrido": uso.km_percorrido,
+                "km_referencia": uso.km_referencia,
+                "valor_km_extra": float(uso.valor_km_extra or 0),
+                "valor_diaria_empresa": float(uso.valor_diaria_empresa or 0),
+                "data_inicio": uso.data_inicio.isoformat() if uso.data_inicio else None,
+                "data_fim": uso.data_fim.isoformat() if uso.data_fim else None,
+                "status": uso.status,
+            })
+    
+    # Convert to dict and add empresa_usos
+    contrato_dict = {
+        "id": contrato.id,
+        "numero": contrato.numero,
+        "cliente_id": contrato.cliente_id,
+        "veiculo_id": contrato.veiculo_id,
+        "data_inicio": contrato.data_inicio.isoformat() if contrato.data_inicio else None,
+        "data_fim": contrato.data_fim.isoformat() if contrato.data_fim else None,
+        "data_finalizacao": contrato.data_finalizacao.isoformat() if contrato.data_finalizacao else None,
+        "data_devolucao_real": contrato.data_devolucao_real.isoformat() if contrato.data_devolucao_real else None,
+        "quilometragem_inicial": contrato.quilometragem_inicial,
+        "quilometragem_final": contrato.quilometragem_final,
+        "km_atual_veiculo": contrato.km_atual_veiculo,
+        "valor_diaria": float(contrato.valor_diaria or 0),
+        "valor_total": float(contrato.valor_total or 0),
+        "status": contrato.status,
+        "empresa_id": contrato.empresa_id,
+        "observacoes": contrato.observacoes,
+        "hora_saida": contrato.hora_saida,
+        "combustivel_saida": contrato.combustivel_saida,
+        "combustivel_retorno": contrato.combustivel_retorno,
+        "km_livres": contrato.km_livres,
+        "valor_km_excedente": float(contrato.valor_km_excedente or 0),
+        "valor_avarias": float(contrato.valor_avarias or 0),
+        "taxa_combustivel": float(contrato.taxa_combustivel or 0),
+        "taxa_limpeza": float(contrato.taxa_limpeza or 0),
+        "taxa_higienizacao": float(contrato.taxa_higienizacao or 0),
+        "taxa_pneus": float(contrato.taxa_pneus or 0),
+        "taxa_acessorios": float(contrato.taxa_acessorios or 0),
+        "valor_franquia_seguro": float(contrato.valor_franquia_seguro or 0),
+        "taxa_administrativa": float(contrato.taxa_administrativa or 0),
+        "desconto": float(contrato.desconto or 0),
+        "status_pagamento": contrato.status_pagamento,
+        "forma_pagamento": contrato.forma_pagamento,
+        "data_vencimento_pagamento": contrato.data_vencimento_pagamento.isoformat() if contrato.data_vencimento_pagamento else None,
+        "data_pagamento": contrato.data_pagamento.isoformat() if contrato.data_pagamento else None,
+        "valor_recebido": float(contrato.valor_recebido or 0),
+        "tipo": contrato.tipo,
+        "vigencia_indeterminada": contrato.vigencia_indeterminada,
+        "empresa_uso_id": contrato.empresa_uso_id,
+        "qtd_diarias": contrato.qtd_diarias,
+        "empresa_usos": empresa_usos,
+    }
+    
+    return contrato_dict
 
 
 @router.put("/{contrato_id}", response_model=ContratoResponse)

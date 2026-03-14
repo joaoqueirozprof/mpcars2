@@ -50,6 +50,23 @@ export interface Veiculo {
   ativo: boolean;
 }
 
+export interface EmpresaUso {
+  id: number;
+  veiculo_id: number;
+  placa?: string;
+  marca?: string;
+  modelo?: string;
+  km_inicial?: number;
+  km_final?: number;
+  km_percorrido?: number;
+  km_referencia?: number;
+  valor_km_extra: number;
+  valor_diaria_empresa: number;
+  data_inicio?: string;
+  data_fim?: string;
+  status?: string;
+}
+
 export interface Contrato {
   id: string;
   numero: string;
@@ -89,7 +106,10 @@ export interface Contrato {
   data_pagamento?: string;
   valor_recebido?: number;
   tipo?: 'cliente' | 'empresa';
-  cliente?: { nome: string };
+  vigencia_indeterminada?: boolean;
+  empresa_uso_id?: number;
+  empresa_usos?: EmpresaUso[];
+  cliente?: { nome: string; empresa_id?: number };
   veiculo?: {
     marca: string;
     modelo: string;
