@@ -1152,10 +1152,25 @@ def add_empresa_periodo(
 
     # Update vehicle km if this period's km is higher
     veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+
+    # Calculate total km percorrida for this uso (sum of all periods)
+    all_uso_relatorios = db.query(RelatorioNF).filter(
+        RelatorioNF.uso_id == uso.id
+    ).all()
+    total_km_uso = sum(float(r.km_percorrida or 0) for r in all_uso_relatorios) + payload.km_percorrida
+    total_km_exc_uso = sum(float(r.km_excedente or 0) for r in all_uso_relatorios) + km_excedente
+
+    # Update uso km_final
+    uso.km_final = float(uso.km_inicial or 0) + total_km_uso
+    uso.km_percorrido = total_km_uso
+
     if veiculo:
-        new_km = float(uso.km_inicial or 0) + payload.km_percorrida
+        new_km = float(uso.km_inicial or 0) + total_km_uso
         if new_km > float(veiculo.km_atual or 0):
             veiculo.km_atual = new_km
+
+    # Update contrato KM fields
+    contrato.km_final = uso.km_final
 
     # Update contrato valor_total with accumulated km extras
     all_relatorios = db.query(RelatorioNF).filter(
@@ -1168,8 +1183,10 @@ def add_empresa_periodo(
     # Get all usos for this contract to sum monthly values
     all_usos = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.contrato_id == contrato_id).all()
     total_mensal = sum(float(u.valor_diaria_empresa or 0) for u in all_usos)
+    num_periodos = len(all_relatorios) + 1  # Include the new one
 
-    contrato.valor_total = round(total_mensal + total_extras, 2)
+    contrato.valor_total = round((total_mensal * num_periodos) + total_extras, 2)
+    contrato.valor_km_excedente = round(total_extras, 2)
 
     db.commit()
     db.refresh(relatorio)
@@ -1635,7 +1652,7 @@ def get_contrato_pdf(
     tipo_clean = str(contrato.tipo or "").strip("'\"").lower()
     if tipo_clean == "empresa":
         from app.services.pdf_contrato import PDFContratoService
-        pdf_buffer = PDFContratoService.generate_contrato_empresa_pdf(db, contrato_id)
+        pdf_buffer = PDFContratoService.generate_contrato_empresa_pdf(db, contrato_id, uso_id=None)
     else:
         pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
 

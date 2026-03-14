@@ -147,10 +147,13 @@ def _parse_optional_export_dates(
 @router.get("/contrato/{contrato_id}/pdf")
 def get_contrato_pdf(
     contrato_id: int,
+    uso_id: Optional[int] = Query(None, description="ID do uso de veiculo para gerar PDF individual"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate contract PDF report (uses original layout matching physical form)."""
+    """Generate contract PDF report (uses original layout matching physical form).
+    For empresa contracts, pass uso_id to generate PDF for a specific vehicle.
+    """
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contrato nao encontrado")
@@ -166,7 +169,7 @@ def get_contrato_pdf(
         # Route to empresa PDF if contract type is empresa
         tipo_clean = str(contrato.tipo or "").strip("'\"").lower()
         if tipo_clean == "empresa":
-            pdf_buffer = PDFContratoService.generate_contrato_empresa_pdf(db, contrato_id)
+            pdf_buffer = PDFContratoService.generate_contrato_empresa_pdf(db, contrato_id, uso_id=uso_id)
         else:
             pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
     except Exception as e:
@@ -178,6 +181,36 @@ def get_contrato_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="{}.pdf"'.format(filename)},
     )
+
+
+@router.get("/contrato/{contrato_id}/veiculos")
+def get_contrato_veiculos(
+    contrato_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List vehicles linked to an empresa contract (for PDF dropdown)."""
+    contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    if not contrato:
+        raise HTTPException(status_code=404, detail="Contrato nao encontrado")
+
+    usos = db.query(UsoVeiculoEmpresa).filter(
+        UsoVeiculoEmpresa.contrato_id == contrato_id
+    ).all()
+
+    result = []
+    for uso in usos:
+        veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+        result.append({
+            "uso_id": uso.id,
+            "veiculo_id": uso.veiculo_id,
+            "placa": veiculo.placa if veiculo else "N/A",
+            "marca": veiculo.marca if veiculo else "",
+            "modelo": veiculo.modelo if veiculo else "",
+            "valor_mensal": float(uso.valor_diaria_empresa or 0),
+            "km_referencia": float(uso.km_referencia or 0),
+        })
+    return result
 
 
 # ============================================================

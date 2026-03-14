@@ -2,7 +2,9 @@ import React, { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
+  Car,
   CheckCircle,
+  ChevronDown,
   Download,
   Edit,
   FileText,
@@ -452,10 +454,11 @@ const Contratos: React.FC = () => {
     onError: (error: any) => toast.error(getErrorMessage(error, 'Erro ao adicionar periodo')),
   })
 
-  const handlePdf = async (contratoId: string, numero: string, print = false) => {
+  const handlePdf = async (contratoId: string, numero: string, print = false, usoId?: number) => {
     setDownloadingPdf(contratoId)
     try {
-      const response = await api.get(`/relatorios/contrato/${contratoId}/pdf`, { responseType: 'blob' })
+      const params = usoId ? `?uso_id=${usoId}` : ''
+      const response = await api.get(`/relatorios/contrato/${contratoId}/pdf${params}`, { responseType: 'blob' })
       const blob = new Blob([response.data], { type: 'application/pdf' })
       const url = window.URL.createObjectURL(blob)
       if (print) {
@@ -474,10 +477,27 @@ const Contratos: React.FC = () => {
       toast.error('Erro ao gerar PDF do contrato')
     } finally {
       setDownloadingPdf(null)
+      setPdfDropdown(null)
     }
   }
 
   const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null)
+  const [pdfDropdown, setPdfDropdown] = useState<string | null>(null)
+  const [pdfVeiculos, setPdfVeiculos] = useState<any[]>([])
+
+  const loadPdfVeiculos = async (contratoId: string) => {
+    if (pdfDropdown === contratoId) {
+      setPdfDropdown(null)
+      return
+    }
+    try {
+      const res = await api.get(`/relatorios/contrato/${contratoId}/veiculos`)
+      setPdfVeiculos(res.data)
+      setPdfDropdown(contratoId)
+    } catch {
+      toast.error('Erro ao carregar veiculos')
+    }
+  }
 
   const openCreate = () => {
     setEditingContract(null)
@@ -496,6 +516,17 @@ const Contratos: React.FC = () => {
     nextParams.delete('quick')
     setSearchParams(nextParams, { replace: true })
   }, [searchParams, setSearchParams])
+
+  // Close PDF vehicle dropdown when clicking outside
+  useEffect(() => {
+    if (!pdfDropdown) return
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.relative')) setPdfDropdown(null)
+    }
+    document.addEventListener('click', handler)
+    return () => document.removeEventListener('click', handler)
+  }, [pdfDropdown])
 
   const openEdit = (contrato: Contrato) => {
     setEditingContract(contrato)
@@ -860,10 +891,51 @@ const Contratos: React.FC = () => {
                                 <FileText size={16} />
                               </button>
                             )}
-                            <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-1.5 hover:text-green-600" disabled={downloadingPdf === contrato.id}>
-                              {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                            </button>
-                            <button onClick={() => handlePdf(contrato.id, contrato.numero, true)} className="p-1.5 hover:text-purple-600"><Printer size={16} /></button>
+                            {contrato.tipo === 'empresa' ? (
+                              <div className="relative">
+                                <button
+                                  onClick={() => loadPdfVeiculos(contrato.id)}
+                                  className="p-1.5 hover:text-green-600 flex items-center gap-0.5"
+                                  disabled={downloadingPdf === contrato.id}
+                                  title="Escolher veículo para PDF"
+                                >
+                                  {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <><Download size={16} /><ChevronDown size={12} /></>}
+                                </button>
+                                {pdfDropdown === contrato.id && (
+                                  <div className="absolute right-0 top-8 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[220px]">
+                                    <div className="px-3 py-1.5 text-xs font-semibold text-slate-500 border-b">Selecione o veículo:</div>
+                                    {pdfVeiculos.map((v: any) => (
+                                      <div key={v.uso_id} className="flex items-center gap-1 px-2 py-1 hover:bg-slate-50">
+                                        <Car size={14} className="text-slate-400 shrink-0" />
+                                        <span className="text-xs text-slate-700 flex-1 truncate">{v.marca} {v.modelo} - {v.placa}</span>
+                                        <button
+                                          onClick={() => handlePdf(contrato.id, contrato.numero, false, v.uso_id)}
+                                          className="p-1 hover:text-green-600" title="Baixar PDF"
+                                        >
+                                          <Download size={14} />
+                                        </button>
+                                        <button
+                                          onClick={() => handlePdf(contrato.id, contrato.numero, true, v.uso_id)}
+                                          className="p-1 hover:text-purple-600" title="Imprimir PDF"
+                                        >
+                                          <Printer size={14} />
+                                        </button>
+                                      </div>
+                                    ))}
+                                    {pdfVeiculos.length === 0 && (
+                                      <div className="px-3 py-2 text-xs text-slate-400">Nenhum veículo vinculado</div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <>
+                                <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-1.5 hover:text-green-600" disabled={downloadingPdf === contrato.id}>
+                                  {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                                </button>
+                                <button onClick={() => handlePdf(contrato.id, contrato.numero, true)} className="p-1.5 hover:text-purple-600"><Printer size={16} /></button>
+                              </>
+                            )}
                             {contrato.status === 'ativo' && <button onClick={() => openCloseout(contrato)} className="p-1.5 hover:text-emerald-600"><CheckCircle size={16} /></button>}
                             <button onClick={() => openEdit(contrato)} className="p-1.5 hover:text-blue-600"><Edit size={16} /></button>
                             <button onClick={() => setDeleteConfirm({ isOpen: true, id: contrato.id })} className="p-1.5 hover:text-red-600"><Trash2 size={16} /></button>
@@ -1648,9 +1720,18 @@ const Contratos: React.FC = () => {
             </div>
             <div className="modal-footer">
               <button onClick={() => setEmpresaDetalhes(null)} className="btn-secondary">Fechar</button>
-              <button onClick={() => handlePdf(empresaDetalhes.id, empresaDetalhesData.contrato?.numero || '')} className="btn-primary flex items-center gap-2">
-                <Download size={16} /> Baixar PDF
-              </button>
+              <div className="flex gap-2">
+                {empresaDetalhesData?.veiculos?.map((v: any) => (
+                  <button
+                    key={v.uso_id}
+                    onClick={() => handlePdf(empresaDetalhes.id, empresaDetalhesData.contrato?.numero || '', false, v.uso_id)}
+                    className="btn-primary flex items-center gap-2 text-sm"
+                    disabled={downloadingPdf === empresaDetalhes.id}
+                  >
+                    <Download size={14} /> PDF {v.placa}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>

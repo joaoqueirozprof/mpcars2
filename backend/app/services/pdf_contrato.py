@@ -127,31 +127,45 @@ class PDFContratoService:
         return ns
 
     @staticmethod
-    def generate_contrato_empresa_pdf(db, contrato_id):
+    def generate_contrato_empresa_pdf(db, contrato_id, uso_id=None):
         """
-        Generate empresa contract PDF.
-        Page 1: EXACT same layout as original PF contract (all sections)
-                with empresa data merged into empty client fields.
-        Page 1+: Extra page with empresa details + periods for each vehicle.
-        Last page: Contract clauses.
+        Generate empresa contract PDF for a specific vehicle (uso_id).
+        If uso_id is None, generates for the first vehicle found.
+        Page 1: Original contract layout with empresa data merged + PERÍODO DE FATURAMENTO.
+        Page 2: Contract clauses.
         """
         contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
         if not contrato:
             raise ValueError("Contract {} not found".format(contrato_id))
 
         cliente = contrato.cliente
-        veiculo = contrato.veiculo
         empresa_id = cliente.empresa_id if cliente else None
         empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first() if empresa_id else None
 
-        usos = db.query(UsoVeiculoEmpresa).filter(
-            UsoVeiculoEmpresa.contrato_id == contrato_id
-        ).all()
-        if not usos and empresa_id and contrato.veiculo_id:
-            usos = db.query(UsoVeiculoEmpresa).filter(
-                UsoVeiculoEmpresa.empresa_id == empresa_id,
-                UsoVeiculoEmpresa.veiculo_id == contrato.veiculo_id,
-            ).all()
+        # Find the specific uso (vehicle) or default to first
+        if uso_id:
+            uso = db.query(UsoVeiculoEmpresa).filter(
+                UsoVeiculoEmpresa.id == uso_id,
+                UsoVeiculoEmpresa.contrato_id == contrato_id
+            ).first()
+        else:
+            uso = db.query(UsoVeiculoEmpresa).filter(
+                UsoVeiculoEmpresa.contrato_id == contrato_id
+            ).first()
+
+        # Get vehicle for this uso
+        veiculo = None
+        if uso:
+            veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+        if not veiculo:
+            veiculo = contrato.veiculo
+
+        # Get all periods for this uso
+        relatorios = []
+        if uso:
+            relatorios = db.query(RelatorioNF).filter(
+                RelatorioNF.uso_id == uso.id
+            ).order_by(RelatorioNF.periodo_inicio.asc()).all()
 
         buffer = BytesIO()
         c = canvas.Canvas(buffer, pagesize=A4)
@@ -160,20 +174,11 @@ class PDFContratoService:
         # Merge empresa data into empty client fields for display
         display_cliente = PDFContratoService._merge_cliente_empresa(cliente, empresa)
 
-        # --- PAGE 1: Original contract layout with merged empresa data ---
-        service._draw_page1(c, contrato, display_cliente, veiculo)
+        # --- PAGE 1: Original contract layout with empresa values ---
+        service._draw_page1_empresa(c, contrato, display_cliente, veiculo, uso, relatorios, empresa)
         c.showPage()
 
-        # --- PAGE 2+: Empresa details for each vehicle ---
-        for v_idx, uso in enumerate(usos):
-            veic = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
-            relatorios = db.query(RelatorioNF).filter(
-                RelatorioNF.uso_id == uso.id
-            ).order_by(RelatorioNF.periodo_inicio.desc()).all()
-            service._draw_empresa_details_page(c, contrato, empresa, veic, uso, relatorios, v_idx + 1, len(usos))
-            c.showPage()
-
-        # --- LAST PAGE: Contract clauses ---
+        # --- PAGE 2: Contract clauses ---
         service._draw_page2(c, contrato)
         c.showPage()
 
@@ -399,6 +404,98 @@ class PDFContratoService:
         # Footer - use the lower of the two columns
         y_footer = min(y_left, y_right) - 0.5 * cm
         self._draw_page1_footer(c, y_footer)
+
+    def _draw_page1_empresa(self, c, contrato, cliente, veiculo, uso, relatorios, empresa):
+        """Draw page 1 for empresa contract - same layout but with PERÍODO DE FATURAMENTO
+        instead of DIÁRIA and empresa-specific KM/values."""
+        y = self.PAGE_HEIGHT - self.MARGIN
+
+        # Header
+        y = self._draw_header(c, y)
+
+        # Left column
+        y_left = y - 1 * cm
+        y_left = self._draw_locatario_block(c, y_left, cliente)
+        y_left = self._draw_identificacao_block(c, y_left, cliente)
+        y_left = self._draw_carro_block(c, y_left, veiculo)
+        y_left = self._draw_vistoria_block(c, y_left, veiculo, contrato)
+
+        # Right column - empresa-specific blocks
+        y_right = y - 1 * cm
+        y_right = self._draw_quilometragem_block_empresa(c, y_right, contrato, uso, relatorios)
+        y_right = self._draw_valores_block_empresa(c, y_right, uso, relatorios)
+        y_right = self._draw_cartoes_block(c, y_right, contrato)
+
+        # Footer
+        y_footer = min(y_left, y_right) - 0.5 * cm
+        self._draw_page1_footer(c, y_footer)
+
+    def _draw_quilometragem_block_empresa(self, c, y, contrato, uso, relatorios):
+        """Draw QUILOMETRAGEM block with empresa-specific data."""
+        y = self._draw_block_title(c, y, "QUILOMETRAGEM", x_pos=self.COL2_X)
+
+        km_saida = ""
+        km_entrada = ""
+        km_total = ""
+        if uso:
+            km_saida = self._format_km(float(uso.km_inicial or 0)) if uso.km_inicial else ""
+            if uso.km_final:
+                km_entrada = self._format_km(float(uso.km_final))
+            total_km_perc = sum(float(r.km_percorrida or 0) for r in relatorios)
+            if total_km_perc > 0:
+                km_total = self._format_km(total_km_perc)
+                if not km_entrada and uso.km_inicial:
+                    km_entrada = self._format_km(float(uso.km_inicial or 0) + total_km_perc)
+
+        data = [
+            ("DATA SAÍDA", self._format_date(contrato.data_inicio)),
+            ("DATA ENTRADA", self._format_date(contrato.data_fim) if contrato.status == "finalizado" else ""),
+            ("KM REF. MENSAL", self._format_km(float(uso.km_referencia or 0)) if uso else ""),
+            ("VAL. KM EXTRA", self._format_currency(float(uso.valor_km_extra or 0)) if uso else ""),
+            ("KM SAÍDA", km_saida),
+            ("KM ENTRADA", km_entrada),
+            ("KM PERCORRIDA", km_total),
+            ("KM TOTAL", km_total),
+        ]
+
+        y = self._draw_grid_2x4(c, y, data, self.COL2_X)
+        return y
+
+    def _draw_valores_block_empresa(self, c, y, uso, relatorios):
+        """Draw TABELA DE VALORES for empresa - PERÍODO DE FATURAMENTO instead of DIÁRIA."""
+        y = self._draw_block_title(c, y, "TABELA DE VALORES", x_pos=self.COL2_X)
+
+        valor_mensal = float(uso.valor_diaria_empresa or 0) if uso else 0
+        total_km_exc = sum(float(r.km_excedente or 0) for r in relatorios)
+        valor_km_extra_unit = float(uso.valor_km_extra or 0) if uso else 0
+        total_km_extra_valor = total_km_exc * valor_km_extra_unit
+        qtd_periodos = len(relatorios)
+
+        # Build period description
+        periodo_desc = ""
+        if relatorios:
+            primeiro = relatorios[0]
+            ultimo = relatorios[-1]
+            if primeiro.periodo_inicio and ultimo.periodo_fim:
+                periodo_desc = "{} a {}".format(
+                    primeiro.periodo_inicio.strftime("%d/%m/%y"),
+                    ultimo.periodo_fim.strftime("%d/%m/%y"))
+
+        sub_total = valor_mensal * qtd_periodos if qtd_periodos > 0 else valor_mensal
+        total_final = sub_total + total_km_extra_valor
+
+        rows = [
+            ("MENSAL", str(qtd_periodos) if qtd_periodos > 0 else "1", self._format_currency(valor_mensal), self._format_currency(sub_total)),
+            ("PERÍODO", periodo_desc, "", ""),
+            ("KM EXCEDENTE", self._format_km(total_km_exc), self._format_currency(valor_km_extra_unit), self._format_currency(total_km_extra_valor)),
+            ("SUB-TOTAL", "-", "-", self._format_currency(sub_total)),
+            ("AVARIAS", "-", "-", ""),
+            ("DESCONTO", "-", "-", ""),
+            ("TOTAL R$", "-", "-", self._format_currency(total_final)),
+        ]
+
+        y = self._draw_valores_table(c, y, rows)
+        return y
 
     def _draw_header(self, c, y):
         """Draw page header"""
