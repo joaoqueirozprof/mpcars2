@@ -1634,7 +1634,8 @@ def get_contrato_pdf(
     # Check contract type and generate appropriate PDF
     tipo_clean = str(contrato.tipo or "").strip("'\"").lower()
     if tipo_clean == "empresa":
-        pdf_buffer = PDFService.generate_contrato_empresa_pdf(db, contrato_id)
+        from app.services.pdf_contrato import PDFContratoService
+        pdf_buffer = PDFContratoService.generate_contrato_empresa_pdf(db, contrato_id)
     else:
         pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
 

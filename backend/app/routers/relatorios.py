@@ -166,7 +166,7 @@ def get_contrato_pdf(
         # Route to empresa PDF if contract type is empresa
         tipo_clean = str(contrato.tipo or "").strip("'\"").lower()
         if tipo_clean == "empresa":
-            pdf_buffer = PDFService.generate_contrato_empresa_pdf(db, contrato_id)
+            pdf_buffer = PDFContratoService.generate_contrato_empresa_pdf(db, contrato_id)
         else:
             pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
     except Exception as e:
