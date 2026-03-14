@@ -482,7 +482,7 @@ class PDFContratoService:
             ("DATA ENTRADA", ""),
             ("HORA SAÍDA", contrato.hora_saida or ""),
             ("HORA ENTRADA", ""),
-            ("KM SAÍDA", str(contrato.km_inicial)),
+            ("KM SAÍDA", str(contrato.km_inicial) if contrato.km_inicial is not None else ""),
             ("KM ENTRADA", ""),
             ("KM LIVRES", str(contrato.km_livres) if contrato.km_livres else ""),
             ("KM TOTAL", ""),
@@ -718,7 +718,7 @@ class PDFContratoService:
     def _draw_field_value(self, c, y, value, x):
         """Draw a field value with underline"""
         c.setFont(self.FONT_REGULAR, self.SIZE_VALUE)
-        c.drawString(x, y - 0.3 * cm, str(value))
+        c.drawString(x, y - 0.3 * cm, str(value) if value is not None else "")
 
         # Underline
         c.line(x - 0.1 * cm, y - 0.38 * cm, x + 3 * cm, y - 0.38 * cm)
