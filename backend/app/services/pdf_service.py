@@ -118,8 +118,11 @@ class PDFService:
     """Service for generating PDF reports."""
 
     @staticmethod
-    def generate_contrato_pdf(db: Session, contrato_id: int) -> BytesIO:
-        """Generate contract PDF matching the MPCARS official template with vehicle inspection diagram."""
+    def generate_contrato_pdf(db: Session, contrato_id: int, uso_id: int = None) -> BytesIO:
+        """Generate contract PDF matching the MPCARS official template with vehicle inspection diagram.
+        If uso_id is provided (empresa contracts), generates a per-vehicle contract with
+        period billing data instead of daily rates in the DISCRIMINACAO section.
+        """
         from reportlab.pdfgen import canvas as pdfcanvas
 
         contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
@@ -131,6 +134,19 @@ class PDFService:
         empresa = None
         if cliente and cliente.empresa_id:
             empresa = db.query(Empresa).filter(Empresa.id == cliente.empresa_id).first()
+
+        # Per-vehicle empresa data
+        uso = None
+        periodos = []
+        if uso_id:
+            uso = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id == uso_id).first()
+            if uso:
+                # Override vehicle with the one from uso
+                veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+                # Fetch all billing periods
+                periodos = db.query(RelatorioNF).filter(
+                    RelatorioNF.uso_id == uso_id
+                ).order_by(RelatorioNF.periodo_inicio).all()
 
         buffer = BytesIO()
         c = pdfcanvas.Canvas(buffer, pagesize=A4)
@@ -240,6 +256,25 @@ class PDFService:
         cnh_cat = cliente.categoria_cnh or "" if cliente else ""
         cnh_val = cliente.validade_cnh.strftime("%d/%m/%Y") if cliente and cliente.validade_cnh else ""
         rg = cliente.rg or "" if cliente else ""
+
+        # Merge empresa data into empty fields for empresa contracts
+        if empresa:
+            if not nome_cli:
+                nome_cli = empresa.nome or ""
+            if not cpf_cnpj:
+                cpf_cnpj = empresa.cnpj or ""
+            if not end_res and empresa.endereco:
+                end_res = empresa.endereco
+            if not cidade and empresa.cidade:
+                cidade = empresa.cidade
+            if not estado and empresa.estado:
+                estado = empresa.estado
+            if not cep_res and empresa.cep:
+                cep_res = empresa.cep
+            if not fones and empresa.telefone:
+                fones = empresa.telefone
+            if not email and empresa.email:
+                email = empresa.email
 
         # Left column fields
         y = draw_field_box(lx, y, "NOME DO CLIENTE:", nome_cli, lw, fh)
@@ -370,11 +405,20 @@ class PDFService:
         hora_saida = contrato.data_inicio.strftime("%H:%M") if contrato.data_inicio else ""
         data_entrada = contrato.data_fim.strftime("%d/%m/%Y") if contrato.data_fim else ""
         hora_entrada = contrato.data_fim.strftime("%H:%M") if contrato.data_fim else ""
-        km_saida = "{:,.0f}".format(contrato.km_inicial) if contrato.km_inicial else ""
-        km_entrada = "{:,.0f}".format(contrato.km_final) if contrato.km_final else ""
-        km_percorridos = ""
-        if contrato.km_inicial and contrato.km_final:
-            km_percorridos = "{:,.0f}".format(contrato.km_final - contrato.km_inicial)
+
+        # Use uso-specific KM data when available
+        if uso:
+            km_saida = "{:,.0f}".format(float(uso.km_inicial)) if uso.km_inicial else ""
+            km_entrada = "{:,.0f}".format(float(uso.km_final)) if uso.km_final else ""
+            km_percorridos = "{:,.0f}".format(float(uso.km_percorrido)) if uso.km_percorrido else ""
+            km_permitida = "{:,.0f}".format(float(uso.km_referencia)) if uso.km_referencia else ""
+        else:
+            km_saida = "{:,.0f}".format(contrato.km_inicial) if contrato.km_inicial else ""
+            km_entrada = "{:,.0f}".format(contrato.km_final) if contrato.km_final else ""
+            km_percorridos = ""
+            if contrato.km_inicial and contrato.km_final:
+                km_percorridos = "{:,.0f}".format(contrato.km_final - contrato.km_inicial)
+            km_permitida = ""
 
         # Quilometragem fields (2 columns)
         qh = 16
@@ -383,7 +427,7 @@ class PDFService:
             ("DATA SAIDA:", data_saida, "DATA ENTRADA:", data_entrada),
             ("HORA SAIDA:", hora_saida, "HORA ENTRADA:", hora_entrada),
             ("KM SAIDA:", km_saida, "KM ENTRADA:", km_entrada),
-            ("KM LIVRES/DIA:", "", "KM PERCORRIDOS:", km_percorridos),
+            ("KM PERMITIDA/MES:", km_permitida, "KM PERCORRIDOS:", km_percorridos),
         ]
         for f1l, f1v, f2l, f2v in fields_km:
             draw_field_box(rx, ry_sec, f1l, f1v, hw2, qh)
@@ -396,49 +440,133 @@ class PDFService:
         c.drawCentredString(rx + rw / 2, ry_sec - 12, "DISCRIMINACAO")
         ry_sec -= 16
 
-        # Table header
-        cols = [rw * 0.35, rw * 0.15, rw * 0.25, rw * 0.25]
-        headers = ["DISCRIMINACAO", "QUANT.", "PRECO UNIT.", "PRECO TOTAL"]
-        c.setFont("Helvetica-Bold", 5.5)
-        cx = rx
-        for i, hd in enumerate(headers):
-            c.rect(cx, ry_sec - 14, cols[i], 14)
-            c.drawCentredString(cx + cols[i] / 2, ry_sec - 10, hd)
-            cx += cols[i]
-        ry_sec -= 14
-
-        # Table rows
-        valor_diaria = "R$ {:,.2f}".format(float(contrato.valor_diaria)) if contrato.valor_diaria else ""
-        valor_total = "R$ {:,.2f}".format(float(contrato.valor_total)) if contrato.valor_total else ""
-        dias = ""
-        if contrato.data_inicio and contrato.data_fim:
-            delta = contrato.data_fim - contrato.data_inicio
-            dias_num = delta.days if delta.days >= 1 else 1
-            dias = str(dias_num)
-
-        rows = [
-            ("DIARIA", dias, valor_diaria, valor_total),
-            ("HORA EXTRA", "", "", ""),
-            ("KM EXCEDENTE", "", "", ""),
-            ("SUB-TOTAL", "", "", valor_total),
-            ("AVARIAS", "", "", ""),
-            ("DESCONTO", "", "", ""),
-        ]
-        c.setFont("Helvetica", 6)
-        for row_data in rows:
+        if uso and periodos:
+            # === EMPRESA PER-VEHICLE: show periods instead of daily rates ===
+            cols = [rw * 0.30, rw * 0.20, rw * 0.25, rw * 0.25]
+            headers = ["PERIODO", "VALOR MENSAL", "KM EXTRA", "TOTAL"]
+            c.setFont("Helvetica-Bold", 5.5)
             cx = rx
-            for i, val in enumerate(row_data):
+            for i, hd in enumerate(headers):
+                c.rect(cx, ry_sec - 14, cols[i], 14)
+                c.drawCentredString(cx + cols[i] / 2, ry_sec - 10, hd)
+                cx += cols[i]
+            ry_sec -= 14
+
+            valor_mensal = float(uso.valor_diaria_empresa or 0)
+            km_ref = float(uso.km_referencia or 0)
+            val_km_extra = float(uso.valor_km_extra or 0)
+
+            soma_total = 0.0
+            soma_km_exc = 0.0
+            for p in periodos:
+                p_inicio = p.periodo_inicio.strftime("%d/%m") if p.periodo_inicio else ""
+                p_fim = p.periodo_fim.strftime("%d/%m/%y") if p.periodo_fim else ""
+                periodo_str = "{} a {}".format(p_inicio, p_fim)
+                km_exc = float(p.km_excedente or 0)
+                val_extra = float(p.valor_total_extra or 0)
+                total_periodo = valor_mensal + val_extra
+                soma_total += total_periodo
+                soma_km_exc += km_exc
+
+                # Only show KM extra column if there's exceedance
+                km_extra_str = ""
+                if km_exc > 0:
+                    km_extra_str = "{:,.0f}km = R$ {:,.2f}".format(km_exc, val_extra)
+
+                row = [
+                    periodo_str,
+                    "R$ {:,.2f}".format(valor_mensal),
+                    km_extra_str,
+                    "R$ {:,.2f}".format(total_periodo),
+                ]
+                c.setFont("Helvetica", 5.5)
+                cx = rx
+                for i, val in enumerate(row):
+                    c.rect(cx, ry_sec - 14, cols[i], 14)
+                    c.drawCentredString(cx + cols[i] / 2, ry_sec - 10, str(val))
+                    cx += cols[i]
+                ry_sec -= 14
+
+            # SUB-TOTAL row
+            c.setFont("Helvetica-Bold", 6)
+            cx = rx
+            sub_row = ["SUB-TOTAL", "", "", "R$ {:,.2f}".format(soma_total)]
+            for i, val in enumerate(sub_row):
                 c.rect(cx, ry_sec - 14, cols[i], 14)
                 c.drawCentredString(cx + cols[i] / 2, ry_sec - 10, str(val))
                 cx += cols[i]
             ry_sec -= 14
 
-        # TOTAL R$
-        c.setFont("Helvetica-Bold", 7)
-        c.rect(rx, ry_sec - 16, rw, 16)
-        c.drawString(rx + rw * 0.5, ry_sec - 12, "TOTAL R$")
-        c.drawString(rx + rw * 0.75, ry_sec - 12, valor_total)
-        ry_sec -= 20
+            # KM EXCEDENTE TOTAL row (only if there's exceedance)
+            if soma_km_exc > 0:
+                cx = rx
+                km_row = ["KM EXCEDENTE TOTAL", "{:,.0f} km".format(soma_km_exc), "R$ {:,.2f}/km".format(val_km_extra), "R$ {:,.2f}".format(soma_km_exc * val_km_extra)]
+                c.setFont("Helvetica", 5.5)
+                for i, val in enumerate(km_row):
+                    c.rect(cx, ry_sec - 14, cols[i], 14)
+                    c.drawCentredString(cx + cols[i] / 2, ry_sec - 10, str(val))
+                    cx += cols[i]
+                ry_sec -= 14
+
+            # DESCONTO row
+            cx = rx
+            desc_row = ["DESCONTO", "", "", ""]
+            c.setFont("Helvetica", 5.5)
+            for i, val in enumerate(desc_row):
+                c.rect(cx, ry_sec - 14, cols[i], 14)
+                c.drawCentredString(cx + cols[i] / 2, ry_sec - 10, str(val))
+                cx += cols[i]
+            ry_sec -= 14
+
+            # TOTAL R$
+            c.setFont("Helvetica-Bold", 7)
+            c.rect(rx, ry_sec - 16, rw, 16)
+            c.drawString(rx + rw * 0.5, ry_sec - 12, "TOTAL R$")
+            c.drawString(rx + rw * 0.75, ry_sec - 12, "R$ {:,.2f}".format(soma_total))
+            ry_sec -= 20
+        else:
+            # === STANDARD: daily rate layout ===
+            cols = [rw * 0.35, rw * 0.15, rw * 0.25, rw * 0.25]
+            headers = ["DISCRIMINACAO", "QUANT.", "PRECO UNIT.", "PRECO TOTAL"]
+            c.setFont("Helvetica-Bold", 5.5)
+            cx = rx
+            for i, hd in enumerate(headers):
+                c.rect(cx, ry_sec - 14, cols[i], 14)
+                c.drawCentredString(cx + cols[i] / 2, ry_sec - 10, hd)
+                cx += cols[i]
+            ry_sec -= 14
+
+            valor_diaria = "R$ {:,.2f}".format(float(contrato.valor_diaria)) if contrato.valor_diaria else ""
+            valor_total = "R$ {:,.2f}".format(float(contrato.valor_total)) if contrato.valor_total else ""
+            dias = ""
+            if contrato.data_inicio and contrato.data_fim:
+                delta = contrato.data_fim - contrato.data_inicio
+                dias_num = delta.days if delta.days >= 1 else 1
+                dias = str(dias_num)
+
+            rows = [
+                ("DIARIA", dias, valor_diaria, valor_total),
+                ("HORA EXTRA", "", "", ""),
+                ("KM EXCEDENTE", "", "", ""),
+                ("SUB-TOTAL", "", "", valor_total),
+                ("AVARIAS", "", "", ""),
+                ("DESCONTO", "", "", ""),
+            ]
+            c.setFont("Helvetica", 6)
+            for row_data in rows:
+                cx = rx
+                for i, val in enumerate(row_data):
+                    c.rect(cx, ry_sec - 14, cols[i], 14)
+                    c.drawCentredString(cx + cols[i] / 2, ry_sec - 10, str(val))
+                    cx += cols[i]
+                ry_sec -= 14
+
+            # TOTAL R$
+            c.setFont("Helvetica-Bold", 7)
+            c.rect(rx, ry_sec - 16, rw, 16)
+            c.drawString(rx + rw * 0.5, ry_sec - 12, "TOTAL R$")
+            c.drawString(rx + rw * 0.75, ry_sec - 12, valor_total)
+            ry_sec -= 20
 
         # --- CARTOES DE CREDITO ---
         c.setFont("Helvetica-Bold", 9)

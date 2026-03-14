@@ -147,10 +147,12 @@ def _parse_optional_export_dates(
 @router.get("/contrato/{contrato_id}/pdf")
 def get_contrato_pdf(
     contrato_id: int,
+    uso_id: int = Query(None, description="ID do uso de veiculo (para contrato empresa por veiculo)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate contract PDF report (uses original layout for ALL contract types)."""
+    """Generate contract PDF report. If uso_id is provided, generates per-vehicle contract
+    with period billing data instead of daily rates."""
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contrato nao encontrado")
@@ -158,13 +160,21 @@ def get_contrato_pdf(
     if not contrato.cliente_id or not contrato.veiculo_id:
         raise HTTPException(status_code=422, detail="Contrato com dados incompletos (cliente ou veiculo ausente)")
 
-    veiculo = db.query(Veiculo).filter(Veiculo.id == contrato.veiculo_id).first()
-    placa = veiculo.placa if veiculo else "000"
+    # Get placa for filename
+    if uso_id:
+        uso = db.query(UsoVeiculoEmpresa).filter(UsoVeiculoEmpresa.id == uso_id).first()
+        if uso:
+            v = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+            placa = v.placa if v else "000"
+        else:
+            placa = "000"
+    else:
+        veiculo = db.query(Veiculo).filter(Veiculo.id == contrato.veiculo_id).first()
+        placa = veiculo.placa if veiculo else "000"
     data_str = datetime.now().strftime("%Y%m%d")
 
     try:
-        # Always use original contract layout
-        pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
+        pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id, uso_id=uso_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Erro ao gerar PDF do contrato: {}".format(str(e)))
 
