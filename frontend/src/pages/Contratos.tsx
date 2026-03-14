@@ -848,17 +848,44 @@ const Contratos: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {contratos.data.map((contrato) => {
+                  {(() => {
+                    // Group empresa contracts: show only one row per empresa
+                    const seenEmpresas = new Set<string>()
+                    const empresaGroups: Record<string, typeof contratos.data> = {}
+                    // Build groups first
+                    contratos.data.forEach((c) => {
+                      if (c.tipo === 'empresa' && c.cliente?.nome) {
+                        const key = c.cliente.nome
+                        if (!empresaGroups[key]) empresaGroups[key] = []
+                        empresaGroups[key].push(c)
+                      }
+                    })
+                    return contratos.data.map((contrato) => {
+                      // Skip duplicate empresa rows (show only the first one)
+                      if (contrato.tipo === 'empresa' && contrato.cliente?.nome) {
+                        const key = contrato.cliente.nome
+                        if (seenEmpresas.has(key)) return null
+                        seenEmpresas.add(key)
+                      }
+                      // For empresa: aggregate values from all contracts of that empresa
+                      const isEmpresa = contrato.tipo === 'empresa' && contrato.cliente?.nome
+                      const empresaContracts = isEmpresa ? (empresaGroups[contrato.cliente!.nome] || [contrato]) : [contrato]
+                      const totalValor = empresaContracts.reduce((sum, c) => sum + (c.valor_total || 0), 0)
+                      const totalRecebido = empresaContracts.reduce((sum, c) => sum + (c.valor_recebido || 0), 0)
+                      const numVeiculos = empresaContracts.length
+
                     const status = displayStatus(contrato)
                     return (
                       <tr key={contrato.id} className="table-row hover:bg-slate-50">
-                        <td className="table-cell font-semibold text-slate-900">{contrato.numero}</td>
+                        <td className="table-cell font-semibold text-slate-900">
+                          {isEmpresa ? empresaContracts.map(c => c.numero).join(', ') : contrato.numero}
+                        </td>
                         <td className="table-cell text-slate-700">{contrato.cliente?.nome || '-'}</td>
                         <td className="table-cell text-slate-700">
-                          {contrato.tipo === 'empresa' ? (
+                          {isEmpresa ? (
                             <div>
                               <span className="inline-block px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 mb-1">Empresa</span>
-                              <div className="text-xs text-slate-500">{contrato.veiculo ? `${contrato.veiculo.marca} ${contrato.veiculo.modelo}` : '-'}</div>
+                              <div className="text-xs text-slate-500">{numVeiculos} veículo{numVeiculos > 1 ? 's' : ''} vinculado{numVeiculos > 1 ? 's' : ''}</div>
                             </div>
                           ) : (
                             <>
@@ -871,9 +898,9 @@ const Contratos: React.FC = () => {
                           {formatDate(contrato.data_inicio)} a {formatDate(contrato.data_fim)}
                         </td>
                         <td className="table-cell text-right font-semibold text-slate-900">
-                          <div>{formatCurrency(contrato.valor_total)}</div>
+                          <div>{formatCurrency(isEmpresa ? totalValor : contrato.valor_total)}</div>
                           <div className="mt-1 text-xs font-medium text-slate-500">
-                            Recebido: {formatCurrency(contrato.valor_recebido || 0)}
+                            Recebido: {formatCurrency(isEmpresa ? totalRecebido : (contrato.valor_recebido || 0))}
                           </div>
                         </td>
                         <td className="table-cell text-center">
@@ -886,12 +913,12 @@ const Contratos: React.FC = () => {
                         </td>
                         <td className="table-cell text-center">
                           <div className="flex items-center justify-center gap-1">
-                            {contrato.tipo === 'empresa' && (
+                            {isEmpresa && (
                               <button onClick={() => setEmpresaDetalhes(contrato)} className="p-1.5 hover:text-blue-600" title="Detalhes empresa">
                                 <FileText size={16} />
                               </button>
                             )}
-                            {contrato.tipo === 'empresa' ? (
+                            {isEmpresa ? (
                               <div className="relative">
                                 <button
                                   onClick={() => loadPdfVeiculos(contrato.id)}
@@ -912,13 +939,13 @@ const Contratos: React.FC = () => {
                                         <Car size={14} className="text-green-500 shrink-0" />
                                         <span className="text-xs text-slate-700 flex-1 truncate">{v.marca} {v.modelo} - {v.placa}</span>
                                         <button
-                                          onClick={() => handlePdf(contrato.id, contrato.numero, false, v.uso_id)}
+                                          onClick={() => handlePdf(String(v.contrato_id || contrato.id), contrato.numero, false, v.uso_id)}
                                           className="p-1 hover:text-green-600" title="Baixar Contrato"
                                         >
                                           <Download size={14} />
                                         </button>
                                         <button
-                                          onClick={() => handlePdf(contrato.id, contrato.numero, true, v.uso_id)}
+                                          onClick={() => handlePdf(String(v.contrato_id || contrato.id), contrato.numero, true, v.uso_id)}
                                           className="p-1 hover:text-purple-600" title="Imprimir Contrato"
                                         >
                                           <Printer size={14} />
@@ -941,12 +968,13 @@ const Contratos: React.FC = () => {
                             )}
                             {contrato.status === 'ativo' && <button onClick={() => openCloseout(contrato)} className="p-1.5 hover:text-emerald-600"><CheckCircle size={16} /></button>}
                             <button onClick={() => openEdit(contrato)} className="p-1.5 hover:text-blue-600"><Edit size={16} /></button>
-                            <button onClick={() => setDeleteConfirm({ isOpen: true, id: contrato.id })} className="p-1.5 hover:text-red-600"><Trash2 size={16} /></button>
+                            {isEmpresa ? null : <button onClick={() => setDeleteConfirm({ isOpen: true, id: contrato.id })} className="p-1.5 hover:text-red-600"><Trash2 size={16} /></button>}
                           </div>
                         </td>
                       </tr>
                     )
-                  })}
+                  })
+                  })()}
                 </tbody>
               </table>
               <div className="flex items-center justify-between pt-4 border-t border-slate-200">

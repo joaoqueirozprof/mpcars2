@@ -25,7 +25,7 @@ from datetime import datetime, date
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_page_access
 from app.models.user import User
-from app.models import Contrato, RelatorioNF, UsoVeiculoEmpresa, Empresa, Veiculo
+from app.models import Cliente, Contrato, RelatorioNF, UsoVeiculoEmpresa, Empresa, Veiculo
 from app.services.pdf_service import PDFService
 from app.services.pdf_contrato import PDFContratoService
 from app.services.pdf_financeiro import PDFFinanceiroService
@@ -192,23 +192,33 @@ def get_contrato_veiculos(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List vehicles linked to an empresa contract (for NF report dropdown)."""
+    """List ALL vehicles linked to the empresa (across all contracts of that empresa)."""
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(status_code=404, detail="Contrato nao encontrado")
 
-    usos = db.query(UsoVeiculoEmpresa).filter(
-        UsoVeiculoEmpresa.contrato_id == contrato_id
-    ).all()
+    # Get the empresa from the contract's client
+    cliente = db.query(Cliente).filter(Cliente.id == contrato.cliente_id).first()
+    empresa_id = cliente.empresa_id if cliente else None
+
+    if empresa_id:
+        # Get ALL usos for this empresa (across all contracts)
+        usos = db.query(UsoVeiculoEmpresa).filter(
+            UsoVeiculoEmpresa.empresa_id == empresa_id
+        ).all()
+    else:
+        usos = db.query(UsoVeiculoEmpresa).filter(
+            UsoVeiculoEmpresa.contrato_id == contrato_id
+        ).all()
 
     result = []
     for uso in usos:
         veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
-        # Count periods
         num_periodos = db.query(RelatorioNF).filter(RelatorioNF.uso_id == uso.id).count()
         result.append({
             "uso_id": uso.id,
             "veiculo_id": uso.veiculo_id,
+            "contrato_id": uso.contrato_id,
             "placa": veiculo.placa if veiculo else "N/A",
             "marca": veiculo.marca if veiculo else "",
             "modelo": veiculo.modelo if veiculo else "",
