@@ -8,6 +8,7 @@ matching the physical MPCARS contract form exactly.
 from io import BytesIO
 from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -88,10 +89,49 @@ class PDFContratoService:
     # ==================== EMPRESA CONTRACT ====================
 
     @staticmethod
+    def _merge_cliente_empresa(cliente, empresa):
+        """
+        Create a display-only namespace that merges empresa data into
+        empty client fields so Page 1 shows complete information.
+        """
+        ns = SimpleNamespace()
+        # Copy all client attributes
+        for attr in [
+            'nome', 'cpf', 'rg', 'telefone', 'email',
+            'endereco_residencial', 'numero_residencial', 'complemento_residencial',
+            'cidade_residencial', 'estado_residencial', 'cep_residencial',
+            'numero_cnh', 'validade_cnh', 'categoria_cnh',
+            'hotel_apartamento',
+        ]:
+            setattr(ns, attr, getattr(cliente, attr, None) if cliente else None)
+
+        # Fill empty fields with empresa data
+        if empresa:
+            if not ns.nome:
+                ns.nome = empresa.razao_social or empresa.nome
+            if not ns.cpf:
+                ns.cpf = empresa.cnpj
+            if not ns.endereco_residencial:
+                ns.endereco_residencial = empresa.endereco
+            if not ns.cidade_residencial:
+                ns.cidade_residencial = empresa.cidade
+            if not ns.estado_residencial:
+                ns.estado_residencial = empresa.estado
+            if not ns.cep_residencial:
+                ns.cep_residencial = empresa.cep
+            if not ns.telefone:
+                ns.telefone = empresa.telefone
+            if not ns.email:
+                ns.email = empresa.email
+
+        return ns
+
+    @staticmethod
     def generate_contrato_empresa_pdf(db, contrato_id):
         """
         Generate empresa contract PDF.
-        Page 1: EXACT same layout as original PF contract (all sections).
+        Page 1: EXACT same layout as original PF contract (all sections)
+                with empresa data merged into empty client fields.
         Page 1+: Extra page with empresa details + periods for each vehicle.
         Last page: Contract clauses.
         """
@@ -117,8 +157,11 @@ class PDFContratoService:
         c = canvas.Canvas(buffer, pagesize=A4)
         service = PDFContratoService()
 
-        # --- PAGE 1: Original contract layout (same as PF) ---
-        service._draw_page1(c, contrato, cliente, veiculo)
+        # Merge empresa data into empty client fields for display
+        display_cliente = PDFContratoService._merge_cliente_empresa(cliente, empresa)
+
+        # --- PAGE 1: Original contract layout with merged empresa data ---
+        service._draw_page1(c, contrato, display_cliente, veiculo)
         c.showPage()
 
         # --- PAGE 2+: Empresa details for each vehicle ---
@@ -377,12 +420,29 @@ class PDFContratoService:
         """Draw LOCATÁRIO block"""
         y = self._draw_block_title(c, y, "LOCATÁRIO - RENTER")
 
+        # Build full address
+        endereco = getattr(cliente, 'endereco_residencial', None) or ""
+        numero = getattr(cliente, 'numero_residencial', None) or ""
+        complemento = getattr(cliente, 'complemento_residencial', None) or ""
+        endereco_full = endereco
+        if numero:
+            endereco_full = "{}, {}".format(endereco, numero) if endereco else numero
+        if complemento:
+            endereco_full = "{} - {}".format(endereco_full, complemento) if endereco_full else complemento
+
+        # Build city/state
+        cidade = getattr(cliente, 'cidade_residencial', None) or ""
+        estado = getattr(cliente, 'estado_residencial', None) or ""
+        cidade_full = cidade
+        if estado:
+            cidade_full = "{}/{}".format(cidade, estado) if cidade else estado
+
         field_data = [
-            ("NOME DO CLIENTE", cliente.nome),
-            ("ENDEREÇO", cliente.endereco_residencial),
-            ("CIDADE", cliente.cidade_residencial),
-            ("TELEFONE", cliente.telefone),
-            ("E-MAIL", cliente.email),
+            ("NOME DO CLIENTE", getattr(cliente, 'nome', None) or ""),
+            ("ENDEREÇO", endereco_full),
+            ("CIDADE", cidade_full),
+            ("TELEFONE", getattr(cliente, 'telefone', None) or ""),
+            ("E-MAIL", getattr(cliente, 'email', None) or ""),
         ]
 
         y = self._draw_two_column_fields(c, y, field_data, self.COL1_X, self.COL_WIDTH)
@@ -394,11 +454,11 @@ class PDFContratoService:
         y = self._draw_block_title(c, y, "IDENTIFICAÇÃO")
 
         field_data = [
-            ("CPF/CNPJ", cliente.cpf),
-            ("CNH", cliente.numero_cnh),
-            ("CATEGORIA", cliente.categoria_cnh),
-            ("VALIDADE", self._format_date(cliente.validade_cnh)),
-            ("RG", cliente.rg),
+            ("CPF/CNPJ", getattr(cliente, 'cpf', None) or ""),
+            ("CNH", getattr(cliente, 'numero_cnh', None) or ""),
+            ("CATEGORIA", getattr(cliente, 'categoria_cnh', None) or ""),
+            ("VALIDADE", self._format_date(getattr(cliente, 'validade_cnh', None))),
+            ("RG", getattr(cliente, 'rg', None) or ""),
         ]
 
         y = self._draw_two_column_fields(c, y, field_data, self.COL1_X, self.COL_WIDTH)
@@ -409,14 +469,17 @@ class PDFContratoService:
         """Draw CARRO block"""
         y = self._draw_block_title(c, y, "CARRO / CAR")
 
-        marca_modelo = f"{veiculo.marca} {veiculo.modelo}"
+        marca = getattr(veiculo, 'marca', '') or ''
+        modelo = getattr(veiculo, 'modelo', '') or ''
+        marca_modelo = "{} {}".format(marca, modelo).strip()
+        placa = getattr(veiculo, 'placa', '') or ''
 
         # Two fields on same line
         self._draw_field_label(c, y, "MARCA/TIPO", self.COL1_X)
         self._draw_field_value(c, y, marca_modelo, self.COL1_X + 3.5 * cm)
 
         self._draw_field_label(c, y, "PLACA", self.COL2_X)
-        self._draw_field_value(c, y, veiculo.placa, self.COL2_X + 1.5 * cm)
+        self._draw_field_value(c, y, placa, self.COL2_X + 1.5 * cm)
 
         y -= 0.6 * cm
 
