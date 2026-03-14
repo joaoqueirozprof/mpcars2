@@ -1631,7 +1631,12 @@ def get_contrato_pdf(
             detail="Contrato nao encontrado",
         )
 
-    pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
+    # Check contract type and generate appropriate PDF
+    if contrato.tipo == "empresa":
+        pdf_buffer = PDFService.generate_contrato_empresa_pdf(db, contrato_id)
+    else:
+        pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
+
     pdf_buffer.seek(0)
     return StreamingResponse(
         pdf_buffer,

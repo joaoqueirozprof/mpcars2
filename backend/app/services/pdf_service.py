@@ -16,7 +16,7 @@ from app.models import (
     Contrato, Cliente, Veiculo, DespesaContrato, Quilometragem,
     CheckinCheckout, Empresa, DespesaVeiculo, DespesaLoja,
     DespesaOperacional, Seguro, IpvaRegistro, Multa, Manutencao,
-    Reserva, Configuracao,
+    Reserva, Configuracao, UsoVeiculoEmpresa, RelatorioNF,
 )
 
 
@@ -1167,6 +1167,213 @@ class PDFService:
             story.append(Paragraph("Relatorio NF nao encontrado.", styles["Normal"]))
 
         _add_footer(story, styles)
+        doc.build(story)
+        buffer.seek(0)
+        return buffer
+
+    @staticmethod
+    def generate_contrato_empresa_pdf(db: Session, contrato_id: int) -> BytesIO:
+        """Generate contract PDF for empresa (company) contracts with detailed vehicle and period breakdown."""
+        contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+        if not contrato:
+            raise ValueError("Contrato nao encontrado")
+
+        cliente = db.query(Cliente).filter(Cliente.id == contrato.cliente_id).first()
+        empresa_id = cliente.empresa_id if cliente else None
+        empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first() if empresa_id else None
+
+        # Get all UsoVeiculoEmpresa linked to this contract
+        usos = db.query(UsoVeiculoEmpresa).filter(
+            UsoVeiculoEmpresa.contrato_id == contrato_id
+        ).all()
+
+        # If no usos found via contrato_id, try via empresa_id + veiculo_id
+        if not usos and empresa_id and contrato.veiculo_id:
+            usos = db.query(UsoVeiculoEmpresa).filter(
+                UsoVeiculoEmpresa.empresa_id == empresa_id,
+                UsoVeiculoEmpresa.veiculo_id == contrato.veiculo_id,
+            ).all()
+
+        # Get styles and create document
+        styles = getSampleStyleSheet()
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=0.5*inch, bottomMargin=0.5*inch,
+                                leftMargin=0.5*inch, rightMargin=0.5*inch)
+        story = []
+
+        # Get empresa info for header branding
+        empresa_info = _get_empresa_info(db)
+
+        # === PAGE 1: HEADER ===
+        _add_header(story, styles, "CONTRATO CORPORATIVO",
+                    subtitle="Relatório de Veículos e Períodos de Faturamento",
+                    empresa_info=empresa_info)
+
+        # === EMPRESA INFO SECTION ===
+        if empresa:
+            empresa_data = [
+                ["Empresa:", empresa.nome or ""],
+                ["CNPJ:", empresa.cnpj or ""],
+                ["Razão Social:", empresa.razao_social or ""],
+                ["Contato:", empresa.email or ""],
+            ]
+            story.append(_info_table(empresa_data))
+            story.append(Spacer(1, 12))
+
+        # === CONTRACT INFO ===
+        contract_data = [
+            ["Contrato Nº:", str(contrato.numero or "")],
+            ["Data de Início:", contrato.data_inicio.strftime("%d/%m/%Y") if contrato.data_inicio else ""],
+            ["Status:", contrato.status or ""],
+        ]
+        story.append(_info_table(contract_data))
+        story.append(Spacer(1, 16))
+
+        # === SUMMARY CARDS ===
+        title_style = ParagraphStyle("SummaryTitle", parent=styles["Heading2"], fontSize=12, textColor=DARK,
+                                     spaceAfter=6, fontName="Helvetica-Bold")
+        story.append(Paragraph("RESUMO GERAL", title_style))
+
+        # Calculate totals
+        total_veiculos = len(usos)
+        total_mensal = 0.0
+        total_km_extra_geral = 0.0
+
+        for uso in usos:
+            relatorios = db.query(RelatorioNF).filter(
+                RelatorioNF.uso_id == uso.id
+            ).all()
+            total_mensal += float(uso.valor_diaria_empresa or 0)
+            total_km_extra_geral += sum(float(rel.valor_total_extra or 0) for rel in relatorios)
+
+        total_geral = total_mensal + total_km_extra_geral
+
+        # Summary table with 4 metrics
+        summary_data = [
+            ["TOTAL VEÍCULOS", str(total_veiculos)],
+            ["VALOR MENSAL TOTAL", "R$ {:,.2f}".format(total_mensal)],
+            ["TOTAL KM EXTRA", "R$ {:,.2f}".format(total_km_extra_geral)],
+            ["VALOR TOTAL GERAL", "R$ {:,.2f}".format(total_geral)],
+        ]
+        summary_table = Table(summary_data, colWidths=[2.5*inch, 2.5*inch])
+        summary_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, -1), HEADER_BG),
+            ("BACKGROUND", (1, 0), (1, -1), LIGHT_BG),
+            ("TEXTCOLOR", (0, 0), (0, -1), WHITE),
+            ("TEXTCOLOR", (1, 0), (1, -1), DARK),
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+            ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 11),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 12),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+            ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#e5e7eb")),
+        ]))
+        story.append(summary_table)
+        story.append(Spacer(1, 20))
+
+        # === VEHICLE SECTIONS ===
+        vehicle_title_style = ParagraphStyle("VehicleTitle", parent=styles["Heading3"], fontSize=11, textColor=DARK,
+                                            spaceAfter=8, fontName="Helvetica-Bold")
+
+        for idx, uso in enumerate(usos, 1):
+            veiculo = db.query(Veiculo).filter(Veiculo.id == uso.veiculo_id).first()
+
+            # Vehicle card header
+            placa = veiculo.placa if veiculo else "N/A"
+            marca_modelo = "{} {}".format(veiculo.marca or "", veiculo.modelo or "").strip()
+            story.append(Paragraph("VEÍCULO {} - {} ({})".format(idx, placa, marca_modelo), vehicle_title_style))
+
+            # Vehicle info
+            veiculo_data = [
+                ["Placa:", placa],
+                ["Marca/Modelo:", marca_modelo],
+                ["KM Referência (mensal):", "{:,.0f} km".format(float(uso.km_referencia or 0))],
+                ["Valor KM Extra:", "R$ {:.2f}".format(float(uso.valor_km_extra or 0))],
+                ["Valor Mensal:", "R$ {:,.2f}".format(float(uso.valor_diaria_empresa or 0))],
+            ]
+            story.append(_info_table(veiculo_data))
+            story.append(Spacer(1, 8))
+
+            # Get all periods for this vehicle
+            relatorios = db.query(RelatorioNF).filter(
+                RelatorioNF.uso_id == uso.id
+            ).order_by(RelatorioNF.periodo_inicio.desc()).all()
+
+            if relatorios:
+                # Periods table header
+                periodo_style = ParagraphStyle("PeriodoStyle", parent=styles["Normal"], fontSize=9, textColor=DARK)
+                periodo_header = ["Período", "KM Percorrida", "KM Referência", "KM Excedente",
+                                 "Valor KM Extra", "Valor Mensal", "Total Período"]
+
+                periodo_data = [periodo_header]
+                periodo_totals = {
+                    "km_perc": 0.0,
+                    "km_ref": 0.0,
+                    "km_exc": 0.0,
+                    "valor_extra": 0.0,
+                    "valor_mensal": 0.0,
+                    "valor_total": 0.0,
+                }
+
+                for rel in relatorios:
+                    km_percorrida = float(rel.km_percorrida or 0)
+                    km_excedente = float(rel.km_excedente or 0)
+                    valor_km_extra = float(uso.valor_km_extra or 0)
+                    valor_extra_periodo = km_excedente * valor_km_extra
+                    valor_mensal = float(uso.valor_diaria_empresa or 0)
+                    valor_total_periodo = valor_mensal + valor_extra_periodo
+
+                    periodo_data.append([
+                        "{} a {}".format(
+                            rel.periodo_inicio.strftime("%d/%m/%Y") if rel.periodo_inicio else "",
+                            rel.periodo_fim.strftime("%d/%m/%Y") if rel.periodo_fim else ""
+                        ),
+                        "{:,.0f}".format(km_percorrida),
+                        "{:,.0f}".format(float(uso.km_referencia or 0)),
+                        "{:,.0f}".format(km_excedente),
+                        "R$ {:,.2f}".format(valor_extra_periodo),
+                        "R$ {:,.2f}".format(valor_mensal),
+                        "R$ {:,.2f}".format(valor_total_periodo),
+                    ])
+
+                    # Accumulate totals
+                    periodo_totals["km_perc"] += km_percorrida
+                    periodo_totals["km_ref"] += float(uso.km_referencia or 0)
+                    periodo_totals["km_exc"] += km_excedente
+                    periodo_totals["valor_extra"] += valor_extra_periodo
+                    periodo_totals["valor_mensal"] += valor_mensal
+                    periodo_totals["valor_total"] += valor_total_periodo
+
+                # Add totals row
+                periodo_data.append([
+                    "TOTAL",
+                    "{:,.0f}".format(periodo_totals["km_perc"]),
+                    "{:,.0f}".format(periodo_totals["km_ref"]),
+                    "{:,.0f}".format(periodo_totals["km_exc"]),
+                    "R$ {:,.2f}".format(periodo_totals["valor_extra"]),
+                    "R$ {:,.2f}".format(periodo_totals["valor_mensal"]),
+                    "R$ {:,.2f}".format(periodo_totals["valor_total"]),
+                ])
+
+                # Create periods table
+                periodo_table = _styled_table(periodo_data, col_widths=[1.1*inch, 1*inch, 1*inch, 0.95*inch,
+                                                                         1.1*inch, 1.1*inch, 1.1*inch], has_header=True)
+                story.append(periodo_table)
+            else:
+                story.append(Paragraph("Nenhum período registrado para este veículo.", styles["Normal"]))
+
+            story.append(Spacer(1, 16))
+
+            # Page break after each vehicle (except the last)
+            if idx < len(usos):
+                story.append(PageBreak())
+
+        # === FOOTER ===
+        _add_footer(story, styles)
+
+        # Build PDF
         doc.build(story)
         buffer.seek(0)
         return buffer
