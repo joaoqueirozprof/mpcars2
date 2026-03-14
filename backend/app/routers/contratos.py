@@ -1003,7 +1003,7 @@ def get_contrato_empresa_detalhes(
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(404, "Contrato nao encontrado")
-    if contrato.tipo != "empresa":
+    if str(contrato.tipo or "").strip("'\"").lower() != "empresa":
         raise HTTPException(400, "Este contrato nao e do tipo empresa")
 
     cliente = contrato.cliente
@@ -1122,7 +1122,7 @@ def add_empresa_periodo(
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(404, "Contrato nao encontrado")
-    if contrato.tipo != "empresa":
+    if str(contrato.tipo or "").strip("'\"").lower() != "empresa":
         raise HTTPException(400, "Este contrato nao e do tipo empresa")
 
     uso = db.query(UsoVeiculoEmpresa).filter(
@@ -1632,7 +1632,8 @@ def get_contrato_pdf(
         )
 
     # Check contract type and generate appropriate PDF
-    if contrato.tipo == "empresa":
+    tipo_clean = str(contrato.tipo or "").strip("'\"").lower()
+    if tipo_clean == "empresa":
         pdf_buffer = PDFService.generate_contrato_empresa_pdf(db, contrato_id)
     else:
         pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)

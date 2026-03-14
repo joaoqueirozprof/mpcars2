@@ -163,7 +163,12 @@ def get_contrato_pdf(
     data_str = datetime.now().strftime("%Y%m%d")
 
     try:
-        pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
+        # Route to empresa PDF if contract type is empresa
+        tipo_clean = str(contrato.tipo or "").strip("'\"").lower()
+        if tipo_clean == "empresa":
+            pdf_buffer = PDFService.generate_contrato_empresa_pdf(db, contrato_id)
+        else:
+            pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Erro ao gerar PDF do contrato: {}".format(str(e)))
 
