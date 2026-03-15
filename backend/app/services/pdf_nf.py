@@ -29,7 +29,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
-from app.models import UsoVeiculoEmpresa, Empresa, Veiculo, DespesaNF
+from app.models import UsoVeiculoEmpresa, Empresa, Veiculo, DespesaNF, RelatorioNF
 
 
 class PDFNFService:
@@ -242,11 +242,15 @@ class PDFNFService:
         else:
             km_status = f'<font color="#27AE60"><b>DENTRO DO LIMITE</b></font>'
 
+        # Get NF number if exists
+        relatorio = db.query(RelatorioNF).filter(RelatorioNF.uso_id == uso_id).order_by(RelatorioNF.id.desc()).first()
+        nf_numero = relatorio.id if relatorio else "N/A"
+
         km_data = [
-            [Paragraph("<b>Período:</b>", styles['normal_nf']),
-             Paragraph(f"{PDFNFService._format_date(uso.data_inicio)} a {PDFNFService._format_date(uso.data_fim)}", styles['normal_nf']),
-             Paragraph("<b>Dias:</b>", styles['normal_nf']),
-             Paragraph(str(dias), styles['normal_nf'])],
+            [Paragraph("<b>Período Utilizado/Faturado:</b>", styles['normal_nf']),
+             Paragraph(f"{PDFNFService._format_date(uso.data_inicio)} até {PDFNFService._format_date(uso.data_fim)} – NF {nf_numero} – Valor {PDFNFService._format_currency(total_geral)}", styles['normal_nf']),
+             Paragraph("", styles['normal_nf']),
+             Paragraph("", styles['normal_nf'])],
             [Paragraph("<b>KM Percorrido:</b>", styles['bold_nf']),
              Paragraph(f"<b>{km_real:,.1f} km</b>", styles['normal_nf']),
              Paragraph("<b>KM Permitido:</b>", styles['normal_nf']),

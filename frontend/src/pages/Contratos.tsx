@@ -254,6 +254,23 @@ const Contratos: React.FC = () => {
     loading: boolean;
   }>({ isOpen: false, contrato: null, empresaUsos: [], loading: false })
   
+  // Modal para detalhes do contrato (3 abas)
+  const [contractDetailsModal, setContractDetailsModal] = useState<{
+    isOpen: boolean;
+    contrato: Contrato | null;
+    veiculoUso: any | null;
+    activeTab: 'geral' | 'veiculo' | 'nf';
+  }>({ isOpen: false, contrato: null, veiculoUso: null, activeTab: 'geral' })
+
+  const [nfFormData, setNfFormData] = useState({
+    periodo_inicio: '',
+    periodo_fim: '',
+    km_referencia: 0,
+    valor_diaria: 0,
+    km_percorrido: 0,
+    valor_km_extra: 0,
+  })
+
   // Modal para documentos da frota
   const [fleetDocumentsModal, setFleetDocumentsModal] = useState<{
     isOpen: boolean;
@@ -1189,51 +1206,317 @@ const Contratos: React.FC = () => {
         </div>
       )}
 
-      {/* Modal para selecionar veículo ao gerar PDF */}
+      {/* Modal para selecionar veículo ao gerar PDF (Frota Completa) */}
       {pdfVehicleSelector.isOpen && pdfVehicleSelector.contrato && (
         <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setPdfVehicleSelector({ isOpen: false, contrato: null, empresaUsos: [], loading: false })}>
-          <div className="modal-content max-w-md w-full" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-content max-w-5xl w-full" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
               <h3 className="text-lg font-display font-bold text-slate-900">
-                Selecionar Veículo para PDF
+                Frota Completa - {pdfVehicleSelector.contrato.cliente?.nome}
               </h3>
               <button onClick={() => setPdfVehicleSelector({ isOpen: false, contrato: null, empresaUsos: [], loading: false })} className="btn-icon">
                 <X size={20} />
               </button>
             </div>
             
-            <div className="p-6">
+            <div className="p-0 max-h-[70vh] overflow-y-auto">
               {pdfVehicleSelector.loading ? (
-                <div className="flex justify-center p-4">
+                <div className="flex justify-center p-8">
                   <Loader2 className="animate-spin text-blue-600" size={32} />
                 </div>
               ) : pdfVehicleSelector.empresaUsos.length > 0 ? (
-                <div className="space-y-3">
-                  <p className="text-sm text-slate-600 mb-4">
-                    Selecione qual veículo deseja gerar o contrato:
-                  </p>
-                  {pdfVehicleSelector.empresaUsos.map((uso) => (
-                    <button
-                      key={uso.id}
-                      onClick={() => handlePdfForVehicle(uso)}
-                      className="w-full text-left p-4 border border-slate-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-semibold text-slate-900">
-                            {uso.placa || 'Sem placa'} - {uso.marca} {uso.modelo}
-                          </p>
-                          <p className="text-sm text-slate-500">
-                            {uso.status === 'ativo' ? 'Ativo' : uso.status}
-                          </p>
-                        </div>
-                        <Download size={20} className="text-blue-600" />
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                <table className="w-full text-sm text-left">
+                  <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
+                    <tr>
+                      <th className="px-6 py-3">Placa / Modelo</th>
+                      <th className="px-6 py-3">Status</th>
+                      <th className="px-6 py-3">Data Inclusão</th>
+                      <th className="px-6 py-3">Grupo Faturamento</th>
+                      <th className="px-6 py-3 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {pdfVehicleSelector.empresaUsos.map((uso: any) => (
+                      <tr key={uso.id} className="bg-white hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="font-medium text-slate-900">{uso.placa || 'Sem placa'}</div>
+                          <div className="text-slate-500">{uso.marca} {uso.modelo}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            uso.status === 'ativo' ? 'bg-green-100 text-green-800' : 
+                            uso.status === 'finalizado' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-800'
+                          }`}>
+                            {uso.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-slate-600">
+                          {uso.data_criacao ? formatDate(uso.data_criacao) : '-'}
+                        </td>
+                        <td className="px-6 py-4 text-slate-600">
+                          {uso.grupo_faturamento || '-'}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => {
+                                setContractDetailsModal({
+                                  isOpen: true,
+                                  contrato: pdfVehicleSelector.contrato,
+                                  veiculoUso: uso,
+                                  activeTab: 'geral'
+                                })
+                                setNfFormData({
+                                  periodo_inicio: uso.data_inicio ? uso.data_inicio.split('T')[0] : '',
+                                  periodo_fim: uso.data_fim ? uso.data_fim.split('T')[0] : new Date().toISOString().split('T')[0],
+                                  km_referencia: uso.km_referencia || 0,
+                                  valor_diaria: uso.valor_diaria_empresa || 0,
+                                  km_percorrido: uso.km_percorrido || 0,
+                                  valor_km_extra: uso.valor_km_extra || 0,
+                                })
+                              }}
+                              className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors border border-blue-200"
+                            >
+                              Ver Detalhes
+                            </button>
+                            <button
+                              onClick={() => handlePdfForVehicle(uso)}
+                              className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-2 rounded-lg transition-colors"
+                              title="Baixar Contrato PDF"
+                            >
+                              <Download size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               ) : (
-                <p className="text-center text-slate-500">Nenhum veículo encontrado.</p>
+                <p className="text-center text-slate-500 p-8">Nenhum veículo encontrado.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Contract Details Modal */}
+      {contractDetailsModal.isOpen && contractDetailsModal.contrato && contractDetailsModal.veiculoUso && (
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setContractDetailsModal({ ...contractDetailsModal, isOpen: false })}>
+          <div className="modal-content max-w-4xl w-full" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-lg font-display font-bold text-slate-900">
+                  Detalhes do Contrato - {contractDetailsModal.veiculoUso.placa}
+                </h3>
+                <p className="text-sm text-slate-500">
+                  {contractDetailsModal.veiculoUso.marca} {contractDetailsModal.veiculoUso.modelo}
+                </p>
+              </div>
+              <button onClick={() => setContractDetailsModal({ ...contractDetailsModal, isOpen: false })} className="btn-icon">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex border-b border-slate-100 px-6">
+              {[
+                { id: 'geral', label: 'Dados Gerais' },
+                { id: 'veiculo', label: 'Histórico Veículo' },
+                { id: 'nf', label: 'Relatório de Notas Fiscais' }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setContractDetailsModal({ ...contractDetailsModal, activeTab: tab.id as any })}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    contractDetailsModal.activeTab === tab.id
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="p-6 max-h-[60vh] overflow-y-auto">
+              {contractDetailsModal.activeTab === 'geral' && (
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Número do Contrato</label>
+                      <p className="text-base font-medium text-slate-900">{contractDetailsModal.contrato.numero}</p>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Cliente</label>
+                      <p className="text-base font-medium text-slate-900">{contractDetailsModal.contrato.cliente?.nome}</p>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Status</label>
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full mt-1 ${statusClass(contractDetailsModal.contrato.status)}`}>
+                        {statusLabel(contractDetailsModal.contrato.status)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Vigência</label>
+                      <p className="text-base font-medium text-slate-900">
+                        {formatDate(contractDetailsModal.contrato.data_inicio)} até {formatDate(contractDetailsModal.contrato.data_fim)}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Valor Total Contrato</label>
+                      <p className="text-base font-medium text-slate-900">{formatCurrency(contractDetailsModal.contrato.valor_total)}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {contractDetailsModal.activeTab === 'veiculo' && (
+                <div className="space-y-4">
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
+                        <tr>
+                          <th className="px-4 py-3">Período</th>
+                          <th className="px-4 py-3">KM Contratada</th>
+                          <th className="px-4 py-3">KM Percorrida</th>
+                          <th className="px-4 py-3">KM Excedente</th>
+                          <th className="px-4 py-3">Valor Período</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        <tr>
+                          <td className="px-4 py-3">
+                            {formatDate(contractDetailsModal.veiculoUso.data_inicio)} - {contractDetailsModal.veiculoUso.data_fim ? formatDate(contractDetailsModal.veiculoUso.data_fim) : 'Atual'}
+                          </td>
+                          <td className="px-4 py-3">{contractDetailsModal.veiculoUso.km_referencia?.toLocaleString('pt-BR')} km</td>
+                          <td className="px-4 py-3">{contractDetailsModal.veiculoUso.km_percorrido?.toLocaleString('pt-BR')} km</td>
+                          <td className="px-4 py-3 text-amber-600 font-medium">
+                            {Math.max((contractDetailsModal.veiculoUso.km_percorrido || 0) - (contractDetailsModal.veiculoUso.km_referencia || 0), 0).toLocaleString('pt-BR')} km
+                          </td>
+                          <td className="px-4 py-3 font-medium">
+                            {formatCurrency(
+                              (contractDetailsModal.veiculoUso.valor_diaria_empresa || 0) + 
+                              (Math.max((contractDetailsModal.veiculoUso.km_percorrido || 0) - (contractDetailsModal.veiculoUso.km_referencia || 0), 0) * (contractDetailsModal.veiculoUso.valor_km_extra || 0))
+                            )}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {contractDetailsModal.activeTab === 'nf' && (
+                <div className="space-y-6">
+                  <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+                    <h4 className="font-bold text-blue-900 mb-2">Gerar Relatório de NF</h4>
+                    <p className="text-sm text-blue-700 mb-4">
+                      Preencha os dados do período para atualizar o histórico e gerar o PDF da Nota Fiscal.
+                    </p>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                      <div>
+                        <label className="input-label">Data Início</label>
+                        <input 
+                          type="date" 
+                          value={nfFormData.periodo_inicio}
+                          onChange={e => setNfFormData({...nfFormData, periodo_inicio: e.target.value})}
+                          className="input-field bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="input-label">Data Fim</label>
+                        <input 
+                          type="date" 
+                          value={nfFormData.periodo_fim}
+                          onChange={e => setNfFormData({...nfFormData, periodo_fim: e.target.value})}
+                          className="input-field bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="input-label">Valor Base (Período)</label>
+                        <CurrencyInput
+                          value={nfFormData.valor_diaria}
+                          onChange={v => setNfFormData({...nfFormData, valor_diaria: v})}
+                          className="bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="input-label">KM Contratada</label>
+                        <input 
+                          type="number" 
+                          value={nfFormData.km_referencia}
+                          onChange={e => setNfFormData({...nfFormData, km_referencia: Number(e.target.value)})}
+                          className="input-field bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="input-label">KM Percorrida</label>
+                        <input 
+                          type="number" 
+                          value={nfFormData.km_percorrido}
+                          onChange={e => setNfFormData({...nfFormData, km_percorrido: Number(e.target.value)})}
+                          className="input-field bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="input-label">Valor KM Excedente</label>
+                        <CurrencyInput
+                          value={nfFormData.valor_km_extra}
+                          onChange={v => setNfFormData({...nfFormData, valor_km_extra: v})}
+                          className="bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={async () => {
+                        const loadingToast = toast.loading('Gerando NF...');
+                        try {
+                          // Prepare params
+                          const params = {
+                            km_percorrido: nfFormData.km_percorrido,
+                            km_referencia: nfFormData.km_referencia,
+                            valor_km_extra: nfFormData.valor_km_extra,
+                            periodo_inicio: nfFormData.periodo_inicio,
+                            periodo_fim: nfFormData.periodo_fim
+                          };
+                          
+                          const response = await api.get(`/relatorios/nf/${contractDetailsModal.veiculoUso.id}/pdf`, {
+                            params,
+                            responseType: 'blob'
+                          });
+                          
+                          const blob = new Blob([response.data], { type: 'application/pdf' });
+                          const url = window.URL.createObjectURL(blob);
+                          const link = document.createElement('a');
+                          link.href = url;
+                          link.download = `nf_${contractDetailsModal.veiculoUso.placa}.pdf`;
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                          window.URL.revokeObjectURL(url);
+                          
+                          toast.dismiss(loadingToast);
+                          toast.success('NF Gerada e dados atualizados!');
+                          invalidateCoreQueries(); // Refresh data instantly
+                          
+                          // Close modal? Or keep open? User might want to see result.
+                        } catch (error) {
+                          toast.dismiss(loadingToast);
+                          toast.error('Erro ao gerar NF');
+                          console.error(error);
+                        }
+                      }}
+                      className="btn-primary w-full flex items-center justify-center gap-2"
+                    >
+                      <Download size={18} />
+                      Salvar Dados e Gerar NF
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           </div>

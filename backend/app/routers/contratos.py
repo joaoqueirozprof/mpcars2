@@ -833,9 +833,11 @@ def get_contrato(
                 "valor_diaria_empresa": float(uso.valor_diaria_empresa or 0),
                 "data_inicio": uso.data_inicio.isoformat() if uso.data_inicio else None,
                 "data_fim": uso.data_fim.isoformat() if uso.data_fim else None,
+                "data_criacao": uso.data_criacao.isoformat() if uso.data_criacao else None,
                 "status": uso.status,
                 "contrato_id": uso.contrato_id,
                 "is_linked": is_linked_to_contract,
+                "grupo_faturamento": uso.veiculo.categoria if uso.veiculo else None,
             })
     
     # Include cliente and veiculo data
