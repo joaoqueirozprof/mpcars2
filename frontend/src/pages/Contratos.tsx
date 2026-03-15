@@ -854,11 +854,61 @@ const Contratos: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          <div className="kpi-card"><p className="kpi-label">Total</p><p className="kpi-value">{summary.total}</p></div>
-          <div className="kpi-card"><p className="kpi-label">Ativos</p><p className="kpi-value text-green-600">{summary.ativos}</p></div>
-          <div className="kpi-card"><p className="kpi-label">Atrasados</p><p className="kpi-value text-red-600">{summary.atrasados}</p></div>
-          <div className="kpi-card"><p className="kpi-label">Financeiro Pendente</p><p className="kpi-value text-amber-600">{summary.pendentesFinanceiro}</p></div>
-          <div className="kpi-card"><p className="kpi-label">Valor em Tela</p><p className="kpi-value text-purple-600">{formatCurrency(summary.valor)}</p></div>
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 bg-slate-100 rounded-lg text-slate-600">
+                <FileText size={20} />
+              </div>
+              <p className="text-sm font-medium text-slate-500">Total</p>
+            </div>
+            <p className="text-2xl font-bold text-slate-900">{summary.total}</p>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 bg-green-50 rounded-lg text-green-600">
+                <CheckCircle size={20} />
+              </div>
+              <p className="text-sm font-medium text-slate-500">Ativos</p>
+            </div>
+            <p className="text-2xl font-bold text-green-600">{summary.ativos}</p>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 bg-red-50 rounded-lg text-red-600">
+                <AlertCircle size={20} />
+              </div>
+              <p className="text-sm font-medium text-slate-500">Atrasados</p>
+            </div>
+            <p className="text-2xl font-bold text-red-600">{summary.atrasados}</p>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
+                <div className="relative">
+                  <FileText size={20} />
+                  <div className="absolute -top-1 -right-1 w-2 h-2 bg-amber-500 rounded-full"></div>
+                </div>
+              </div>
+              <p className="text-sm font-medium text-slate-500">Financeiro Pendente</p>
+            </div>
+            <p className="text-2xl font-bold text-amber-600">{summary.pendentesFinanceiro}</p>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 bg-purple-50 rounded-lg text-purple-600">
+                <div className="font-bold text-xs">R$</div>
+              </div>
+              <p className="text-sm font-medium text-slate-500">Valor em Tela</p>
+            </div>
+            <p className="text-2xl font-bold text-purple-600 leading-tight">
+              <span className="text-sm font-normal mr-1">R$</span>
+              {formatCurrency(summary.valor).replace('R$', '').trim()}
+            </p>
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -898,161 +948,176 @@ const Contratos: React.FC = () => {
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="table-header border-b border-slate-200">
-                    <th className="table-cell text-left">Numero</th>
-                    <th className="table-cell text-left">Cliente</th>
-                    <th className="table-cell text-left">Veiculo(s)</th>
-                    <th className="table-cell text-left">Periodo</th>
-                    <th className="table-cell text-right">Valor</th>
-                    <th className="table-cell text-center">Status</th>
-                    <th className="table-cell text-center">Acoes</th>
+                  <tr className="bg-slate-50/50">
+                    <th className="px-4 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Número</th>
+                    <th className="px-4 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Cliente</th>
+                    <th className="px-4 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Veículo(s)</th>
+                    <th className="px-4 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Período</th>
+                    <th className="px-4 py-4 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Valor Total</th>
+                    <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">Ações</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-slate-100">
                   {contratosAgrupados.map((grupo) => {
-                    // Pegar o primeiro contrato como referência
                     const contrato = grupo.contratos[0]
                     const status = displayStatus(contrato)
                     const ehEmpresa = grupo.tipo === 'empresa'
                     
                     return (
-                      <tr key={grupo.tipo === 'empresa' ? `empresa_${grupo.empresaId}` : `cliente_${contrato.cliente_id}`} className="table-row hover:bg-slate-50">
-                        <td className="table-cell font-semibold text-slate-900">
-                          {ehEmpresa ? (
-                            <span className="text-blue-600">{contrato.numero}</span>
-                          ) : (
-                            contrato.numero
-                          )}
+                      <tr key={grupo.tipo === 'empresa' ? `empresa_${grupo.empresaId}` : `cliente_${contrato.cliente_id}`} className="hover:bg-blue-50/30 transition-colors group">
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          <span className={`text-xs font-mono font-bold px-2 py-1 rounded-md ${ehEmpresa ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>
+                            {contrato.numero}
+                          </span>
                         </td>
-                        <td className="table-cell text-slate-700">
-                          <div>{contrato.cliente?.nome || '-'}</div>
-                          {ehEmpresa && (
-                            <div className="text-xs text-blue-600 font-medium">Empresarial ({grupo.contratos.length} veículo(s))</div>
-                          )}
-                        </td>
-                        <td className="table-cell text-slate-700">
-                          {ehEmpresa ? (
-                            <div className="flex items-center gap-2">
-                              <div>
-                                {grupo.contratos.length === 1 && contrato.veiculo ? (
-                                  <>
-                                    {contrato.veiculo.marca} {contrato.veiculo.modelo}
-                                    <div className="text-xs text-slate-500">{contrato.veiculo.placa || '-'}</div>
-                                  </>
-                                ) : (
-                                  <span className="text-slate-500">{grupo.contratos.length} veículos na frota</span>
-                                )}
-                              </div>
-                              <button
-                                onClick={() => openCompanyContractDetails(contrato)}
-                                className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 flex items-center gap-1"
-                                title="Ver todos os veículos da empresa"
-                              >
-                                <Car size={12} />
-                                Ver frota
-                              </button>
-                            </div>
-                          ) : (
-                            <div>
-                              {contrato.veiculo ? `${contrato.veiculo.marca} ${contrato.veiculo.modelo}` : '-'}
-                              <div className="text-xs text-slate-500">{contrato.veiculo?.placa || '-'}</div>
-                            </div>
-                          )}
-                        </td>
-                        <td className="table-cell text-slate-600 text-sm">
-                          {formatDate(contrato.data_inicio)} a {formatDate(contrato.data_fim)}
-                        </td>
-                        <td className="table-cell text-right font-semibold text-slate-900">
-                          <div>{formatCurrency(contrato.valor_total)}</div>
-                          <div className="mt-1 text-xs font-medium text-slate-500">
-                            Recebido: {formatCurrency(contrato.valor_recebido || 0)}
+                        <td className="px-4 py-4">
+                          <div className="flex flex-col">
+                            <span className="text-sm font-bold text-slate-900">{contrato.cliente?.nome || '-'}</span>
+                            {ehEmpresa && (
+                              <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit">
+                                Empresarial
+                              </span>
+                            )}
                           </div>
                         </td>
-                        <td className="table-cell text-center">
-                          <div className="flex flex-col items-center gap-2">
-                            <span className={`inline-block ${statusClass(status)}`}>{statusLabel(status)}</span>
-                            <span className={`inline-block ${paymentStatusClass(contrato.status_pagamento)}`}>
+                        <td className="px-4 py-4">
+                          {ehEmpresa ? (
+                            <div className="flex flex-col gap-1.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm text-slate-600 font-medium">
+                                  {grupo.contratos.length} veículos na frota
+                                </span>
+                                <button
+                                  onClick={() => openCompanyContractDetails(contrato)}
+                                  className="p-1 text-blue-600 hover:bg-blue-100 rounded-full transition-colors"
+                                  title="Ver todos os veículos da empresa"
+                                >
+                                  <Car size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium text-slate-800">
+                                {contrato.veiculo ? `${contrato.veiculo.marca} ${contrato.veiculo.modelo}` : '-'}
+                              </span>
+                              <span className="text-xs text-slate-500 font-mono">{contrato.veiculo?.placa || '-'}</span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          <div className="flex flex-col gap-1 text-xs text-slate-600">
+                            <div className="flex items-center gap-1.5 font-medium">
+                              <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                              {formatDate(contrato.data_inicio)}
+                            </div>
+                            <div className="flex items-center gap-1.5 font-medium">
+                              <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+                              {formatDate(contrato.data_fim)}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-right whitespace-nowrap">
+                          <div className="flex flex-col">
+                            <span className="text-sm font-bold text-slate-900">{formatCurrency(contrato.valor_total)}</span>
+                            <span className="text-[10px] text-slate-500">
+                              Recebido: <span className="font-semibold text-slate-700">{formatCurrency(contrato.valor_recebido || 0)}</span>
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <div className="flex flex-col items-center gap-1.5">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                              status === 'ativo' ? 'bg-green-100 text-green-700' :
+                              status === 'finalizado' ? 'bg-blue-100 text-blue-700' :
+                              status === 'cancelado' ? 'bg-red-100 text-red-700' :
+                              'bg-amber-100 text-amber-700'
+                            }`}>
+                              {statusLabel(status)}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                              contrato.status_pagamento === 'pago' ? 'bg-emerald-100 text-emerald-700' :
+                              contrato.status_pagamento === 'pendente' ? 'bg-amber-100 text-amber-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>
                               {paymentStatusLabel(contrato.status_pagamento)}
                             </span>
                           </div>
                         </td>
-                        <td className="table-cell text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            {/* Botão de PDF com Dropdown para Empresa */}
+                        <td className="px-4 py-4 text-center whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-0.5 opacity-60 group-hover:opacity-100 transition-opacity">
+                            {/* PDF e Impressão agrupados em um dropdown para Empresas */}
                             {ehEmpresa ? (
                               <div className="dropdown dropdown-left">
-                                <label tabIndex={0} className="p-1.5 hover:text-green-600 cursor-pointer flex items-center">
-                                  {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                                  <ChevronDown size={12} />
+                                <label tabIndex={0} className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors flex items-center gap-1">
+                                  <FileText size={18} />
+                                  <ChevronDown size={14} />
                                 </label>
-                                <ul tabIndex={0} className="dropdown-content z-[1] menu p-2 shadow bg-white border border-slate-200 rounded-box w-52 text-left">
-                                  <li className="menu-title text-slate-500 text-[10px] uppercase font-bold px-2 py-1">Selecione o veículo</li>
-                                  {grupo.contratos.map(c => (
-                                    <li key={c.id}>
-                                      <button 
-                                        onClick={() => handlePdf(c.id, c.numero, c.veiculo_id)}
-                                        className="flex items-center gap-2 text-xs py-2"
-                                      >
-                                        <Car size={14} />
-                                        <span>{c.veiculo?.placa} - {c.veiculo?.modelo}</span>
-                                      </button>
-                                    </li>
-                                  ))}
-                                  <div className="divider my-1 h-px bg-slate-100"></div>
+                                <ul tabIndex={0} className="dropdown-content z-[10] menu p-2 shadow-xl bg-white border border-slate-100 rounded-xl w-64 text-left">
+                                  <li className="menu-title text-slate-400 text-[10px] uppercase font-bold px-3 py-2">Documentos da Frota</li>
+                                  <div className="max-h-60 overflow-y-auto">
+                                    {grupo.contratos.map(c => (
+                                      <li key={c.id} className="mb-1 last:mb-0">
+                                        <div className="flex flex-col p-0">
+                                          <div className="px-3 py-2 bg-slate-50/50 rounded-lg mb-1">
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase">{c.veiculo?.placa}</p>
+                                            <p className="text-xs font-medium text-slate-700 truncate">{c.veiculo?.modelo}</p>
+                                          </div>
+                                          <div className="flex gap-1 px-1">
+                                            <button 
+                                              onClick={() => handlePdf(c.id, c.numero, c.veiculo_id)}
+                                              className="flex-1 flex items-center justify-center gap-1.5 text-[10px] font-bold py-1.5 bg-white border border-slate-200 rounded-md hover:bg-blue-50 hover:text-blue-600 hover:border-blue-100 transition-colors"
+                                            >
+                                              <Download size={12} /> PDF
+                                            </button>
+                                            <button 
+                                              onClick={() => handlePdf(c.id, c.numero, c.veiculo_id, true)}
+                                              className="flex-1 flex items-center justify-center gap-1.5 text-[10px] font-bold py-1.5 bg-white border border-slate-200 rounded-md hover:bg-purple-50 hover:text-purple-600 hover:border-purple-100 transition-colors"
+                                            >
+                                              <Printer size={12} /> Imprimir
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </li>
+                                    ))}
+                                  </div>
+                                  <div className="divider my-2 h-px bg-slate-100"></div>
                                   <li>
                                     <button 
                                       onClick={() => openPdfVehicleSelector(contrato)}
-                                      className="flex items-center gap-2 text-xs py-2 text-blue-600"
+                                      className="flex items-center gap-2 text-xs font-bold py-2.5 text-blue-600 hover:bg-blue-50 rounded-lg"
                                     >
                                       <Search size={14} />
-                                      <span>Ver frota completa</span>
+                                      Buscar na frota completa
                                     </button>
                                   </li>
                                 </ul>
                               </div>
                             ) : (
-                              <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-1.5 hover:text-green-600" disabled={downloadingPdf === contrato.id}>
-                                {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                              </button>
+                              <>
+                                <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Download PDF">
+                                  {downloadingPdf === contrato.id ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                                </button>
+                                <button onClick={() => handlePdf(contrato.id, contrato.numero, undefined, true)} className="p-2 text-slate-600 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Imprimir">
+                                  <Printer size={18} />
+                                </button>
+                              </>
                             )}
                             
-                            {/* Botão de Imprimir com Dropdown para Empresa */}
-                            {ehEmpresa ? (
-                              <div className="dropdown dropdown-left">
-                                <label tabIndex={0} className="p-1.5 hover:text-purple-600 cursor-pointer flex items-center">
-                                  <Printer size={16} />
-                                  <ChevronDown size={12} />
-                                </label>
-                                <ul tabIndex={0} className="dropdown-content z-[1] menu p-2 shadow bg-white border border-slate-200 rounded-box w-52 text-left">
-                                  <li className="menu-title text-slate-500 text-[10px] uppercase font-bold px-2 py-1">Imprimir contrato</li>
-                                  {grupo.contratos.map(c => (
-                                    <li key={c.id}>
-                                      <button 
-                                        onClick={() => handlePdf(c.id, c.numero, c.veiculo_id, true)}
-                                        className="flex items-center gap-2 text-xs py-2"
-                                      >
-                                        <Car size={14} />
-                                        <span>{c.veiculo?.placa} - {c.veiculo?.modelo}</span>
-                                      </button>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            ) : (
-                              <button onClick={() => handlePdf(contrato.id, contrato.numero, undefined, true)} className="p-1.5 hover:text-purple-600" title="Imprimir"><Printer size={16} /></button>
-                            )}
-                            {ehEmpresa && (
-                              <button 
-                                onClick={() => openCompanyContractDetails(contrato)} 
-                                className="p-1.5 hover:text-blue-600" 
-                                title="Ver detalhes do contrato de empresa"
-                              >
-                                <FileText size={16} />
+                            <div className="w-px h-4 bg-slate-200 mx-1"></div>
+
+                            {contrato.status === 'ativo' && (
+                              <button onClick={() => openCloseout(contrato)} className="p-2 text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="Encerrar Contrato">
+                                <CheckCircle size={18} />
                               </button>
                             )}
-                            {contrato.status === 'ativo' && <button onClick={() => openCloseout(contrato)} className="p-1.5 hover:text-emerald-600" title="Encerrar"><CheckCircle size={16} /></button>}
-                            <button onClick={() => openEdit(contrato)} className="p-1.5 hover:text-blue-600" title="Editar"><Edit size={16} /></button>
-                            <button onClick={() => setDeleteConfirm({ isOpen: true, id: contrato.id })} className="p-1.5 hover:text-red-600" title="Excluir"><Trash2 size={16} /></button>
+                            <button onClick={() => openEdit(contrato)} className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Editar">
+                              <Edit size={18} />
+                            </button>
+                            <button onClick={() => setDeleteConfirm({ isOpen: true, id: contrato.id })} className="p-2 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir">
+                              <Trash2 size={18} />
+                            </button>
                           </div>
                         </td>
                       </tr>
