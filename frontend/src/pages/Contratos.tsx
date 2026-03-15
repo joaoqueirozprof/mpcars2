@@ -1050,63 +1050,76 @@ const Contratos: React.FC = () => {
                             {/* PDF e Impressão agrupados em um dropdown para Empresas */}
                             {ehEmpresa ? (
                               <div className="dropdown dropdown-left">
-                                <label tabIndex={0} className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors flex items-center gap-1 group/btn">
+                                <label 
+                                  tabIndex={0} 
+                                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer transition-all flex items-center gap-1 group/btn"
+                                >
                                   <FileText size={18} className="group-hover/btn:scale-110 transition-transform" />
-                                  <ChevronDown size={14} />
+                                  <ChevronDown size={14} className="group-hover/btn:translate-y-0.5 transition-transform" />
                                 </label>
-                                <div tabIndex={0} className="dropdown-content z-[20] p-0 shadow-2xl bg-white border border-slate-100 rounded-2xl w-72 mt-2">
-                                  <div className="p-4 border-b border-slate-50">
-                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Documentos da Frota</h4>
-                                    <p className="text-[11px] text-slate-500 mt-0.5">Selecione um veículo abaixo</p>
+                                <div tabIndex={0} className="dropdown-content z-[30] p-0 shadow-2xl bg-white border border-slate-100 rounded-2xl w-80 mt-2 animate-in fade-in zoom-in duration-200 origin-top-right">
+                                  <div className="p-4 bg-slate-50/50 border-b border-slate-100 rounded-t-2xl">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <div className="w-6 h-6 rounded-md bg-blue-100 flex items-center justify-center text-blue-600">
+                                        <FileText size={14} />
+                                      </div>
+                                      <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600">Documentos da Frota</h4>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 font-medium ml-8">Selecione o veículo para gerar o PDF ou imprimir</p>
                                   </div>
                                   
-                                  <div className="max-h-[320px] overflow-y-auto p-2 space-y-1 custom-scrollbar">
-                                    {grupo.contratos.map(c => (
-                                      <div key={c.id} className="p-3 bg-slate-50/50 hover:bg-blue-50/50 rounded-xl transition-colors border border-transparent hover:border-blue-100 group/item">
-                                        <div className="flex items-start justify-between mb-2">
-                                          <div>
-                                            <p className="text-[10px] font-mono font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit mb-1">{c.veiculo?.placa}</p>
-                                            <p className="text-xs font-semibold text-slate-700 truncate max-w-[160px]">{c.veiculo?.modelo}</p>
+                                  <div className="max-h-[350px] overflow-y-auto custom-scrollbar">
+                                    {grupo.contratos.map((c, idx) => (
+                                      <div 
+                                        key={c.id} 
+                                        className={`p-4 hover:bg-blue-50/30 transition-colors border-b border-slate-50 last:border-0 group/item ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/20'}`}
+                                      >
+                                        <div className="flex items-center justify-between mb-3">
+                                          <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 group-hover/item:bg-blue-100 group-hover/item:text-blue-600 transition-colors">
+                                              <Car size={16} />
+                                            </div>
+                                            <div>
+                                              <p className="text-[10px] font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full w-fit mb-0.5">{c.veiculo?.placa}</p>
+                                              <p className="text-xs font-bold text-slate-700 truncate max-w-[150px]">{c.veiculo?.modelo}</p>
+                                            </div>
                                           </div>
-                                          <Car size={14} className="text-slate-300 group-hover/item:text-blue-400 transition-colors" />
                                         </div>
                                         
                                         <div className="flex gap-2">
                                           <button 
-                                            onClick={(e) => {
+                                            onClick={() => {
                                               handlePdf(c.id, c.numero, c.veiculo_id);
-                                              (e.currentTarget.closest('.dropdown') as HTMLElement)?.querySelector('label')?.focus();
-                                              (document.activeElement as HTMLElement)?.blur();
+                                              if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
                                             }}
-                                            className="flex-1 flex items-center justify-center gap-1.5 text-[10px] font-bold py-2 bg-white border border-slate-200 rounded-lg hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-sm"
+                                            className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-sm active:scale-95"
                                           >
                                             <Download size={12} /> PDF
                                           </button>
                                           <button 
-                                            onClick={(e) => {
+                                            onClick={() => {
                                               handlePdf(c.id, c.numero, c.veiculo_id, true);
-                                              (e.currentTarget.closest('.dropdown') as HTMLElement)?.querySelector('label')?.focus();
-                                              (document.activeElement as HTMLElement)?.blur();
+                                              if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
                                             }}
-                                            className="flex-1 flex items-center justify-center gap-1.5 text-[10px] font-bold py-2 bg-white border border-slate-200 rounded-lg hover:bg-purple-600 hover:text-white hover:border-purple-600 transition-all shadow-sm"
+                                            className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-purple-600 hover:text-white hover:border-purple-600 transition-all shadow-sm active:scale-95"
                                           >
-                                            <Printer size={12} /> Imprimir
+                                            <Printer size={12} /> IMPRIMIR
                                           </button>
                                         </div>
                                       </div>
                                     ))}
                                   </div>
                                   
-                                  <div className="p-2 border-t border-slate-50 bg-slate-50/30 rounded-b-2xl">
+                                  <div className="p-3 bg-slate-50/80 rounded-b-2xl">
                                     <button 
                                       onClick={() => {
                                         openPdfVehicleSelector(contrato);
-                                        (document.activeElement as HTMLElement)?.blur();
+                                        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
                                       }}
-                                      className="w-full flex items-center justify-center gap-2 text-xs font-bold py-3 text-blue-600 hover:bg-blue-100/50 rounded-xl transition-colors"
+                                      className="w-full flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest py-3 text-blue-600 bg-white border border-blue-100 rounded-xl hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-sm active:scale-[0.98]"
                                     >
                                       <Search size={14} />
-                                      Frota Completa
+                                      Buscar na Frota Completa
                                     </button>
                                   </div>
                                 </div>
