@@ -784,7 +784,7 @@ def create_contrato(
     return db_contrato
 
 
-@router.get("/{contrato_id}", response_model=ContratoResponse)
+@router.get("/{contrato_id}")
 def get_contrato(
     contrato_id: int,
     db: Session = Depends(get_db),
@@ -792,30 +792,39 @@ def get_contrato(
 ):
     """Get a specific contract."""
     del current_user
-    contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    contrato = db.query(Contrato).options(
+        joinedload(Contrato.cliente),
+        joinedload(Contrato.veiculo)
+    ).filter(Contrato.id == contrato_id).first()
+    
     if not contrato:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Contrato nao encontrado",
         )
     
-    # Include empresa_usos for company contracts
+    # Include ALL empresa_usos for company contracts (not just the ones from this contract)
     empresa_usos = []
     if str(contrato.tipo or "").lower() == "empresa" and contrato.cliente and contrato.cliente.empresa_id:
+        # Get ALL vehicle usages for this company, not just from this contract
         usos = db.query(UsoVeiculoEmpresa).options(
             joinedload(UsoVeiculoEmpresa.veiculo)
         ).filter(
-            UsoVeiculoEmpresa.empresa_id == contrato.cliente.empresa_id,
-            UsoVeiculoEmpresa.contrato_id == contrato_id
-        ).all()
+            UsoVeiculoEmpresa.empresa_id == contrato.cliente.empresa_id
+        ).order_by(UsoVeiculoEmpresa.data_criacao.desc()).all()
         
         for uso in usos:
+            # Check if this usage is linked to this contract
+            is_linked_to_contract = uso.contrato_id == contrato_id
+            
             empresa_usos.append({
                 "id": uso.id,
                 "veiculo_id": uso.veiculo_id,
                 "placa": uso.veiculo.placa if uso.veiculo else None,
                 "marca": uso.veiculo.marca if uso.veiculo else None,
                 "modelo": uso.veiculo.modelo if uso.veiculo else None,
+                "ano": uso.veiculo.ano if uso.veiculo else None,
+                "cor": uso.veiculo.cor if uso.veiculo else None,
                 "km_inicial": uso.km_inicial,
                 "km_final": uso.km_final,
                 "km_percorrido": uso.km_percorrido,
@@ -825,25 +834,45 @@ def get_contrato(
                 "data_inicio": uso.data_inicio.isoformat() if uso.data_inicio else None,
                 "data_fim": uso.data_fim.isoformat() if uso.data_fim else None,
                 "status": uso.status,
+                "contrato_id": uso.contrato_id,
+                "is_linked": is_linked_to_contract,
             })
+    
+    # Include cliente and veiculo data
+    cliente_data = None
+    if contrato.cliente:
+        cliente_data = {
+            "id": contrato.cliente.id,
+            "nome": contrato.cliente.nome,
+            "empresa_id": contrato.cliente.empresa_id,
+        }
+    
+    veiculo_data = None
+    if contrato.veiculo:
+        veiculo_data = {
+            "id": contrato.veiculo.id,
+            "placa": contrato.veiculo.placa,
+            "marca": contrato.veiculo.marca,
+            "modelo": contrato.veiculo.modelo,
+            "km_atual": contrato.veiculo.km_atual,
+        }
     
     # Convert to dict and add empresa_usos
     contrato_dict = {
         "id": contrato.id,
         "numero": contrato.numero,
         "cliente_id": contrato.cliente_id,
+        "cliente": cliente_data,
         "veiculo_id": contrato.veiculo_id,
+        "veiculo": veiculo_data,
         "data_inicio": contrato.data_inicio.isoformat() if contrato.data_inicio else None,
         "data_fim": contrato.data_fim.isoformat() if contrato.data_fim else None,
         "data_finalizacao": contrato.data_finalizacao.isoformat() if contrato.data_finalizacao else None,
-        "data_devolucao_real": contrato.data_devolucao_real.isoformat() if contrato.data_devolucao_real else None,
-        "quilometragem_inicial": contrato.quilometragem_inicial,
-        "quilometragem_final": contrato.quilometragem_final,
-        "km_atual_veiculo": contrato.km_atual_veiculo,
+        "km_inicial": contrato.km_inicial,
+        "km_final": contrato.km_final,
         "valor_diaria": float(contrato.valor_diaria or 0),
         "valor_total": float(contrato.valor_total or 0),
         "status": contrato.status,
-        "empresa_id": contrato.empresa_id,
         "observacoes": contrato.observacoes,
         "hora_saida": contrato.hora_saida,
         "combustivel_saida": contrato.combustivel_saida,
@@ -865,8 +894,6 @@ def get_contrato(
         "data_pagamento": contrato.data_pagamento.isoformat() if contrato.data_pagamento else None,
         "valor_recebido": float(contrato.valor_recebido or 0),
         "tipo": contrato.tipo,
-        "vigencia_indeterminada": contrato.vigencia_indeterminada,
-        "empresa_uso_id": contrato.empresa_uso_id,
         "qtd_diarias": contrato.qtd_diarias,
         "empresa_usos": empresa_usos,
     }
@@ -1286,6 +1313,7 @@ def prorrogar_contrato(
 @router.get("/{contrato_id}/pdf")
 def get_contrato_pdf(
     contrato_id: int,
+    veiculo_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1298,14 +1326,25 @@ def get_contrato_pdf(
             detail="Contrato nao encontrado",
         )
 
-    pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
+    # If veiculo_id is provided for a company contract, use that vehicle for the PDF
+    target_veiculo_id = veiculo_id if veiculo_id else contrato.veiculo_id
+    
+    pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id, veiculo_id=target_veiculo_id)
     pdf_buffer.seek(0)
+    
+    # Include vehicle info in filename if different from contract's main vehicle
+    filename_suffix = ""
+    if veiculo_id and veiculo_id != contrato.veiculo_id:
+        veiculo = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
+        if veiculo:
+            filename_suffix = f"_{veiculo.placa}"
+    
     return StreamingResponse(
         pdf_buffer,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": 'attachment; filename="contrato_{}.pdf"'.format(
-                contrato.numero
+            "Content-Disposition": 'attachment; filename="contrato_{}{}.pdf"'.format(
+                contrato.numero, filename_suffix
             )
         },
     )

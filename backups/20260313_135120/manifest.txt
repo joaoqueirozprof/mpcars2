@@ -1,0 +1,6 @@
+timestamp=20260313_135120
+database_container=mpcars2-db
+api_container=mpcars2-api
+postgres_db=mpcars2
+postgres_user=mpcars2
+backup_directory=/docker/mpcars2/backups/20260313_135120

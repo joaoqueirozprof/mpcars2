@@ -146,10 +146,17 @@ def _parse_optional_export_dates(
 @router.get("/contrato/{contrato_id}/pdf")
 def get_contrato_pdf(
     contrato_id: int,
+    veiculo_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate contract PDF report (uses original layout matching physical form)."""
+    """Generate contract PDF report (uses original layout matching physical form).
+    
+    Args:
+        contrato_id: ID do contrato
+        veiculo_id: ID opcional do veículo para gerar o PDF com dados específicos
+                    (útil para contratos de empresa com múltiplos veículos)
+    """
     contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contrato nao encontrado")
@@ -157,16 +164,23 @@ def get_contrato_pdf(
     if not contrato.cliente_id or not contrato.veiculo_id:
         raise HTTPException(status_code=422, detail="Contrato com dados incompletos (cliente ou veiculo ausente)")
 
-    veiculo = db.query(Veiculo).filter(Veiculo.id == contrato.veiculo_id).first()
+    # Use the provided veiculo_id if different from contract's main vehicle
+    target_veiculo_id = veiculo_id if veiculo_id else contrato.veiculo_id
+    veiculo = db.query(Veiculo).filter(Veiculo.id == target_veiculo_id).first()
     placa = veiculo.placa if veiculo else "000"
     data_str = datetime.now().strftime("%Y%m%d")
 
     try:
-        pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id)
+        pdf_buffer = PDFService.generate_contrato_pdf(db, contrato_id, veiculo_id=target_veiculo_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Erro ao gerar PDF do contrato: {}".format(str(e)))
 
-    filename = "contrato_{}_{}_{}".format(contrato_id, placa, data_str)
+    # Include vehicle info in filename if different from contract's main vehicle
+    filename_suffix = ""
+    if veiculo_id and veiculo_id != contrato.veiculo_id:
+        filename_suffix = f"_{placa}"
+    
+    filename = "contrato_{}{}_{}".format(contrato_id, filename_suffix, data_str)
     return StreamingResponse(
         iter([pdf_buffer.getvalue()]),
         media_type="application/pdf",

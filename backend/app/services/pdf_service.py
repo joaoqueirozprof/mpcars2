@@ -118,8 +118,14 @@ class PDFService:
     """Service for generating PDF reports."""
 
     @staticmethod
-    def generate_contrato_pdf(db: Session, contrato_id: int) -> BytesIO:
-        """Generate contract PDF matching the MPCARS official template with vehicle inspection diagram."""
+    def generate_contrato_pdf(db: Session, contrato_id: int, veiculo_id: int = None) -> BytesIO:
+        """Generate contract PDF matching the MPCARS official template with vehicle inspection diagram.
+        
+        Args:
+            db: Database session
+            contrato_id: Contract ID
+            veiculo_id: Optional vehicle ID to use for the PDF (useful for company contracts with multiple vehicles)
+        """
         from reportlab.pdfgen import canvas as pdfcanvas
 
         contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
@@ -127,7 +133,9 @@ class PDFService:
             raise ValueError("Contrato nao encontrado")
 
         cliente = db.query(Cliente).filter(Cliente.id == contrato.cliente_id).first()
-        veiculo = db.query(Veiculo).filter(Veiculo.id == contrato.veiculo_id).first()
+        # Use the provided veiculo_id if different from contract's main vehicle
+        target_veiculo_id = veiculo_id if veiculo_id else contrato.veiculo_id
+        veiculo = db.query(Veiculo).filter(Veiculo.id == target_veiculo_id).first()
         empresa = None
         if cliente and cliente.empresa_id:
             empresa = db.query(Empresa).filter(Empresa.id == cliente.empresa_id).first()

@@ -2,6 +2,7 @@ import React, { useMemo, useState, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
+  Car,
   CheckCircle,
   ChevronDown,
   Download,
@@ -103,7 +104,7 @@ const paymentMethodOptions = ['Pix', 'Cartao', 'Dinheiro', 'Transferencia', 'Bol
 const closeoutChecklistFields: Array<{ key: CloseoutChecklistKey; label: string; hint: string }> = [
   { key: 'macaco', label: 'Macaco', hint: 'Equipamento presente no carro' },
   { key: 'estepe', label: 'Estepe', hint: 'Roda reserva devolvida' },
-  { key: 'chave_de_roda', label: 'Chave de roda', hint: 'Ferramenta de troca de pneu' },
+  { key: 'chave_de_roda', label: 'Chave de roda', hint: 'Ferramenta de troca de pne' },
   { key: 'triangulo', label: 'Triangulo', hint: 'Item de seguranca obrigatorio' },
   { key: 'documento', label: 'Documento', hint: 'CRLV ou documento liberado' },
   { key: 'chave_reserva', label: 'Chave reserva', hint: 'Chave extra ou chaveiro devolvido' },
@@ -197,6 +198,14 @@ const buildCloseoutChecklist = (veiculo?: any): CloseoutChecklist => {
   }
 }
 
+// Tipo para agrupar contratos de empresa por cliente/empresa
+type ContratoAgrupado = {
+  tipo: 'empresa' | 'cliente'
+  contratos: Contrato[]
+  empresaId?: number
+  empresaNome?: string
+}
+
 const Contratos: React.FC = () => {
   const queryClient = useQueryClient()
   const config = useConfig()
@@ -229,8 +238,16 @@ const Contratos: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState<ContractForm>(buildForm())
   
-  // Company contract details modal/popover
+  // Modal para detalhes do contrato de empresa
   const [companyContractDetails, setCompanyContractDetails] = useState<{
+    isOpen: boolean;
+    contrato: Contrato | null;
+    empresaUsos: EmpresaUso[];
+    loading: boolean;
+  }>({ isOpen: false, contrato: null, empresaUsos: [], loading: false })
+  
+  // Modal para selecionar veículo ao gerar PDF de contrato de empresa
+  const [pdfVehicleSelector, setPdfVehicleSelector] = useState<{
     isOpen: boolean;
     contrato: Contrato | null;
     empresaUsos: EmpresaUso[];
@@ -272,6 +289,31 @@ const Contratos: React.FC = () => {
       return data
     },
   })
+
+  // Agrupar contratos de empresa por cliente (uma linha por empresa)
+  const contratosAgrupados = useMemo(() => {
+    if (!contratos?.data) return []
+    
+    const grouped = new Map<string, ContratoAgrupado>()
+    
+    contratos.data.forEach(contrato => {
+      const key = contrato.tipo === 'empresa' 
+        ? `empresa_${contrato.cliente?.empresa_id || contrato.cliente_id}`
+        : `cliente_${contrato.cliente_id}`
+      
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          tipo: contrato.tipo as 'empresa' | 'cliente',
+          contratos: [],
+          empresaId: contrato.cliente?.empresa_id,
+          empresaNome: contrato.cliente?.nome,
+        })
+      }
+      grouped.get(key)!.contratos.push(contrato)
+    })
+    
+    return Array.from(grouped.values())
+  }, [contratos])
 
   const { data: clientes } = useQuery({
     queryKey: ['clientes-select', formData.tipo],
@@ -344,34 +386,40 @@ const Contratos: React.FC = () => {
     [empresaUsos, formData.veiculo_id, formData.empresa_uso_id]
   )
 
-  const availableVehicles = useMemo(
-    () => {
-      if (formData.tipo !== 'empresa') {
-        return (veiculos || []).filter(
-          (veiculo: any) =>
-            veiculo.status === 'disponivel' ||
-            String(veiculo.id) === String(formData.veiculo_id) ||
-            String(veiculo.id) === String(editingContract?.veiculo_id)
-        )
+  const availableVehicles = useMemo(() => {
+    if (formData.tipo !== 'empresa') {
+      return (veiculos || []).filter(
+        (veiculo: any) =>
+          veiculo.status === 'disponivel' ||
+          String(veiculo.id) === String(formData.veiculo_id) ||
+          String(veiculo.id) === String(editingContract?.veiculo_id)
+      )
+    }
+
+    if (!empresaUsos || empresaUsos.length === 0) {
+      return (veiculos || []).filter(
+        (veiculo: any) =>
+          veiculo.status === 'disponivel' ||
+          String(veiculo.id) === String(formData.veiculo_id) ||
+          String(veiculo.id) === String(editingContract?.veiculo_id)
+      )
+    }
+
+    return empresaUsos.map((uso: any) => {
+      const veiculoRelacionado = (veiculos || []).find(
+        (veiculo: any) => String(veiculo.id) === String(uso.veiculo_id)
+      )
+
+      return {
+        ...veiculoRelacionado,
+        id: uso.veiculo_id,
+        placa: uso.placa || veiculoRelacionado?.placa || 'Sem placa',
+        marca: uso.marca || veiculoRelacionado?.marca || '',
+        modelo: uso.modelo || veiculoRelacionado?.modelo || '',
+        km_atual: veiculoRelacionado?.km_atual ?? uso.km_inicial ?? 0,
       }
-
-      return (empresaUsos || []).map((uso: any) => {
-        const veiculoRelacionado = (veiculos || []).find(
-          (veiculo: any) => String(veiculo.id) === String(uso.veiculo_id)
-        )
-
-        return {
-          ...veiculoRelacionado,
-          id: uso.veiculo_id,
-          placa: uso.placa || veiculoRelacionado?.placa || 'Sem placa',
-          marca: uso.marca || veiculoRelacionado?.marca || '',
-          modelo: uso.modelo || veiculoRelacionado?.modelo || '',
-          km_atual: veiculoRelacionado?.km_atual ?? uso.km_inicial ?? 0,
-        }
-      })
-    },
-    [veiculos, formData.veiculo_id, editingContract, formData.tipo, empresaUsos]
-  )
+    })
+  }, [veiculos, formData.veiculo_id, editingContract, formData.tipo, empresaUsos])
 
   const invalidateCoreQueries = () => {
     queryClient.invalidateQueries({ queryKey: ['contratos'] })
@@ -423,10 +471,18 @@ const Contratos: React.FC = () => {
     onError: (error: any) => toast.error(getErrorMessage(error, 'Erro ao deletar contrato')),
   })
 
-  const handlePdf = async (contratoId: string, numero: string, print = false) => {
+  const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null)
+
+  // Função para gerar PDF - agora suporta veículo específico
+  const handlePdf = async (contratoId: string, numero: string, veiculoId?: number, print = false) => {
     setDownloadingPdf(contratoId)
     try {
-      const response = await api.get(`/relatorios/contrato/${contratoId}/pdf`, { responseType: 'blob' })
+      const params: any = { responseType: 'blob' }
+      // Se for contrato de empresa e tem veículo específico, passar o veiculo_id
+      if (veiculoId) {
+        params.params = { veiculo_id: veiculoId }
+      }
+      const response = await api.get(`/relatorios/contrato/${contratoId}/pdf`, params)
       const blob = new Blob([response.data], { type: 'application/pdf' })
       const url = window.URL.createObjectURL(blob)
       if (print) {
@@ -448,7 +504,28 @@ const Contratos: React.FC = () => {
     }
   }
 
-  const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null)
+  // Abrir seletor de veículo para gerar PDF de contrato de empresa
+  const openPdfVehicleSelector = async (contrato: Contrato) => {
+    setPdfVehicleSelector({ isOpen: true, contrato, empresaUsos: [], loading: true })
+    try {
+      const { data } = await api.get(`/contratos/${contrato.id}`)
+      setPdfVehicleSelector(prev => ({
+        ...prev,
+        empresaUsos: data.empresa_usos || [],
+        loading: false,
+      }))
+    } catch {
+      toast.error('Erro ao carregar veículos')
+      setPdfVehicleSelector({ isOpen: false, contrato: null, empresaUsos: [], loading: false })
+    }
+  }
+
+  // Gerar PDF para veículo específico selecionado
+  const handlePdfForVehicle = async (uso: any) => {
+    if (!pdfVehicleSelector.contrato) return
+    setPdfVehicleSelector({ isOpen: false, contrato: null, empresaUsos: [], loading: false })
+    await handlePdf(pdfVehicleSelector.contrato.id, pdfVehicleSelector.contrato.numero, uso.veiculo_id)
+  }
   
   // Open company contract details modal
   const openCompanyContractDetails = async (contrato: Contrato) => {
@@ -474,7 +551,6 @@ const Contratos: React.FC = () => {
     }
     setDownloadingPdf(contrato.id)
     try {
-      // Get all vehicle usages for this contract
       const { data } = await api.get(`/contratos/${contrato.id}`)
       const empresaUsos = data.empresa_usos || []
       
@@ -800,14 +876,14 @@ const Contratos: React.FC = () => {
         <div className="card">
           {isLoading ? (
             <div className="space-y-3">{[...Array(5)].map((_, index) => <div key={index} className="h-12 bg-slate-100 rounded animate-pulse" />)}</div>
-          ) : contratos?.data?.length ? (
+          ) : contratosAgrupados.length ? (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="table-header border-b border-slate-200">
                     <th className="table-cell text-left">Numero</th>
                     <th className="table-cell text-left">Cliente</th>
-                    <th className="table-cell text-left">Veiculo</th>
+                    <th className="table-cell text-left">Veiculo(s)</th>
                     <th className="table-cell text-left">Periodo</th>
                     <th className="table-cell text-right">Valor</th>
                     <th className="table-cell text-center">Status</th>
@@ -815,15 +891,55 @@ const Contratos: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {contratos.data.map((contrato) => {
+                  {contratosAgrupados.map((grupo) => {
+                    // Pegar o primeiro contrato como referência
+                    const contrato = grupo.contratos[0]
                     const status = displayStatus(contrato)
+                    const ehEmpresa = grupo.tipo === 'empresa'
+                    
                     return (
-                      <tr key={contrato.id} className="table-row hover:bg-slate-50">
-                        <td className="table-cell font-semibold text-slate-900">{contrato.numero}</td>
-                        <td className="table-cell text-slate-700">{contrato.cliente?.nome || '-'}</td>
+                      <tr key={grupo.tipo === 'empresa' ? `empresa_${grupo.empresaId}` : `cliente_${contrato.cliente_id}`} className="table-row hover:bg-slate-50">
+                        <td className="table-cell font-semibold text-slate-900">
+                          {ehEmpresa ? (
+                            <span className="text-blue-600">{contrato.numero}</span>
+                          ) : (
+                            contrato.numero
+                          )}
+                        </td>
                         <td className="table-cell text-slate-700">
-                          {contrato.veiculo ? `${contrato.veiculo.marca} ${contrato.veiculo.modelo}` : '-'}
-                          <div className="text-xs text-slate-500">{contrato.veiculo?.placa || '-'}</div>
+                          <div>{contrato.cliente?.nome || '-'}</div>
+                          {ehEmpresa && (
+                            <div className="text-xs text-blue-600 font-medium">Empresarial ({grupo.contratos.length} veículo(s))</div>
+                          )}
+                        </td>
+                        <td className="table-cell text-slate-700">
+                          {ehEmpresa ? (
+                            <div className="flex items-center gap-2">
+                              <div>
+                                {grupo.contratos.length === 1 && contrato.veiculo ? (
+                                  <>
+                                    {contrato.veiculo.marca} {contrato.veiculo.modelo}
+                                    <div className="text-xs text-slate-500">{contrato.veiculo.placa || '-'}</div>
+                                  </>
+                                ) : (
+                                  <span className="text-slate-500">{grupo.contratos.length} veículos na frota</span>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => openCompanyContractDetails(contrato)}
+                                className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 flex items-center gap-1"
+                                title="Ver todos os veículos da empresa"
+                              >
+                                <Car size={12} />
+                                Ver frota
+                              </button>
+                            </div>
+                          ) : (
+                            <div>
+                              {contrato.veiculo ? `${contrato.veiculo.marca} ${contrato.veiculo.modelo}` : '-'}
+                              <div className="text-xs text-slate-500">{contrato.veiculo?.placa || '-'}</div>
+                            </div>
+                          )}
                         </td>
                         <td className="table-cell text-slate-600 text-sm">
                           {formatDate(contrato.data_inicio)} a {formatDate(contrato.data_fim)}
@@ -844,11 +960,23 @@ const Contratos: React.FC = () => {
                         </td>
                         <td className="table-cell text-center">
                           <div className="flex items-center justify-center gap-1">
-                            <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-1.5 hover:text-green-600" disabled={downloadingPdf === contrato.id}>
-                              {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                            </button>
-                            <button onClick={() => handlePdf(contrato.id, contrato.numero, true)} className="p-1.5 hover:text-purple-600"><Printer size={16} /></button>
-                            {contrato.tipo === 'empresa' && (
+                            {/* Botão de PDF - para empresa abre seletor, para cliente direto */}
+                            {ehEmpresa ? (
+                              <button 
+                                onClick={() => openPdfVehicleSelector(contrato)} 
+                                className="p-1.5 hover:text-green-600"
+                                disabled={downloadingPdf === contrato.id}
+                                title="Gerar PDF do contrato"
+                              >
+                                {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                              </button>
+                            ) : (
+                              <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-1.5 hover:text-green-600" disabled={downloadingPdf === contrato.id}>
+                                {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                              </button>
+                            )}
+                            <button onClick={() => handlePdf(contrato.id, contrato.numero, undefined, true)} className="p-1.5 hover:text-purple-600" title="Imprimir"><Printer size={16} /></button>
+                            {ehEmpresa && (
                               <button 
                                 onClick={() => openCompanyContractDetails(contrato)} 
                                 className="p-1.5 hover:text-blue-600" 
@@ -857,9 +985,9 @@ const Contratos: React.FC = () => {
                                 <FileText size={16} />
                               </button>
                             )}
-                            {contrato.status === 'ativo' && <button onClick={() => openCloseout(contrato)} className="p-1.5 hover:text-emerald-600"><CheckCircle size={16} /></button>}
-                            <button onClick={() => openEdit(contrato)} className="p-1.5 hover:text-blue-600"><Edit size={16} /></button>
-                            <button onClick={() => setDeleteConfirm({ isOpen: true, id: contrato.id })} className="p-1.5 hover:text-red-600"><Trash2 size={16} /></button>
+                            {contrato.status === 'ativo' && <button onClick={() => openCloseout(contrato)} className="p-1.5 hover:text-emerald-600" title="Encerrar"><CheckCircle size={16} /></button>}
+                            <button onClick={() => openEdit(contrato)} className="p-1.5 hover:text-blue-600" title="Editar"><Edit size={16} /></button>
+                            <button onClick={() => setDeleteConfirm({ isOpen: true, id: contrato.id })} className="p-1.5 hover:text-red-600" title="Excluir"><Trash2 size={16} /></button>
                           </div>
                         </td>
                       </tr>
@@ -868,10 +996,10 @@ const Contratos: React.FC = () => {
                 </tbody>
               </table>
               <div className="flex items-center justify-between pt-4 border-t border-slate-200">
-                <p className="text-sm text-slate-600">Mostrando {contratos.data.length} de {contratos.total} contratos</p>
+                <p className="text-sm text-slate-600">Mostrando {contratosAgrupados.length} de {contratos?.total || 0} contratos</p>
                 <div className="flex gap-2">
                   <button onClick={() => setPagination({ ...pagination, page: Math.max(1, pagination.page - 1) })} disabled={pagination.page === 1} className="btn-secondary btn-sm">Anterior</button>
-                  <button onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })} disabled={pagination.page * pagination.limit >= (contratos.total || 0)} className="btn-secondary btn-sm">Proximo</button>
+                  <button onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })} disabled={pagination.page * pagination.limit >= (contratos?.total || 0)} className="btn-secondary btn-sm">Proximo</button>
                 </div>
               </div>
             </div>
@@ -884,6 +1012,205 @@ const Contratos: React.FC = () => {
         </div>
       </div>
 
+      {/* Modal para selecionar veículo ao gerar PDF */}
+      {pdfVehicleSelector.isOpen && pdfVehicleSelector.contrato && (
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setPdfVehicleSelector({ isOpen: false, contrato: null, empresaUsos: [], loading: false })}>
+          <div className="modal-content max-w-md w-full" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">
+                Selecionar Veículo para PDF
+              </h3>
+              <button onClick={() => setPdfVehicleSelector({ isOpen: false, contrato: null, empresaUsos: [], loading: false })} className="btn-icon">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-6">
+              {pdfVehicleSelector.loading ? (
+                <div className="flex justify-center p-4">
+                  <Loader2 className="animate-spin text-blue-600" size={32} />
+                </div>
+              ) : pdfVehicleSelector.empresaUsos.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-slate-600 mb-4">
+                    Selecione qual veículo deseja gerar o contrato:
+                  </p>
+                  {pdfVehicleSelector.empresaUsos.map((uso) => (
+                    <button
+                      key={uso.id}
+                      onClick={() => handlePdfForVehicle(uso)}
+                      className="w-full text-left p-4 border border-slate-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold text-slate-900">
+                            {uso.placa || 'Sem placa'} - {uso.marca} {uso.modelo}
+                          </p>
+                          <p className="text-sm text-slate-500">
+                            {uso.status === 'ativo' ? 'Ativo' : uso.status}
+                          </p>
+                        </div>
+                        <Download size={20} className="text-blue-600" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-center text-slate-500">Nenhum veículo encontrado.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Company Contract Details Modal - permanece igual */}
+      {companyContractDetails.isOpen && companyContractDetails.contrato && (
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setCompanyContractDetails({ isOpen: false, contrato: null, empresaUsos: [], loading: false })}>
+          <div className="modal-content max-w-4xl w-full" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="text-lg font-display font-bold text-slate-900">
+                Contrato Empresa - {companyContractDetails.contrato.numero}
+              </h3>
+              <button onClick={() => setCompanyContractDetails({ isOpen: false, contrato: null, empresaUsos: [], loading: false })} className="btn-icon">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="modal-scroll-body">
+              {companyContractDetails.loading ? (
+                <div className="flex items-center justify-center p-8">
+                  <Loader2 className="animate-spin text-blue-600" size={32} />
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Veículos</p>
+                      <p className="text-2xl font-bold text-slate-900">{companyContractDetails.empresaUsos.length}</p>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+                      <p className="text-xs uppercase tracking-wide text-blue-600">Valor Mensal Total</p>
+                      <p className="text-2xl font-bold text-blue-900">
+                        {formatCurrency(companyContractDetails.empresaUsos.reduce((sum, uso) => sum + (uso.valor_diaria_empresa || 0), 0))}
+                      </p>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
+                      <p className="text-xs uppercase tracking-wide text-amber-600">Total KM Extra</p>
+                      <p className="text-2xl font-bold text-amber-900">
+                        {formatCurrency(companyContractDetails.empresaUsos.reduce((sum, uso) => {
+                          const kmPercorrido = uso.km_percorrido || 0
+                          const kmReferencia = uso.km_referencia || 0
+                          const kmExtra = Math.max(kmPercorrido - kmReferencia, 0)
+                          return sum + (kmExtra * (uso.valor_km_extra || 0))
+                        }, 0))}
+                      </p>
+                    </div>
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                      <p className="text-xs uppercase tracking-wide text-green-600">Valor Total Geral</p>
+                      <p className="text-2xl font-bold text-green-900">
+                        {formatCurrency(companyContractDetails.contrato.valor_total || 0)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {companyContractDetails.empresaUsos.map((uso) => {
+                      const kmPercorrido = uso.km_percorrido || 0
+                      const kmReferencia = uso.km_referencia || 0
+                      const kmExtra = Math.max(kmPercorrido - kmReferencia, 0)
+                      const valorKmExtra = kmExtra * (uso.valor_km_extra || 0)
+                      
+                      return (
+                        <div key={uso.id} className="border border-slate-200 rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-lg font-semibold text-slate-900">
+                              {uso.placa || 'Sem placa'} - {uso.marca} {uso.modelo}
+                            </h4>
+                            <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${uso.status === 'ativo' ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>
+                              {uso.status === 'ativo' ? 'Ativo' : uso.status}
+                            </span>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div>
+                              <p className="text-slate-500">Período</p>
+                              <p className="font-medium text-slate-900">
+                                {uso.data_inicio ? formatDate(uso.data_inicio) : '-'} a {uso.data_fim ? formatDate(uso.data_fim) : 'Em andamento'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">KM Percorrida</p>
+                              <p className="font-medium text-slate-900">{kmPercorrido.toLocaleString('pt-BR')} km</p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">KM Excedente</p>
+                              <p className={`font-medium ${kmExtra > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                                {kmExtra.toLocaleString('pt-BR')} km
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">Valor KM Extra</p>
+                              <p className="font-medium text-slate-900">{formatCurrency(valorKmExtra)}</p>
+                            </div>
+                          </div>
+                          
+                          <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                            <div>
+                              <p className="text-slate-500">Valor Mensal</p>
+                              <p className="font-semibold text-slate-900">{formatCurrency(uso.valor_diaria_empresa || 0)}</p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">KM Referência</p>
+                              <p className="font-medium text-slate-900">{kmReferencia.toLocaleString('pt-BR')} km</p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">Valor Total</p>
+                              <p className="font-semibold text-slate-900">
+                                {formatCurrency((uso.valor_diaria_empresa || 0) + valorKmExtra)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {companyContractDetails.empresaUsos.length === 0 && (
+                    <div className="text-center py-8 text-slate-500">
+                      Nenhum veículo encontrado neste contrato.
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button 
+                onClick={() => setCompanyContractDetails({ isOpen: false, contrato: null, empresaUsos: [], loading: false })} 
+                className="btn-secondary"
+              >
+                Fechar
+              </button>
+              {companyContractDetails.contrato.cliente?.empresa_id && (
+                <button 
+                  onClick={() => downloadNfReport(companyContractDetails.contrato!, companyContractDetails.contrato.cliente?.empresa_id)} 
+                  className="btn-primary flex items-center gap-2"
+                  disabled={downloadingPdf === companyContractDetails.contrato.id}
+                >
+                  {downloadingPdf === companyContractDetails.contrato.id ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Download size={16} />
+                  )}
+                  Baixar Relatório de Notas Fiscais
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Form Modal - similar ao original, apenas ajustando key */}
       {isModalOpen && (
         <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setIsModalOpen(false)}>
           <div className="modal-content max-w-2xl w-full" onClick={(event) => event.stopPropagation()}>
@@ -1352,155 +1679,6 @@ const Contratos: React.FC = () => {
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50">
               <button onClick={() => setDeleteConfirm({ isOpen: false })} className="btn-secondary" disabled={deleteMutation.isPending}>Cancelar</button>
               <button onClick={() => deleteConfirm.id && deleteMutation.mutate(deleteConfirm.id)} className="btn-danger" disabled={deleteMutation.isPending}>{deleteMutation.isPending ? 'Deletando...' : 'Deletar'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Company Contract Details Modal */}
-      {companyContractDetails.isOpen && companyContractDetails.contrato && (
-        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setCompanyContractDetails({ isOpen: false, contrato: null, empresaUsos: [], loading: false })}>
-          <div className="modal-content max-w-4xl w-full" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-              <h3 className="text-lg font-display font-bold text-slate-900">
-                Contrato Empresa - {companyContractDetails.contrato.numero}
-              </h3>
-              <button onClick={() => setCompanyContractDetails({ isOpen: false, contrato: null, empresaUsos: [], loading: false })} className="btn-icon">
-                <X size={20} />
-              </button>
-            </div>
-            
-            <div className="modal-scroll-body">
-              {companyContractDetails.loading ? (
-                <div className="flex items-center justify-center p-8">
-                  <Loader2 className="animate-spin text-blue-600" size={32} />
-                </div>
-              ) : (
-                <>
-                  {/* Summary Cards */}
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Veículos</p>
-                      <p className="text-2xl font-bold text-slate-900">{companyContractDetails.empresaUsos.length}</p>
-                    </div>
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
-                      <p className="text-xs uppercase tracking-wide text-blue-600">Valor Mensal Total</p>
-                      <p className="text-2xl font-bold text-blue-900">
-                        {formatCurrency(companyContractDetails.empresaUsos.reduce((sum, uso) => sum + (uso.valor_diaria_empresa || 0), 0))}
-                      </p>
-                    </div>
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
-                      <p className="text-xs uppercase tracking-wide text-amber-600">Total KM Extra</p>
-                      <p className="text-2xl font-bold text-amber-900">
-                        {formatCurrency(companyContractDetails.empresaUsos.reduce((sum, uso) => {
-                          const kmPercorrido = uso.km_percorrido || 0
-                          const kmReferencia = uso.km_referencia || 0
-                          const kmExtra = Math.max(kmPercorrido - kmReferencia, 0)
-                          return sum + (kmExtra * (uso.valor_km_extra || 0))
-                        }, 0))}
-                      </p>
-                    </div>
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-                      <p className="text-xs uppercase tracking-wide text-green-600">Valor Total Geral</p>
-                      <p className="text-2xl font-bold text-green-900">
-                        {formatCurrency(companyContractDetails.contrato.valor_total || 0)}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Vehicle Details */}
-                  <div className="space-y-4">
-                    {companyContractDetails.empresaUsos.map((uso) => {
-                      const kmPercorrido = uso.km_percorrido || 0
-                      const kmReferencia = uso.km_referencia || 0
-                      const kmExtra = Math.max(kmPercorrido - kmReferencia, 0)
-                      const valorKmExtra = kmExtra * (uso.valor_km_extra || 0)
-                      
-                      return (
-                        <div key={uso.id} className="border border-slate-200 rounded-lg p-4">
-                          <div className="flex items-center justify-between mb-4">
-                            <h4 className="text-lg font-semibold text-slate-900">
-                              {uso.placa || 'Sem placa'} - {uso.marca} {uso.modelo}
-                            </h4>
-                            <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${uso.status === 'ativo' ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>
-                              {uso.status === 'ativo' ? 'Ativo' : uso.status}
-                            </span>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                            <div>
-                              <p className="text-slate-500">Período</p>
-                              <p className="font-medium text-slate-900">
-                                {uso.data_inicio ? formatDate(uso.data_inicio) : '-'} a {uso.data_fim ? formatDate(uso.data_fim) : 'Em andamento'}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-slate-500">KM Percorrida</p>
-                              <p className="font-medium text-slate-900">{kmPercorrido.toLocaleString('pt-BR')} km</p>
-                            </div>
-                            <div>
-                              <p className="text-slate-500">KM Excedente</p>
-                              <p className={`font-medium ${kmExtra > 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                                {kmExtra.toLocaleString('pt-BR')} km
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-slate-500">Valor KM Extra</p>
-                              <p className="font-medium text-slate-900">{formatCurrency(valorKmExtra)}</p>
-                            </div>
-                          </div>
-                          
-                          <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                            <div>
-                              <p className="text-slate-500">Valor Mensal</p>
-                              <p className="font-semibold text-slate-900">{formatCurrency(uso.valor_diaria_empresa || 0)}</p>
-                            </div>
-                            <div>
-                              <p className="text-slate-500">KM Referência</p>
-                              <p className="font-medium text-slate-900">{kmReferencia.toLocaleString('pt-BR')} km</p>
-                            </div>
-                            <div>
-                              <p className="text-slate-500">Valor Total</p>
-                              <p className="font-semibold text-slate-900">
-                                {formatCurrency((uso.valor_diaria_empresa || 0) + valorKmExtra)}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-
-                  {companyContractDetails.empresaUsos.length === 0 && (
-                    <div className="text-center py-8 text-slate-500">
-                      Nenhum veículo encontrado neste contrato.
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            <div className="modal-footer">
-              <button 
-                onClick={() => setCompanyContractDetails({ isOpen: false, contrato: null, empresaUsos: [], loading: false })} 
-                className="btn-secondary"
-              >
-                Fechar
-              </button>
-              {companyContractDetails.contrato.cliente?.empresa_id && (
-                <button 
-                  onClick={() => downloadNfReport(companyContractDetails.contrato!, companyContractDetails.contrato.cliente?.empresa_id)} 
-                  className="btn-primary flex items-center gap-2"
-                  disabled={downloadingPdf === companyContractDetails.contrato.id}
-                >
-                  {downloadingPdf === companyContractDetails.contrato.id ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <Download size={16} />
-                  )}
-                  Baixar Relatório de Notas Fiscais
-                </button>
-              )}
             </div>
           </div>
         </div>
