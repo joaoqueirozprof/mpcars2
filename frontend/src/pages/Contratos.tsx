@@ -481,6 +481,24 @@ const Contratos: React.FC = () => {
       // Se for contrato de empresa e tem veículo específico, passar o veiculo_id
       if (veiculoId) {
         params.params = { veiculo_id: veiculoId }
+      } else {
+        // Fallback para o endpoint do router de contratos se o de relatórios falhar ou for diferente
+        const response = await api.get(`/contratos/${contratoId}/pdf`, params)
+        const blob = new Blob([response.data], { type: 'application/pdf' })
+        const url = window.URL.createObjectURL(blob)
+        if (print) {
+          const printWindow = window.open(url, '_blank')
+          if (printWindow) printWindow.onload = () => printWindow.print()
+        } else {
+          const link = document.createElement('a')
+          link.href = url
+          link.download = `contrato_${numero}.pdf`
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+        }
+        window.URL.revokeObjectURL(url)
+        return
       }
       const response = await api.get(`/relatorios/contrato/${contratoId}/pdf`, params)
       const blob = new Blob([response.data], { type: 'application/pdf' })
@@ -960,22 +978,69 @@ const Contratos: React.FC = () => {
                         </td>
                         <td className="table-cell text-center">
                           <div className="flex items-center justify-center gap-1">
-                            {/* Botão de PDF - para empresa abre seletor, para cliente direto */}
+                            {/* Botão de PDF com Dropdown para Empresa */}
                             {ehEmpresa ? (
-                              <button 
-                                onClick={() => openPdfVehicleSelector(contrato)} 
-                                className="p-1.5 hover:text-green-600"
-                                disabled={downloadingPdf === contrato.id}
-                                title="Gerar PDF do contrato"
-                              >
-                                {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                              </button>
+                              <div className="dropdown dropdown-left">
+                                <label tabIndex={0} className="p-1.5 hover:text-green-600 cursor-pointer flex items-center">
+                                  {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                                  <ChevronDown size={12} />
+                                </label>
+                                <ul tabIndex={0} className="dropdown-content z-[1] menu p-2 shadow bg-white border border-slate-200 rounded-box w-52 text-left">
+                                  <li className="menu-title text-slate-500 text-[10px] uppercase font-bold px-2 py-1">Selecione o veículo</li>
+                                  {grupo.contratos.map(c => (
+                                    <li key={c.id}>
+                                      <button 
+                                        onClick={() => handlePdf(c.id, c.numero, c.veiculo_id)}
+                                        className="flex items-center gap-2 text-xs py-2"
+                                      >
+                                        <Car size={14} />
+                                        <span>{c.veiculo?.placa} - {c.veiculo?.modelo}</span>
+                                      </button>
+                                    </li>
+                                  ))}
+                                  <div className="divider my-1 h-px bg-slate-100"></div>
+                                  <li>
+                                    <button 
+                                      onClick={() => openPdfVehicleSelector(contrato)}
+                                      className="flex items-center gap-2 text-xs py-2 text-blue-600"
+                                    >
+                                      <Search size={14} />
+                                      <span>Ver frota completa</span>
+                                    </button>
+                                  </li>
+                                </ul>
+                              </div>
                             ) : (
                               <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-1.5 hover:text-green-600" disabled={downloadingPdf === contrato.id}>
                                 {downloadingPdf === contrato.id ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                               </button>
                             )}
-                            <button onClick={() => handlePdf(contrato.id, contrato.numero, undefined, true)} className="p-1.5 hover:text-purple-600" title="Imprimir"><Printer size={16} /></button>
+                            
+                            {/* Botão de Imprimir com Dropdown para Empresa */}
+                            {ehEmpresa ? (
+                              <div className="dropdown dropdown-left">
+                                <label tabIndex={0} className="p-1.5 hover:text-purple-600 cursor-pointer flex items-center">
+                                  <Printer size={16} />
+                                  <ChevronDown size={12} />
+                                </label>
+                                <ul tabIndex={0} className="dropdown-content z-[1] menu p-2 shadow bg-white border border-slate-200 rounded-box w-52 text-left">
+                                  <li className="menu-title text-slate-500 text-[10px] uppercase font-bold px-2 py-1">Imprimir contrato</li>
+                                  {grupo.contratos.map(c => (
+                                    <li key={c.id}>
+                                      <button 
+                                        onClick={() => handlePdf(c.id, c.numero, c.veiculo_id, true)}
+                                        className="flex items-center gap-2 text-xs py-2"
+                                      >
+                                        <Car size={14} />
+                                        <span>{c.veiculo?.placa} - {c.veiculo?.modelo}</span>
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : (
+                              <button onClick={() => handlePdf(contrato.id, contrato.numero, undefined, true)} className="p-1.5 hover:text-purple-600" title="Imprimir"><Printer size={16} /></button>
+                            )}
                             {ehEmpresa && (
                               <button 
                                 onClick={() => openCompanyContractDetails(contrato)} 
