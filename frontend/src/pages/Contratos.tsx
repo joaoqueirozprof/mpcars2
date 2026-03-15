@@ -1050,49 +1050,66 @@ const Contratos: React.FC = () => {
                             {/* PDF e Impressão agrupados em um dropdown para Empresas */}
                             {ehEmpresa ? (
                               <div className="dropdown dropdown-left">
-                                <label tabIndex={0} className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors flex items-center gap-1">
-                                  <FileText size={18} />
+                                <label tabIndex={0} className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors flex items-center gap-1 group/btn">
+                                  <FileText size={18} className="group-hover/btn:scale-110 transition-transform" />
                                   <ChevronDown size={14} />
                                 </label>
-                                <ul tabIndex={0} className="dropdown-content z-[10] menu p-2 shadow-xl bg-white border border-slate-100 rounded-xl w-64 text-left">
-                                  <li className="menu-title text-slate-400 text-[10px] uppercase font-bold px-3 py-2">Documentos da Frota</li>
-                                  <div className="max-h-60 overflow-y-auto">
+                                <div tabIndex={0} className="dropdown-content z-[20] p-0 shadow-2xl bg-white border border-slate-100 rounded-2xl w-72 mt-2">
+                                  <div className="p-4 border-b border-slate-50">
+                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Documentos da Frota</h4>
+                                    <p className="text-[11px] text-slate-500 mt-0.5">Selecione um veículo abaixo</p>
+                                  </div>
+                                  
+                                  <div className="max-h-[320px] overflow-y-auto p-2 space-y-1 custom-scrollbar">
                                     {grupo.contratos.map(c => (
-                                      <li key={c.id} className="mb-1 last:mb-0">
-                                        <div className="flex flex-col p-0">
-                                          <div className="px-3 py-2 bg-slate-50/50 rounded-lg mb-1">
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase">{c.veiculo?.placa}</p>
-                                            <p className="text-xs font-medium text-slate-700 truncate">{c.veiculo?.modelo}</p>
+                                      <div key={c.id} className="p-3 bg-slate-50/50 hover:bg-blue-50/50 rounded-xl transition-colors border border-transparent hover:border-blue-100 group/item">
+                                        <div className="flex items-start justify-between mb-2">
+                                          <div>
+                                            <p className="text-[10px] font-mono font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit mb-1">{c.veiculo?.placa}</p>
+                                            <p className="text-xs font-semibold text-slate-700 truncate max-w-[160px]">{c.veiculo?.modelo}</p>
                                           </div>
-                                          <div className="flex gap-1 px-1">
-                                            <button 
-                                              onClick={() => handlePdf(c.id, c.numero, c.veiculo_id)}
-                                              className="flex-1 flex items-center justify-center gap-1.5 text-[10px] font-bold py-1.5 bg-white border border-slate-200 rounded-md hover:bg-blue-50 hover:text-blue-600 hover:border-blue-100 transition-colors"
-                                            >
-                                              <Download size={12} /> PDF
-                                            </button>
-                                            <button 
-                                              onClick={() => handlePdf(c.id, c.numero, c.veiculo_id, true)}
-                                              className="flex-1 flex items-center justify-center gap-1.5 text-[10px] font-bold py-1.5 bg-white border border-slate-200 rounded-md hover:bg-purple-50 hover:text-purple-600 hover:border-purple-100 transition-colors"
-                                            >
-                                              <Printer size={12} /> Imprimir
-                                            </button>
-                                          </div>
+                                          <Car size={14} className="text-slate-300 group-hover/item:text-blue-400 transition-colors" />
                                         </div>
-                                      </li>
+                                        
+                                        <div className="flex gap-2">
+                                          <button 
+                                            onClick={(e) => {
+                                              handlePdf(c.id, c.numero, c.veiculo_id);
+                                              (e.currentTarget.closest('.dropdown') as HTMLElement)?.querySelector('label')?.focus();
+                                              (document.activeElement as HTMLElement)?.blur();
+                                            }}
+                                            className="flex-1 flex items-center justify-center gap-1.5 text-[10px] font-bold py-2 bg-white border border-slate-200 rounded-lg hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-sm"
+                                          >
+                                            <Download size={12} /> PDF
+                                          </button>
+                                          <button 
+                                            onClick={(e) => {
+                                              handlePdf(c.id, c.numero, c.veiculo_id, true);
+                                              (e.currentTarget.closest('.dropdown') as HTMLElement)?.querySelector('label')?.focus();
+                                              (document.activeElement as HTMLElement)?.blur();
+                                            }}
+                                            className="flex-1 flex items-center justify-center gap-1.5 text-[10px] font-bold py-2 bg-white border border-slate-200 rounded-lg hover:bg-purple-600 hover:text-white hover:border-purple-600 transition-all shadow-sm"
+                                          >
+                                            <Printer size={12} /> Imprimir
+                                          </button>
+                                        </div>
+                                      </div>
                                     ))}
                                   </div>
-                                  <div className="divider my-2 h-px bg-slate-100"></div>
-                                  <li>
+                                  
+                                  <div className="p-2 border-t border-slate-50 bg-slate-50/30 rounded-b-2xl">
                                     <button 
-                                      onClick={() => openPdfVehicleSelector(contrato)}
-                                      className="flex items-center gap-2 text-xs font-bold py-2.5 text-blue-600 hover:bg-blue-50 rounded-lg"
+                                      onClick={() => {
+                                        openPdfVehicleSelector(contrato);
+                                        (document.activeElement as HTMLElement)?.blur();
+                                      }}
+                                      className="w-full flex items-center justify-center gap-2 text-xs font-bold py-3 text-blue-600 hover:bg-blue-100/50 rounded-xl transition-colors"
                                     >
                                       <Search size={14} />
-                                      Buscar na frota completa
+                                      Frota Completa
                                     </button>
-                                  </li>
-                                </ul>
+                                  </div>
+                                </div>
                               </div>
                             ) : (
                               <>
