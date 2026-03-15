@@ -206,146 +206,6 @@ type ContratoAgrupado = {
   empresaNome?: string
 }
 
-const FleetDocumentsDropdown = ({
-  grupo,
-  contrato,
-  handlePdf,
-  openPdfVehicleSelector
-}: {
-  grupo: ContratoAgrupado
-  contrato: Contrato
-  handlePdf: (id: string, numero: string, veiculoId?: number, print?: boolean) => void
-  openPdfVehicleSelector: (contrato: Contrato) => void
-}) => {
-  const [isOpen, setIsOpen] = useState(false)
-  const dropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false)
-      }
-    }
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [isOpen])
-
-  return (
-    <div className="relative" ref={dropdownRef}>
-      <button
-        onClick={(e) => {
-          e.stopPropagation()
-          setIsOpen(!isOpen)
-        }}
-        className={`p-2 rounded-lg cursor-pointer transition-all flex items-center gap-1 group/btn ${
-          isOpen ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'
-        }`}
-        title="Documentos da Frota"
-      >
-        <FileText size={18} className="group-hover/btn:scale-110 transition-transform" />
-        <ChevronDown
-          size={14}
-          className={`group-hover/btn:translate-y-0.5 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-        />
-      </button>
-
-      {isOpen && (
-        <div className="absolute right-0 z-[30] p-0 shadow-2xl bg-white border border-slate-100 rounded-2xl w-80 mt-2 animate-in fade-in zoom-in duration-200 origin-top-right">
-          <div className="p-4 bg-slate-50/50 border-b border-slate-100 rounded-t-2xl">
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-md bg-blue-100 flex items-center justify-center text-blue-600">
-                  <FileText size={14} />
-                </div>
-                <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600">Documentos da Frota</h4>
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setIsOpen(false)
-                }}
-                className="text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full p-1 transition-colors"
-                title="Fechar menu"
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <p className="text-[10px] text-slate-400 font-medium ml-8">Selecione o veículo para gerar o PDF ou imprimir</p>
-          </div>
-
-          <div className="max-h-[350px] overflow-y-auto custom-scrollbar">
-            {grupo.contratos.map((c, idx) => (
-              <div
-                key={c.id}
-                className={`p-4 hover:bg-blue-50/30 transition-colors border-b border-slate-50 last:border-0 group/item ${
-                  idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/20'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 group-hover/item:bg-blue-100 group-hover/item:text-blue-600 transition-colors">
-                      <Car size={16} />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full w-fit mb-0.5">
-                        {c.veiculo?.placa}
-                      </p>
-                      <p className="text-xs font-bold text-slate-700 truncate max-w-[150px]">{c.veiculo?.modelo}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handlePdf(c.id, c.numero, c.veiculo_id)
-                      setIsOpen(false)
-                    }}
-                    className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-sm active:scale-95"
-                  >
-                    <Download size={12} /> PDF
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handlePdf(c.id, c.numero, c.veiculo_id, true)
-                      setIsOpen(false)
-                    }}
-                    className="flex-1 flex items-center justify-center gap-2 text-[10px] font-bold py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-purple-600 hover:text-white hover:border-purple-600 transition-all shadow-sm active:scale-95"
-                  >
-                    <Printer size={12} /> IMPRIMIR
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="p-3 bg-slate-50/80 rounded-b-2xl">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                openPdfVehicleSelector(contrato)
-                setIsOpen(false)
-              }}
-              className="w-full flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest py-3 text-blue-600 bg-white border border-blue-100 rounded-xl hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-sm active:scale-[0.98]"
-            >
-              <Search size={14} />
-              Buscar na Frota Completa
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 const Contratos: React.FC = () => {
   const queryClient = useQueryClient()
   const config = useConfig()
@@ -393,6 +253,13 @@ const Contratos: React.FC = () => {
     empresaUsos: EmpresaUso[];
     loading: boolean;
   }>({ isOpen: false, contrato: null, empresaUsos: [], loading: false })
+  
+  // Modal para documentos da frota
+  const [fleetDocumentsModal, setFleetDocumentsModal] = useState<{
+    isOpen: boolean;
+    contrato: Contrato | null;
+    grupo: ContratoAgrupado | null;
+  }>({ isOpen: false, contrato: null, grupo: null })
   
   const [closeoutData, setCloseoutData] = useState<CloseoutForm>({
     km_atual_veiculo: 0,
@@ -1189,12 +1056,14 @@ const Contratos: React.FC = () => {
                           <div className="flex items-center justify-center gap-0.5 opacity-60 group-hover:opacity-100 transition-opacity">
                             {/* PDF e Impressão agrupados em um dropdown para Empresas */}
                             {ehEmpresa ? (
-                              <FleetDocumentsDropdown 
-                                grupo={grupo}
-                                contrato={contrato}
-                                handlePdf={handlePdf}
-                                openPdfVehicleSelector={openPdfVehicleSelector}
-                              />
+                              <button 
+                                onClick={() => setFleetDocumentsModal({ isOpen: true, contrato, grupo })}
+                                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer transition-all flex items-center gap-1 group/btn"
+                                title="Documentos da Frota"
+                              >
+                                <FileText size={18} className="group-hover/btn:scale-110 transition-transform" />
+                                <ChevronDown size={14} className="group-hover/btn:translate-y-0.5 transition-transform" />
+                              </button>
                             ) : (
                               <>
                                 <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Download PDF">
@@ -1242,6 +1111,83 @@ const Contratos: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Fleet Documents Modal */}
+      {fleetDocumentsModal.isOpen && fleetDocumentsModal.grupo && fleetDocumentsModal.contrato && (
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setFleetDocumentsModal({ isOpen: false, contrato: null, grupo: null })}>
+          <div className="modal-content max-w-md w-full" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
+                  <FileText size={18} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-display font-bold text-slate-900">Documentos da Frota</h3>
+                  <p className="text-xs text-slate-500 font-medium">Selecione o veículo para gerar o PDF ou imprimir</p>
+                </div>
+              </div>
+              <button onClick={() => setFleetDocumentsModal({ isOpen: false, contrato: null, grupo: null })} className="btn-icon">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-0 max-h-[60vh] overflow-y-auto custom-scrollbar">
+              {fleetDocumentsModal.grupo.contratos.map((c, idx) => (
+                <div 
+                  key={c.id} 
+                  className={`p-4 hover:bg-blue-50/30 transition-colors border-b border-slate-50 last:border-0 group/item ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/20'}`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 group-hover/item:bg-blue-100 group-hover/item:text-blue-600 transition-colors">
+                        <Car size={20} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full w-fit mb-1">{c.veiculo?.placa}</p>
+                        <p className="text-sm font-bold text-slate-900">{c.veiculo?.modelo}</p>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-3">
+                    <button 
+                      onClick={() => {
+                        handlePdf(c.id, c.numero, c.veiculo_id);
+                        setFleetDocumentsModal({ isOpen: false, contrato: null, grupo: null });
+                      }}
+                      className="flex-1 flex items-center justify-center gap-2 text-xs font-bold py-3 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-sm active:scale-95"
+                    >
+                      <Download size={16} /> PDF
+                    </button>
+                    <button 
+                      onClick={() => {
+                        handlePdf(c.id, c.numero, c.veiculo_id, true);
+                        setFleetDocumentsModal({ isOpen: false, contrato: null, grupo: null });
+                      }}
+                      className="flex-1 flex items-center justify-center gap-2 text-xs font-bold py-3 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-purple-600 hover:text-white hover:border-purple-600 transition-all shadow-sm active:scale-95"
+                    >
+                      <Printer size={16} /> IMPRIMIR
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <div className="p-4 bg-slate-50/80 rounded-b-2xl border-t border-slate-100">
+              <button 
+                onClick={() => {
+                  openPdfVehicleSelector(fleetDocumentsModal.contrato!);
+                  setFleetDocumentsModal({ isOpen: false, contrato: null, grupo: null });
+                }}
+                className="w-full flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest py-3.5 text-blue-600 bg-white border border-blue-100 rounded-xl hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-sm active:scale-[0.98]"
+              >
+                <Search size={16} />
+                Buscar na Frota Completa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal para selecionar veículo ao gerar PDF */}
       {pdfVehicleSelector.isOpen && pdfVehicleSelector.contrato && (
