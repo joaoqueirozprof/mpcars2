@@ -844,7 +844,7 @@ const Contratos: React.FC = () => {
       <div className="space-y-6">
         <div className="page-header">
           <div>
-            <h1 className="page-title">Contratos</h1>
+            <h1 className="page-title">Contratos (V2)</h1>
             <p className="page-subtitle">Locacao com retirada, acompanhamento e encerramento.</p>
           </div>
           <button onClick={openCreate} className="btn-primary flex items-center gap-2">
@@ -1059,11 +1059,24 @@ const Contratos: React.FC = () => {
                                 </label>
                                 <div tabIndex={0} className="dropdown-content z-[30] p-0 shadow-2xl bg-white border border-slate-100 rounded-2xl w-80 mt-2 animate-in fade-in zoom-in duration-200 origin-top-right">
                                   <div className="p-4 bg-slate-50/50 border-b border-slate-100 rounded-t-2xl">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <div className="w-6 h-6 rounded-md bg-blue-100 flex items-center justify-center text-blue-600">
-                                        <FileText size={14} />
+                                    <div className="flex items-center justify-between mb-1">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-6 h-6 rounded-md bg-blue-100 flex items-center justify-center text-blue-600">
+                                          <FileText size={14} />
+                                        </div>
+                                        <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600">Documentos da Frota</h4>
                                       </div>
-                                      <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-600">Documentos da Frota</h4>
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          // Find the dropdown content and blur it, or blur active element
+                                          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+                                        }}
+                                        className="text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full p-1 transition-colors"
+                                        title="Fechar menu"
+                                      >
+                                        <X size={14} />
+                                      </button>
                                     </div>
                                     <p className="text-[10px] text-slate-400 font-medium ml-8">Selecione o veículo para gerar o PDF ou imprimir</p>
                                   </div>
