@@ -24,6 +24,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import CurrencyInput from '@/components/shared/CurrencyInput'
 import { Veiculo } from '@/types'
 import toast from 'react-hot-toast'
+import { formatCurrency, formatDate } from '@/lib/utils'
 
 const API_BASE = (() => {
   const hostname = window.location.hostname
@@ -79,7 +80,7 @@ const Veiculos: React.FC = () => {
         ...v,
         quilometragem: v.km_atual || 0,
         data_compra: v.data_aquisicao || '',
-        observacoes: '',
+        observacoes: v.observacoes || '',
         cor: v.cor || '',
         foto_url: v.foto_url || null,
       }))
@@ -337,6 +338,7 @@ const Veiculos: React.FC = () => {
       status: formData.status,
       valor_aquisicao: formData.valor_aquisicao,
       data_aquisicao: formData.data_compra || null,
+      observacoes: formData.observacoes,
     }
 
     if (editingVehicle) {
@@ -753,8 +755,8 @@ const Veiculos: React.FC = () => {
                   <label className="input-label">Quilometragem</label>
                   <input
                     type="number"
-                    value={formData.quilometragem}
-                    onChange={(e) => setFormData({ ...formData, quilometragem: parseInt(e.target.value) || 0 })}
+                    value={formData.quilometragem === 0 ? '' : formData.quilometragem}
+                    onChange={(e) => setFormData({ ...formData, quilometragem: e.target.value === '' ? 0 : parseInt(e.target.value) || 0 })}
                     min="0"
                     placeholder="0"
                     className={`input-field ${formErrors.quilometragem ? 'border-red-500 focus:ring-red-500' : ''}`}
