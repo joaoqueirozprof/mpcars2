@@ -445,6 +445,7 @@ def list_financeiro(
     data_fim: Optional[str] = None,
     mes: Optional[int] = None,
     ano: Optional[int] = None,
+    veiculo_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -653,6 +654,9 @@ def list_financeiro(
             or term in str(record.get("categoria", "")).lower()
         ]
 
+    if veiculo_id:
+        records = [record for record in records if str(record.get("veiculo_id")) == str(veiculo_id)]
+
     records = [record for record in records if _record_in_period(record.get("data"), start_date, end_date)]
 
     records.sort(key=lambda item: item["data"] or "", reverse=True)
@@ -672,11 +676,31 @@ def list_financeiro(
 
 @router.get("/resumo")
 def get_resumo(
+    veiculo_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get financial summary."""
-    contratos = db.query(Contrato).all()
+    query_contratos = db.query(Contrato)
+    query_nf = db.query(RelatorioNF)
+    query_dc = db.query(DespesaContrato)
+    query_dv = db.query(DespesaVeiculo)
+    query_dl = db.query(DespesaLoja)
+    query_mt = db.query(Manutencao)
+    query_sg = db.query(Seguro)
+    query_ip = db.query(IpvaRegistro)
+    query_ml = db.query(Multa)
+
+    if veiculo_id:
+        query_contratos = query_contratos.filter(Contrato.veiculo_id == veiculo_id)
+        query_nf = query_nf.filter(RelatorioNF.veiculo_id == veiculo_id)
+        query_dv = query_dv.filter(DespesaVeiculo.veiculo_id == veiculo_id)
+        query_mt = query_mt.filter(Manutencao.veiculo_id == veiculo_id)
+        query_sg = query_sg.filter(Seguro.veiculo_id == veiculo_id)
+        query_ip = query_ip.filter(IpvaRegistro.veiculo_id == veiculo_id)
+        query_ml = query_ml.filter(Multa.veiculo_id == veiculo_id)
+
+    contratos = query_contratos.all()
     total_receita = sum(
         float(contrato.valor_total)
         for contrato in contratos
@@ -690,7 +714,7 @@ def get_resumo(
         if contrato.valor_total and str(contrato.tipo or "").lower() != "empresa"
     )
     total_receita_pendente = max(total_receita - total_receita_recebida, 0.0)
-    relatorios_nf = db.query(RelatorioNF).all()
+    relatorios_nf = query_nf.all()
     uso_ids = [relatorio.uso_id for relatorio in relatorios_nf if relatorio.uso_id]
     usos_empresa = {}
     if uso_ids:
@@ -701,45 +725,36 @@ def get_resumo(
         for relatorio in relatorios_nf
     )
 
-    total_despesa_contrato = sum(
-        float(despesa.valor) for despesa in db.query(DespesaContrato).all() if despesa.valor
-    )
-    total_despesa_veiculo = sum(
-        float(despesa.valor) for despesa in db.query(DespesaVeiculo).all() if despesa.valor
-    )
-    total_despesa_loja = sum(
-        float(despesa.valor) for despesa in db.query(DespesaLoja).all() if despesa.valor
-    )
-    total_manutencao = sum(
-        float(manutencao.custo) for manutencao in db.query(Manutencao).all() if manutencao.custo
-    )
-    total_seguros = sum(
-        float(seguro.valor) for seguro in db.query(Seguro).all() if seguro.valor
-    )
-    total_ipva = sum(
-        float(ipva.valor_ipva or ipva.valor_pago or 0) for ipva in db.query(IpvaRegistro).all()
-    )
-    total_multas = sum(
-        float(multa.valor) for multa in db.query(Multa).all() if multa.valor
-    )
+    total_despesa_contrato = 0.0 if veiculo_id else sum(float(despesa.valor) for despesa in query_dc.all() if despesa.valor)
+    total_despesa_veiculo = sum(float(despesa.valor) for despesa in query_dv.all() if despesa.valor)
+    total_despesa_loja = 0.0 if veiculo_id else sum(float(despesa.valor) for despesa in query_dl.all() if despesa.valor)
+    total_manutencao = sum(float(manutencao.custo) for manutencao in query_mt.all() if manutencao.custo)
+    total_seguros = sum(float(seguro.valor) for seguro in query_sg.all() if seguro.valor)
+    total_ipva = sum(float(ipva.valor_ipva or ipva.valor_pago or 0) for ipva in query_ip.all())
+    total_multas = sum(float(multa.valor) for multa in query_ml.all() if multa.valor)
 
-    total_manual_receita = sum(
-        float(lancamento.valor)
-        for lancamento in db.query(LancamentoFinanceiro).filter(LancamentoFinanceiro.tipo == "receita").all()
-        if lancamento.valor
-    )
-    total_manual_receita_recebida = sum(
-        float(lancamento.valor)
-        for lancamento in db.query(LancamentoFinanceiro)
-        .filter(LancamentoFinanceiro.tipo == "receita", LancamentoFinanceiro.status == "pago")
-        .all()
-        if lancamento.valor
-    )
-    total_manual_despesa = sum(
-        float(lancamento.valor)
-        for lancamento in db.query(LancamentoFinanceiro).filter(LancamentoFinanceiro.tipo == "despesa").all()
-        if lancamento.valor
-    )
+    total_manual_receita = 0.0
+    total_manual_receita_recebida = 0.0
+    total_manual_despesa = 0.0
+
+    if not veiculo_id:
+        total_manual_receita = sum(
+            float(lancamento.valor)
+            for lancamento in db.query(LancamentoFinanceiro).filter(LancamentoFinanceiro.tipo == "receita").all()
+            if lancamento.valor
+        )
+        total_manual_receita_recebida = sum(
+            float(lancamento.valor)
+            for lancamento in db.query(LancamentoFinanceiro)
+            .filter(LancamentoFinanceiro.tipo == "receita", LancamentoFinanceiro.status == "pago")
+            .all()
+            if lancamento.valor
+        )
+        total_manual_despesa = sum(
+            float(lancamento.valor)
+            for lancamento in db.query(LancamentoFinanceiro).filter(LancamentoFinanceiro.tipo == "despesa").all()
+            if lancamento.valor
+        )
 
     total_receita += total_manual_receita + total_receita_nf
     total_receita_recebida += total_manual_receita_recebida

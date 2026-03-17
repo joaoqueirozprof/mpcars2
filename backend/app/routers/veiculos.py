@@ -50,6 +50,7 @@ class VeiculoBase(BaseModel):
     km_atual: Optional[float] = 0
     data_aquisicao: Optional[date] = None
     valor_aquisicao: Optional[float] = None
+    observacoes: Optional[str] = None
 
 
 class VeiculoCreate(VeiculoBase):
@@ -71,6 +72,7 @@ class VeiculoUpdate(BaseModel):
     valor_aquisicao: Optional[float] = None
     status: Optional[str] = None
     ativo: Optional[bool] = None
+    observacoes: Optional[str] = None
 
 
 class VeiculoResponse(BaseModel):
@@ -90,6 +92,7 @@ class VeiculoResponse(BaseModel):
     status: str = "disponivel"
     foto_url: Optional[str] = None
     ativo: bool = True
+    observacoes: Optional[str] = None
 
     class Config:
         from_attributes = True

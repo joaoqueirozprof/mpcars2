@@ -79,6 +79,7 @@ const FinanceiroPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const [periodStart, setPeriodStart] = useState('')
   const [periodEnd, setPeriodEnd] = useState('')
+  const [veiculoFilter, setVeiculoFilter] = useState('')
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
     tipo: 'receita' as 'receita' | 'despesa',
@@ -97,7 +98,7 @@ const FinanceiroPage: React.FC = () => {
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['financeiro', pagination, typeFilter, statusFilter, searchTerm, periodStart, periodEnd],
+    queryKey: ['financeiro', pagination, typeFilter, statusFilter, searchTerm, periodStart, periodEnd, veiculoFilter],
     queryFn: async () => {
       const { data } = await api.get<PaginatedResponse<Financeiro>>('/financeiro', {
         params: {
@@ -108,6 +109,7 @@ const FinanceiroPage: React.FC = () => {
           search: searchTerm || undefined,
           data_inicio: periodStart || undefined,
           data_fim: periodEnd || undefined,
+          veiculo_id: veiculoFilter || undefined,
         },
       })
       return data
@@ -115,10 +117,22 @@ const FinanceiroPage: React.FC = () => {
   })
 
   const { data: summaryData } = useQuery({
-    queryKey: ['financeiro-resumo'],
+    queryKey: ['financeiro-resumo', veiculoFilter],
     queryFn: async () => {
-      const { data } = await api.get<FinanceiroResumo>('/financeiro/resumo')
+      const { data } = await api.get<FinanceiroResumo>('/financeiro/resumo', {
+        params: {
+          veiculo_id: veiculoFilter || undefined,
+        }
+      })
       return data
+    },
+  })
+
+  const { data: vehiclesData } = useQuery({
+    queryKey: ['veiculos-list'],
+    queryFn: async () => {
+      const { data } = await api.get('/veiculos', { params: { limit: 1000 } })
+      return data.data || []
     },
   })
 
@@ -480,6 +494,26 @@ const FinanceiroPage: React.FC = () => {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Veiculo Filter */}
+            <div className="border-t border-slate-200 pt-4">
+              <p className="text-sm font-semibold text-slate-900 mb-3">Veículo</p>
+              <select
+                value={veiculoFilter}
+                onChange={(e) => {
+                  setVeiculoFilter(e.target.value)
+                  setPagination((current) => ({ ...current, page: 1 }))
+                }}
+                className="input-field max-w-xs"
+              >
+                <option value="">Todos os veículos</option>
+                {(vehiclesData || []).map((v: any) => (
+                  <option key={v.id} value={v.id}>
+                    {v.placa} - {v.marca} {v.modelo}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Search */}

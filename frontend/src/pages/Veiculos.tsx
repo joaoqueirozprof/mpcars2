@@ -915,6 +915,38 @@ const Veiculos: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Detalhamento de Despesas por Categoria */}
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5 mt-4">
+                    <p className="text-sm font-semibold text-slate-800 mb-4">Detalhamento Estratégico de Despesas</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                      {Object.entries(
+                        (financialHistory?.records || []).reduce((acc: any, record: any) => {
+                          if (record.tipo === 'despesa') {
+                            const cat = record.categoria.split('/')[0].split('-')[0].trim()
+                            acc[cat] = (acc[cat] || 0) + (Number(record.valor) || 0)
+                          }
+                          return acc
+                        }, {} as Record<string, number>)
+                      ).map(([cat, val]: any) => (
+                        <div key={cat} className="bg-white border border-slate-100 rounded-xl px-4 py-3 shadow-sm">
+                          <p className="text-xs uppercase tracking-[0.12em] text-slate-400 font-medium mb-1 truncate" title={cat}>{cat}</p>
+                          <p className="text-lg font-display font-bold text-rose-600">{formatCurrency(val)}</p>
+                        </div>
+                      ))}
+                      {Object.keys(
+                        (financialHistory?.records || []).reduce((acc: any, record: any) => {
+                          if (record.tipo === 'despesa') {
+                            const cat = record.categoria.split('/')[0].split('-')[0].trim()
+                            acc[cat] = (acc[cat] || 0) + (Number(record.valor) || 0)
+                          }
+                          return acc
+                        }, {} as Record<string, number>)
+                      ).length === 0 && (
+                        <p className="text-sm text-slate-400 italic col-span-full">Nenhuma despesa para detalhar.</p>
+                      )}
+                    </div>
+                  </div>
+
                   <div className="rounded-2xl border border-slate-200 overflow-hidden">
                     <div className="grid grid-cols-[140px_120px_1fr_140px] gap-4 border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       <span>Data</span>
