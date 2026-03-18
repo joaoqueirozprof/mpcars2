@@ -282,7 +282,7 @@ const Veiculos: React.FC = () => {
         status: vehicle.status,
         valor_aquisicao: vehicle.valor_aquisicao,
         data_compra: vehicle.data_compra,
-        observacoes: vehicle.observacoes,
+        observacoes: vehicle.observacoes || '',
       })
       // Set photo preview if vehicle has a photo
       if (vehicle.foto_url) {
