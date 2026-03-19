@@ -1160,8 +1160,8 @@ class PDFService:
             ["Margem de Lucro", "{:.1f}%".format((lucro / receita_total * 100) if receita_total > 0 else 0)],
             ["Total de Registros", str(len(records))],
         ]
-        story.append(_styled_table(summary_data, col_widths=[4*inch, 3*inch]))
-        story.append(Spacer(1, 12))
+        story.append(_styled_table(summary_data, col_widths=[3.5*inch, 2.5*inch]))
+        story.append(Spacer(1, 14))
 
         # Despesas por categoria
         if desp_por_cat:
@@ -1172,8 +1172,22 @@ class PDFService:
                 pct = (val / despesa_total * 100) if despesa_total > 0 else 0
                 cat_rows.append([cat, "R$ {:,.2f}".format(val), "{:.1f}%".format(pct)])
             cat_rows.append(["TOTAL", "R$ {:,.2f}".format(despesa_total), "100%"])
-            story.append(_styled_table(cat_rows, col_widths=[5*cm, 5*cm, 3*cm]))
+            story.append(_styled_table(cat_rows, col_widths=[6*cm, 4.5*cm, 3*cm]))
             story.append(Spacer(1, 12))
+
+        # Style for wrapped cell text
+        cell_style = ParagraphStyle("CellWrap", parent=styles["Normal"], fontSize=8, leading=10, textColor=DARK)
+        cell_bold = ParagraphStyle("CellBold", parent=styles["Normal"], fontSize=8, leading=10, textColor=DARK, fontName="Helvetica-Bold")
+        cell_green = ParagraphStyle("CellGreen", parent=styles["Normal"], fontSize=8, leading=10, textColor=colors.HexColor("#059669"), fontName="Helvetica-Bold")
+        cell_red = ParagraphStyle("CellRed", parent=styles["Normal"], fontSize=8, leading=10, textColor=colors.HexColor("#dc2626"), fontName="Helvetica-Bold")
+
+        def _fmt_date(date_str):
+            if not date_str:
+                return ""
+            try:
+                return datetime.fromisoformat(date_str.replace("Z", "+00:00")).strftime("%d/%m/%y")
+            except Exception:
+                return str(date_str)[:10]
 
         # Receitas detail
         if receitas:
@@ -1181,25 +1195,16 @@ class PDFService:
             story.append(Paragraph("<b>DETALHAMENTO DE RECEITAS ({} registros)</b>".format(len(receitas)), sec_rec))
             rev_rows = [["Data", "Categoria", "Descricao", "Valor", "Status"]]
             for r in receitas:
-                data_fmt = ""
-                if r["data"]:
-                    try:
-                        data_fmt = datetime.fromisoformat(r["data"].replace("Z", "+00:00")).strftime("%d/%m/%y")
-                    except Exception:
-                        data_fmt = str(r["data"])[:10]
-                desc = (r["descricao"] or "")[:35]
-                if len(r["descricao"] or "") > 35:
-                    desc += ".."
                 rev_rows.append([
-                    data_fmt,
-                    (r["categoria"] or "")[:15],
-                    desc,
-                    "R$ {:,.2f}".format(r["valor"]),
+                    _fmt_date(r["data"]),
+                    Paragraph((r["categoria"] or "")[:20], cell_style),
+                    Paragraph(r["descricao"] or "", cell_style),
+                    Paragraph("R$ {:,.2f}".format(r["valor"]), cell_green),
                     r["status"] or "",
                 ])
-            rev_rows.append(["", "", "TOTAL", "R$ {:,.2f}".format(receita_total), ""])
-            story.append(_styled_table(rev_rows, col_widths=[2*cm, 3*cm, 5.5*cm, 3.5*cm, 2*cm]))
-            story.append(Spacer(1, 12))
+            rev_rows.append(["", "", Paragraph("<b>TOTAL</b>", cell_bold), Paragraph("<b>R$ {:,.2f}</b>".format(receita_total), cell_green), ""])
+            story.append(_styled_table(rev_rows, col_widths=[1.8*cm, 2.8*cm, 6.5*cm, 2.8*cm, 1.8*cm]))
+            story.append(Spacer(1, 14))
 
         # Despesas detail
         if despesas:
@@ -1207,24 +1212,15 @@ class PDFService:
             story.append(Paragraph("<b>DETALHAMENTO DE DESPESAS ({} registros)</b>".format(len(despesas)), sec_desp))
             desp_rows = [["Data", "Categoria", "Descricao", "Valor", "Status"]]
             for r in despesas:
-                data_fmt = ""
-                if r["data"]:
-                    try:
-                        data_fmt = datetime.fromisoformat(r["data"].replace("Z", "+00:00")).strftime("%d/%m/%y")
-                    except Exception:
-                        data_fmt = str(r["data"])[:10]
-                desc = (r["descricao"] or "")[:35]
-                if len(r["descricao"] or "") > 35:
-                    desc += ".."
                 desp_rows.append([
-                    data_fmt,
-                    (r["categoria"] or "")[:15],
-                    desc,
-                    "R$ {:,.2f}".format(r["valor"]),
+                    _fmt_date(r["data"]),
+                    Paragraph((r["categoria"] or "")[:20], cell_style),
+                    Paragraph(r["descricao"] or "", cell_style),
+                    Paragraph("R$ {:,.2f}".format(r["valor"]), cell_red),
                     r["status"] or "",
                 ])
-            desp_rows.append(["", "", "TOTAL", "R$ {:,.2f}".format(despesa_total), ""])
-            story.append(_styled_table(desp_rows, col_widths=[2*cm, 3*cm, 5.5*cm, 3.5*cm, 2*cm]))
+            desp_rows.append(["", "", Paragraph("<b>TOTAL</b>", cell_bold), Paragraph("<b>R$ {:,.2f}</b>".format(despesa_total), cell_red), ""])
+            story.append(_styled_table(desp_rows, col_widths=[1.8*cm, 2.8*cm, 6.5*cm, 2.8*cm, 1.8*cm]))
 
         _add_footer(story, styles)
         doc.build(story)
