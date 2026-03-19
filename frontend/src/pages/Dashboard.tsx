@@ -123,7 +123,7 @@ const Dashboard: React.FC = () => {
     ? clamp(
         100
           - criticalAlerts * 12
-          - (stats.contratos_atrasados.length * 10)
+          - ((stats.contratos_atrasados || []).length * 10)
           - (stats.veiculos_manutencao * 5)
           - (stats.reservas_pendentes > 5 ? 6 : 0)
           + (stats.taxa_ocupacao >= 55 && stats.taxa_ocupacao <= 88 ? 4 : 0),
@@ -457,7 +457,7 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div className="dashboard-mini-card flex flex-col gap-2">
                   <span className="text-xs uppercase tracking-wide text-slate-500">Atrasos</span>
-                  <CountUpValue value={stats?.contratos_atrasados.length || 0} className="mt-2 text-2xl font-display font-bold text-slate-950" />
+                  <CountUpValue value={(stats?.contratos_atrasados || []).length || 0} className="mt-2 text-2xl font-display font-bold text-slate-950" />
                 </div>
                 <div className="dashboard-mini-card col-span-2 min-w-0">
                   <div className="min-w-0">
@@ -853,7 +853,7 @@ const Dashboard: React.FC = () => {
                   <div key={index} className="h-16 bg-slate-100 rounded-lg animate-pulse" />
                 ))}
               </div>
-            ) : stats?.contratos_atrasados && stats.contratos_atrasados.length > 0 ? (
+            ) : stats?.contratos_atrasados && (stats.contratos_atrasados || []).length > 0 ? (
               <div className="space-y-3">
                 {stats.contratos_atrasados.map((contrato) => (
                   <div
