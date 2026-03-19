@@ -5,6 +5,9 @@ const api: AxiosInstance = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // CRITICAL: prevent axios from following redirects that break CORS
+  maxRedirects: 0,
+  validateStatus: (status) => status < 400 || status === 307,
 })
 
 api.interceptors.request.use(
@@ -13,24 +16,6 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
-    // Ensure trailing slash ONLY on GET/DELETE to prevent FastAPI 307 redirects
-    // POST/PUT/PATCH must NOT have trailing slash (307 redirect loses request body)
-    const method = (config.method || 'get').toUpperCase()
-    if (method === 'GET' || method === 'DELETE') {
-      if (config.url) {
-        const hasQuery = config.url.includes('?')
-        if (hasQuery) {
-          const idx = config.url.indexOf('?')
-          const path = config.url.substring(0, idx)
-          const query = config.url.substring(idx)
-          if (!path.endsWith('/')) {
-            config.url = path + '/' + query
-          }
-        } else if (!config.url.endsWith('/')) {
-          config.url = config.url + '/'
-        }
-      }
-    }
     return config
   },
   (error: AxiosError) => {
@@ -38,15 +23,33 @@ api.interceptors.request.use(
   }
 )
 
-let _isRedirecting = false
-
+// Handle 307 redirects manually - fix the URL to stay on the same origin
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (response.status === 307 && response.headers.location) {
+      const location = response.headers.location as string
+      // Convert absolute redirect URL to relative path
+      let redirectPath = location
+      try {
+        const url = new URL(location)
+        redirectPath = url.pathname + url.search
+      } catch {
+        // already relative
+      }
+      // Retry the request with the corrected URL
+      return api.request({
+        ...response.config,
+        url: redirectPath,
+        baseURL: '',
+        maxRedirects: 0,
+      })
+    }
+    return response
+  },
   (error: AxiosError) => {
-    if (error.response?.status === 401 && !_isRedirecting) {
+    if (error.response?.status === 401) {
       const currentPath = window.location.pathname
       if (currentPath !== '/login') {
-        _isRedirecting = true
         localStorage.removeItem('access_token')
         localStorage.removeItem('user')
         setTimeout(() => { window.location.href = '/login' }, 100)
