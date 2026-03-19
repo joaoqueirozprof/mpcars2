@@ -1,10 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios'
 
 const getApiBaseUrl = (): string => {
-  const hostname = window.location.hostname
-  if (hostname === '72.61.129.78' || hostname === 'localhost') {
-    return `http://${hostname}:8002/api/v1`
-  }
   return '/api/v1'
 }
 
