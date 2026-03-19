@@ -103,9 +103,30 @@ def _serialize_user(user: User) -> dict:
     }
 
 
+# Simple login rate limiter: max 10 attempts per minute per IP
+_login_attempts: dict = {}
+
+def _check_login_rate(ip: str) -> bool:
+    import time
+    now = time.time()
+    # Clean old entries
+    cutoff = now - 60
+    _login_attempts[ip] = [t for t in _login_attempts.get(ip, []) if t > cutoff]
+    if len(_login_attempts.get(ip, [])) >= 10:
+        return False
+    _login_attempts.setdefault(ip, []).append(now)
+    return True
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(request: LoginRequest, req: Request, db: Session = Depends(get_db)):
     """Login with email and password. Rate limited to 10/minute per IP."""
+    client_ip = req.client.host if req.client else "unknown"
+    if not _check_login_rate(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Muitas tentativas de login. Aguarde 1 minuto.",
+        )
     normalized_email = request.email.lower()
     user = db.query(User).filter(User.email == normalized_email).first()
     if not user or not verify_password(request.password, user.hashed_password):

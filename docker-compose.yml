@@ -63,7 +63,7 @@ services:
       MAX_DB_CONNECTIONS: 50
       MAX_USER_CONNECTIONS: 50
     ports:
-      - "6432:5432"
+      # - "6432:5432"  # REMOVED: security risk
     depends_on:
       mpcars2-db:
         condition: service_healthy

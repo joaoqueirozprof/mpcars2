@@ -380,6 +380,19 @@ def update_nf_pagamento(
     return {"id": nf.id, "pago": nf.pago, "data_pagamento": str(nf.data_pagamento) if nf.data_pagamento else None, "forma_pagamento": nf.forma_pagamento}
 
 
+
+COMPROVANTE_ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"]
+COMPROVANTE_MAX_SIZE = 10 * 1024 * 1024  # 10MB
+
+def _validate_comprovante(arquivo):
+    if arquivo.content_type not in COMPROVANTE_ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="Tipo de arquivo nao permitido. Use PDF, JPEG, PNG ou WebP.")
+    contents = arquivo.file.read()
+    if len(contents) > COMPROVANTE_MAX_SIZE:
+        raise HTTPException(status_code=400, detail="Arquivo muito grande. Maximo 10MB.")
+    arquivo.file.seek(0)
+    return contents
+
 @router.post("/nf/{nf_id}/comprovante")
 def upload_nf_comprovante(
     nf_id: int,
