@@ -1251,16 +1251,22 @@ def exportar_contratos_xlsx(
 
 
 @router.get("/exportar/csv")
-def exportar_contratos_csv(
+def exportar_financeiro_csv(
+    data_inicio: Optional[str] = None,
+    data_fim: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Export contracts to CSV."""
-    buffer = ExportService.export_contratos_csv(db)
+    """Export complete financial data to CSV."""
+    from app.services.exportacao import ExportacaoService
+    parsed_start = datetime.strptime(data_inicio, "%Y-%m-%d").date() if data_inicio else None
+    parsed_end = datetime.strptime(data_fim, "%Y-%m-%d").date() if data_fim else None
+    buffer = ExportacaoService.export_financeiro(db, "csv", parsed_start, parsed_end)
+    filename = "financeiro_{}.csv".format(datetime.now().strftime("%Y%m%d"))
     return StreamingResponse(
         iter([buffer.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=contratos.csv"},
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 
