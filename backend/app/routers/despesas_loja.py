@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 from app.core.database import get_db
+from app.core.pagination import escape_like
 from app.core.deps import get_current_user, require_page_access
 from app.models.user import User
 from app.models import DespesaLoja
@@ -54,7 +55,7 @@ def list_despesas_loja(
     query = db.query(DespesaLoja)
 
     if search:
-        query = query.filter(DespesaLoja.descricao.ilike(f"%{search}%"))
+        query = query.filter(DespesaLoja.descricao.ilike(f"%{escape_like(search)}%"))
     if categoria:
         query = query.filter(DespesaLoja.categoria == categoria)
     if mes:
@@ -195,6 +196,7 @@ def create_despesa_loja(
 
 
 @router.put("/{despesa_id}")
+@router.patch("/{despesa_id}")
 def update_despesa_loja(
     despesa_id: int,
     data: DespesaLojaUpdate,

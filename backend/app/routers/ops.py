@@ -867,13 +867,17 @@ def sync_backup_now(
 def get_version_status(
     _: User = Depends(get_platform_admin_user),
 ) -> Dict[str, Any]:
+    fallback = {"branch": "unknown", "commit": "unknown", "message": "Git nao disponivel no container", "version": "production"}
     repo_path = _resolve_path(settings.GIT_REPOSITORY_PATH, ".")
     if not repo_path.exists():
-        raise HTTPException(status_code=500, detail="Repositorio git nao encontrado para leitura de versao.")
+        return fallback
 
-    branch = _run_command(["git", "rev-parse", "--abbrev-ref", "HEAD"], repo_path)
+    try:
+        branch = _run_command(["git", "rev-parse", "--abbrev-ref", "HEAD"], repo_path)
+    except HTTPException:
+        return fallback
     if branch.returncode != 0:
-        raise HTTPException(status_code=500, detail=(branch.stderr or "Falha ao consultar branch git").strip())
+        return fallback
 
     commit = _run_command(["git", "rev-parse", "HEAD"], repo_path)
     short_commit = _run_command(["git", "rev-parse", "--short", "HEAD"], repo_path)

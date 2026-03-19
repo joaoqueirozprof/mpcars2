@@ -16,7 +16,7 @@ from app.models import (
     Contrato, Cliente, Veiculo, DespesaContrato, Quilometragem,
     CheckinCheckout, Empresa, DespesaVeiculo, DespesaLoja,
     DespesaOperacional, Seguro, IpvaRegistro, Multa, Manutencao,
-    Reserva, Configuracao,
+    Reserva, Configuracao, UsoVeiculoEmpresa, RelatorioNF,
 )
 
 
@@ -367,6 +367,9 @@ class PDFService:
         rw = col_right_w
         ry = y_line - 4
 
+        # Check if it's a company contract (needed for data_entrada and later sections)
+        eh_empresa = getattr(contrato, 'tipo', 'cliente') == 'empresa'
+
         # --- QUILOMETRAGEM ---
         ry_sec = ry
         c.setFont("Helvetica-Bold", 9)
@@ -375,23 +378,29 @@ class PDFService:
         ry_sec -= 20
 
         data_saida = contrato.data_inicio.strftime("%d/%m/%Y") if contrato.data_inicio else ""
-        hora_saida = contrato.data_inicio.strftime("%H:%M") if contrato.data_inicio else ""
-        data_entrada = contrato.data_fim.strftime("%d/%m/%Y") if contrato.data_fim else ""
-        hora_entrada = contrato.data_fim.strftime("%H:%M") if contrato.data_fim else ""
-        km_saida = "{:,.0f}".format(contrato.km_inicial) if contrato.km_inicial else ""
-        km_entrada = "{:,.0f}".format(contrato.km_final) if contrato.km_final else ""
+        hora_saida = contrato.hora_saida or (contrato.data_inicio.strftime("%H:%M") if contrato.data_inicio else "")
+        data_entrada = contrato.data_fim.strftime("%d/%m/%Y") if contrato.data_fim else ("Indeterminado" if eh_empresa else "")
+        hora_entrada = contrato.combustivel_retorno or (contrato.data_fim.strftime("%H:%M") if contrato.data_fim else "")
+        km_saida = "{:,.0f}".format(float(contrato.km_inicial or 0)).replace(",", ".") if contrato.km_inicial else ""
+        km_entrada = "{:,.0f}".format(float(contrato.km_final or 0)).replace(",", ".") if contrato.km_final else ""
         km_percorridos = ""
         if contrato.km_inicial and contrato.km_final:
-            km_percorridos = "{:,.0f}".format(contrato.km_final - contrato.km_inicial)
+            km_percorridos = "{:,.0f}".format(float(contrato.km_final) - float(contrato.km_inicial)).replace(",", ".")
 
         # Quilometragem fields (2 columns)
         qh = 16
         hw2 = rw / 2
+        km_livres_str = ""
+        if contrato.km_livres:
+            km_livres_str = "{:,.0f} km".format(float(contrato.km_livres)).replace(",", ".")
+            if contrato.valor_km_excedente:
+                km_livres_str += " | R$ {:.2f}/km extra".format(float(contrato.valor_km_excedente))
+
         fields_km = [
             ("DATA SAIDA:", data_saida, "DATA ENTRADA:", data_entrada),
-            ("HORA SAIDA:", hora_saida, "HORA ENTRADA:", hora_entrada),
+            ("HORA SAIDA:", hora_saida, "COMB. SAIDA:", contrato.combustivel_saida or ""),
             ("KM SAIDA:", km_saida, "KM ENTRADA:", km_entrada),
-            ("KM LIVRES/DIA:", "", "KM PERCORRIDOS:", km_percorridos),
+            ("KM PERMITIDA:", km_livres_str, "KM PERCORRIDOS:", km_percorridos),
         ]
         for f1l, f1v, f2l, f2v in fields_km:
             draw_field_box(rx, ry_sec, f1l, f1v, hw2, qh)
@@ -403,9 +412,6 @@ class PDFService:
         c.rect(rx, ry_sec - 16, rw, 16)
         c.drawCentredString(rx + rw / 2, ry_sec - 12, "DISCRIMINACAO")
         ry_sec -= 16
-
-        # Check if it's a company contract
-        eh_empresa = getattr(contrato, 'tipo', 'cliente') == 'empresa'
 
         # Table header
         if eh_empresa:
@@ -438,9 +444,54 @@ class PDFService:
                 )
             else:
                 quant_value = str(dias_num)
+        elif contrato.data_inicio and eh_empresa:
+            quant_value = "{} - Indeterminado".format(contrato.data_inicio.strftime("%d/%m/%Y"))
 
-        rows = [
-            ("DIARIA", quant_value, valor_diaria, valor_total),
+        # Build rows - for empresa contracts, show NF period history
+        rows = []
+        _total_geral = 0.0
+        if eh_empresa:
+            # Fetch NF history for this vehicle/empresa
+            _uso_for_pdf = None
+            if empresa:
+                _uso_for_pdf = db.query(UsoVeiculoEmpresa).filter(
+                    UsoVeiculoEmpresa.empresa_id == empresa.id,
+                    UsoVeiculoEmpresa.veiculo_id == target_veiculo_id,
+                ).order_by(UsoVeiculoEmpresa.data_criacao.desc()).first()
+            _nf_records = []
+            if _uso_for_pdf:
+                _nf_records = db.query(RelatorioNF).filter(
+                    RelatorioNF.uso_id == _uso_for_pdf.id
+                ).order_by(RelatorioNF.periodo_inicio.asc()).all()
+
+            if _nf_records:
+                _diaria_val = float(contrato.valor_diaria or 0)
+                for nf in _nf_records:
+                    periodo = "{} a {}".format(
+                        nf.periodo_inicio.strftime("%d/%m/%Y") if nf.periodo_inicio else "",
+                        nf.periodo_fim.strftime("%d/%m/%Y") if nf.periodo_fim else "",
+                    )
+                    _extra = float(nf.valor_total_extra or 0)
+                    _valor_periodo = _diaria_val + _extra
+                    _total_geral += _valor_periodo
+                    rows.append((
+                        periodo,
+                        "{:.0f} km | +R$ {:.2f}".format(float(nf.km_percorrida or 0), _extra),
+                        "R$ {:,.2f}".format(_diaria_val).replace(",", "."),
+                        "R$ {:,.2f}".format(_valor_periodo).replace(",", "."),
+                    ))
+                rows.append((
+                    "TOTAL ({} periodos)".format(len(_nf_records)),
+                    "",
+                    "",
+                    "R$ {:,.2f}".format(_total_geral).replace(",", "."),
+                ))
+            else:
+                rows.append(("DIARIA", quant_value, valor_diaria, valor_total))
+        else:
+            rows.append(("DIARIA", quant_value, valor_diaria, valor_total))
+
+        rows += [
             ("HORA EXTRA", "", "", ""),
             ("KM EXCEDENTE", "", "", ""),
             ("SUB-TOTAL", "", "", valor_total),
@@ -456,11 +507,15 @@ class PDFService:
                 cx += cols[i]
             ry_sec -= 14
 
-        # TOTAL R$
+        # TOTAL R$ - use NF total for empresa contracts if available
+        _total_final_display = valor_total
+        if eh_empresa and '_total_geral' in dir():
+            _total_final_display = "R$ {:,.2f}".format(_total_geral).replace(",", ".")
+
         c.setFont("Helvetica-Bold", 7)
         c.rect(rx, ry_sec - 16, rw, 16)
         c.drawString(rx + rw * 0.5, ry_sec - 12, "TOTAL R$")
-        c.drawString(rx + rw * 0.75, ry_sec - 12, valor_total)
+        c.drawString(rx + rw * 0.75, ry_sec - 12, _total_final_display)
         ry_sec -= 20
 
         # --- CARTOES DE CREDITO ---
@@ -734,6 +789,85 @@ class PDFService:
         c.line(col2_x, sig_y - 30, col2_x + sig_line_w, sig_y - 30)
         c.drawCentredString(col2_x + sig_line_w / 2, sig_y - 40, "TESTEMUNHA 2")
 
+        # === PAGE 3: NF HISTORY (only for empresa contracts) ===
+        if contrato.tipo == "empresa" and empresa:
+            uso = db.query(UsoVeiculoEmpresa).filter(
+                UsoVeiculoEmpresa.contrato_id == contrato_id,
+                UsoVeiculoEmpresa.veiculo_id == target_veiculo_id,
+            ).first()
+            if not uso:
+                uso = db.query(UsoVeiculoEmpresa).filter(
+                    UsoVeiculoEmpresa.empresa_id == empresa.id,
+                    UsoVeiculoEmpresa.veiculo_id == target_veiculo_id,
+                ).order_by(UsoVeiculoEmpresa.data_criacao.desc()).first()
+
+            nf_records = []
+            if uso:
+                nf_records = db.query(RelatorioNF).filter(
+                    RelatorioNF.uso_id == uso.id
+                ).order_by(RelatorioNF.periodo_inicio.asc()).all()
+
+            if nf_records:
+                c.showPage()
+                y = h - margin
+
+                c.setFont("Helvetica-Bold", 16)
+                c.drawString(margin, y - 10, "HISTORICO DE PERIODOS - NOTA FISCAL")
+                y -= 30
+
+                c.setFont("Helvetica", 8)
+                c.drawString(margin, y, "Empresa: {}".format(empresa.nome))
+                y -= 12
+                c.drawString(margin, y, "CNPJ: {}".format(empresa.cnpj or ""))
+                y -= 12
+                placa_str = veiculo.placa if veiculo else ""
+                modelo_str = "{} {}".format(veiculo.marca, veiculo.modelo) if veiculo else ""
+                c.drawString(margin, y, "Veiculo: {} - {}".format(placa_str, modelo_str))
+                y -= 12
+                c.drawString(margin, y, "KM Permitida (Franquia): {} km".format(uso.km_referencia or 0))
+                y -= 20
+
+                # Table header
+                c.setFont("Helvetica-Bold", 7)
+                col_x = [margin, margin + 80, margin + 160, margin + 240, margin + 320, margin + 410]
+                headers = ["Periodo Inicio", "Periodo Fim", "KM Percorrida", "KM Excedente", "Valor Extra", "Data Emissao"]
+                for i, hdr in enumerate(headers):
+                    c.drawString(col_x[i], y, hdr)
+                y -= 2
+                c.setLineWidth(0.5)
+                c.line(margin, y, w - margin, y)
+                y -= 10
+
+                c.setFont("Helvetica", 7)
+                total_km = 0
+                total_excedente = 0
+                total_valor = 0
+                for nf in nf_records:
+                    if y < 60:
+                        c.showPage()
+                        y = h - margin
+                        c.setFont("Helvetica", 7)
+                    c.drawString(col_x[0], y, nf.periodo_inicio.strftime("%d/%m/%Y") if nf.periodo_inicio else "")
+                    c.drawString(col_x[1], y, nf.periodo_fim.strftime("%d/%m/%Y") if nf.periodo_fim else "")
+                    c.drawString(col_x[2], y, "{:,.1f} km".format(nf.km_percorrida or 0))
+                    c.drawString(col_x[3], y, "{:,.1f} km".format(nf.km_excedente or 0))
+                    c.drawString(col_x[4], y, "R$ {:,.2f}".format(float(nf.valor_total_extra or 0)))
+                    c.drawString(col_x[5], y, nf.data_criacao.strftime("%d/%m/%Y") if nf.data_criacao else "")
+                    total_km += float(nf.km_percorrida or 0)
+                    total_excedente += float(nf.km_excedente or 0)
+                    total_valor += float(nf.valor_total_extra or 0)
+                    y -= 12
+
+                # Totals
+                y -= 5
+                c.setLineWidth(0.5)
+                c.line(margin, y + 8, w - margin, y + 8)
+                c.setFont("Helvetica-Bold", 7)
+                c.drawString(col_x[0], y, "TOTAL ({} periodos)".format(len(nf_records)))
+                c.drawString(col_x[2], y, "{:,.1f} km".format(total_km))
+                c.drawString(col_x[3], y, "{:,.1f} km".format(total_excedente))
+                c.drawString(col_x[4], y, "R$ {:,.2f}".format(total_valor))
+
         c.save()
         buffer.seek(0)
         return buffer
@@ -792,17 +926,36 @@ class PDFService:
         return buffer
 
     @staticmethod
-    def generate_relatorio_financeiro_pdf(db: Session, data_inicio: str, data_fim: str) -> BytesIO:
-        """Generate financial report PDF with real data."""
+    def generate_relatorio_financeiro_pdf(
+        db: Session, data_inicio: str, data_fim: str,
+        tipo: str = None, status_filter: str = None, categoria: str = None,
+        veiculo_id: int = None, search: str = None,
+    ) -> BytesIO:
+        """Generate financial report PDF with filters."""
         di = datetime.strptime(data_inicio, "%Y-%m-%d")
         df = datetime.strptime(data_fim, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
         empresa_info = _get_empresa_info(db)
 
-        contratos = db.query(Contrato).filter(Contrato.data_criacao >= di, Contrato.data_criacao <= df).all()
-        receita_total = sum(float(c.valor_total or 0) for c in contratos)
+        # Apply filters
+        contratos_query = db.query(Contrato).filter(Contrato.data_criacao >= di, Contrato.data_criacao <= df)
+        if veiculo_id:
+            contratos_query = contratos_query.filter(Contrato.veiculo_id == veiculo_id)
+        if status_filter and status_filter != "todos":
+            contratos_query = contratos_query.filter(Contrato.status == status_filter)
+        contratos = contratos_query.all()
 
-        desp_contrato = db.query(DespesaContrato).filter(DespesaContrato.data_registro >= di, DespesaContrato.data_registro <= df).all()
-        desp_veiculo = db.query(DespesaVeiculo).filter(DespesaVeiculo.data >= di, DespesaVeiculo.data <= df).all()
+        # Filter receita/despesa by tipo
+        show_receita = tipo in (None, "todos", "receita")
+        show_despesa = tipo in (None, "todos", "despesa")
+
+        receita_total = sum(float(c.valor_total or 0) for c in contratos) if show_receita else 0
+
+        desp_contrato_query = db.query(DespesaContrato).filter(DespesaContrato.data_registro >= di, DespesaContrato.data_registro <= df)
+        desp_veiculo_query = db.query(DespesaVeiculo).filter(DespesaVeiculo.data >= di, DespesaVeiculo.data <= df)
+        if veiculo_id:
+            desp_veiculo_query = desp_veiculo_query.filter(DespesaVeiculo.veiculo_id == veiculo_id)
+        desp_contrato = desp_contrato_query.all() if show_despesa else []
+        desp_veiculo = desp_veiculo_query.all() if show_despesa else []
         # Filter DespesaLoja by month/year within the date range
         all_desp_loja = db.query(DespesaLoja).all()
         desp_loja = [d for d in all_desp_loja if di.year <= d.ano <= df.year and (
@@ -811,6 +964,28 @@ class PDFService:
             (d.ano > di.year and d.ano < df.year) or
             (d.ano == df.year and d.ano > di.year and d.mes <= df.month)
         )]
+
+        # Apply categoria filter
+        if categoria:
+            cat_lower = categoria.lower()
+            if show_receita and cat_lower not in ("locacao", "locação", "faturamento empresa"):
+                contratos = []
+                receita_total = 0
+            if show_despesa:
+                if "manutencao" in cat_lower or "manutenção" in cat_lower:
+                    desp_contrato = []
+                    desp_loja = []
+                elif "loja" in cat_lower:
+                    desp_contrato = []
+                    desp_veiculo = []
+                elif "veiculo" in cat_lower or "veículo" in cat_lower:
+                    desp_contrato = []
+                    desp_loja = []
+
+        # Apply search filter
+        if search:
+            s = search.lower()
+            contratos = [ct for ct in contratos if s in (ct.numero or "").lower() or s in str(ct.valor_total or "")]
 
         total_desp_contrato = sum(float(d.valor or 0) for d in desp_contrato)
         total_desp_veiculo = sum(float(d.valor or 0) for d in desp_veiculo)
@@ -823,7 +998,21 @@ class PDFService:
         story = []
         styles = getSampleStyleSheet()
 
-        _add_header(story, styles, "RELATORIO FINANCEIRO", "Periodo: {} a {}".format(di.strftime("%d/%m/%Y"), df.strftime("%d/%m/%Y")), empresa_info)
+        filtros_desc = "Periodo: {} a {}".format(di.strftime("%d/%m/%Y"), df.strftime("%d/%m/%Y"))
+        filtros_extras = []
+        if tipo and tipo != "todos":
+            filtros_extras.append("Tipo: {}".format(tipo.capitalize()))
+        if status_filter and status_filter != "todos":
+            filtros_extras.append("Status: {}".format(status_filter.capitalize()))
+        if categoria:
+            filtros_extras.append("Categoria: {}".format(categoria))
+        if veiculo_id:
+            v = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
+            if v:
+                filtros_extras.append("Veiculo: {} {}".format(v.placa, v.modelo))
+        if filtros_extras:
+            filtros_desc += " | " + " | ".join(filtros_extras)
+        _add_header(story, styles, "RELATORIO FINANCEIRO", filtros_desc, empresa_info)
 
         summary_data = [
             ["Metrica", "Valor"],
@@ -838,14 +1027,64 @@ class PDFService:
         story.append(_styled_table(summary_data, col_widths=[4*inch, 3*inch]))
         story.append(Spacer(1, 20))
 
-        if contratos:
+        if contratos and show_receita:
             sec_style = ParagraphStyle("S", parent=styles["Heading2"], fontSize=13, textColor=PRIMARY, spaceAfter=8)
             story.append(Paragraph("<b>DETALHAMENTO DE RECEITAS</b>", sec_style))
-            rev_rows = [["Contrato", "Cliente", "Valor", "Status"]]
-            for c in contratos:
-                cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
-                rev_rows.append([c.numero, cliente.nome if cliente else "N/A", "R$ {:,.2f}".format(float(c.valor_total or 0)), c.status])
-            story.append(_styled_table(rev_rows, col_widths=[3*cm, 5*cm, 4*cm, 3*cm]))
+            rev_rows = [["Contrato", "Cliente", "Veiculo", "Periodo", "Valor", "Status"]]
+            for ct in contratos:
+                cliente = db.query(Cliente).filter(Cliente.id == ct.cliente_id).first()
+                veiculo = db.query(Veiculo).filter(Veiculo.id == ct.veiculo_id).first()
+                numero_curto = ct.numero[-8:] if ct.numero and len(ct.numero) > 8 else (ct.numero or "")
+                cliente_nome = (cliente.nome[:15] + "..") if cliente and len(cliente.nome) > 17 else (cliente.nome if cliente else "N/A")
+                placa = veiculo.placa if veiculo else "-"
+                periodo = ""
+                if ct.data_inicio:
+                    periodo = ct.data_inicio.strftime("%d/%m/%y")
+                    if ct.data_fim:
+                        periodo += " a " + ct.data_fim.strftime("%d/%m/%y")
+                    else:
+                        periodo += " - Indet."
+                rev_rows.append([
+                    numero_curto,
+                    cliente_nome,
+                    placa,
+                    periodo,
+                    "R$ {:,.2f}".format(float(ct.valor_total or 0)),
+                    ct.status or "",
+                ])
+            story.append(_styled_table(rev_rows, col_widths=[2.2*cm, 3.5*cm, 2*cm, 3.5*cm, 3*cm, 2*cm]))
+
+        # Expense details
+        if desp_contrato or desp_veiculo or desp_loja:
+            story.append(Spacer(1, 15))
+            sec_desp = ParagraphStyle("SD", parent=styles["Heading2"], fontSize=13, textColor=colors.HexColor("#dc2626"), spaceAfter=8)
+            story.append(Paragraph("<b>DETALHAMENTO DE DESPESAS</b>", sec_desp))
+
+            if desp_contrato:
+                story.append(Paragraph("<b>Despesas de Contrato</b>", styles["Normal"]))
+                desp_c_rows = [["Tipo", "Descricao", "Valor"]]
+                for d in desp_contrato:
+                    desp_c_rows.append([d.tipo or "", (d.descricao or "")[:30], "R$ {:,.2f}".format(float(d.valor or 0))])
+                desp_c_rows.append(["", "TOTAL", "R$ {:,.2f}".format(total_desp_contrato)])
+                story.append(_styled_table(desp_c_rows, col_widths=[3*cm, 8*cm, 4*cm]))
+                story.append(Spacer(1, 10))
+
+            if desp_veiculo:
+                story.append(Paragraph("<b>Despesas de Veiculo</b>", styles["Normal"]))
+                desp_v_rows = [["Tipo", "Descricao", "Valor"]]
+                for d in desp_veiculo:
+                    desp_v_rows.append([d.tipo or "", (d.descricao or "")[:30], "R$ {:,.2f}".format(float(d.valor or 0))])
+                desp_v_rows.append(["", "TOTAL", "R$ {:,.2f}".format(total_desp_veiculo)])
+                story.append(_styled_table(desp_v_rows, col_widths=[3*cm, 8*cm, 4*cm]))
+                story.append(Spacer(1, 10))
+
+            if desp_loja:
+                story.append(Paragraph("<b>Despesas de Loja</b>", styles["Normal"]))
+                desp_l_rows = [["Categoria", "Descricao", "Mes/Ano", "Valor"]]
+                for d in desp_loja:
+                    desp_l_rows.append([d.categoria or "", (d.descricao or "")[:25], "{}/{}".format(d.mes, d.ano), "R$ {:,.2f}".format(float(d.valor or 0))])
+                desp_l_rows.append(["", "", "TOTAL", "R$ {:,.2f}".format(total_desp_loja)])
+                story.append(_styled_table(desp_l_rows, col_widths=[3*cm, 5*cm, 2.5*cm, 4*cm]))
 
         _add_footer(story, styles)
         doc.build(story)

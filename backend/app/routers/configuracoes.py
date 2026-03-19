@@ -24,8 +24,13 @@ class ConfiguracaoResponse(BaseModel):
         from_attributes = True
 
 
+class ConfiguracaoItem(BaseModel):
+    chave: str
+    valor: Optional[str] = None
+
+
 class ConfiguracaoBatch(BaseModel):
-    items: List[dict]
+    items: List[ConfiguracaoItem]
 
 
 @router.get("/", response_model=List[ConfiguracaoResponse])
@@ -50,8 +55,8 @@ def update_batch_configuracoes(
     config_map = {c.chave: c for c in all_configs}
 
     for item in batch.items:
-        chave = item.get("chave")
-        valor = item.get("valor")
+        chave = item.chave
+        valor = item.valor
         if not chave:
             continue
         if chave in config_map:

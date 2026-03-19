@@ -10,7 +10,7 @@ from typing import Optional, List
 from datetime import date
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_page_access
-from app.core.pagination import paginate
+from app.core.pagination import escape_like, paginate, strip_html
 from app.models.user import User
 from app.models import (
     Veiculo, DespesaVeiculo, Contrato, DespesaOperacional,
@@ -38,6 +38,17 @@ def _nf_total_for_uso(uso: Optional[UsoVeiculoEmpresa], relatorio: RelatorioNF) 
 
 
 def _sanitize_veiculo_payload(payload: dict) -> dict:
+    for field in ("marca", "modelo", "cor", "observacoes"):
+        if field in payload and isinstance(payload[field], str):
+            payload[field] = strip_html(payload[field])
+    VALID_STATUS = {"disponivel", "alugado", "manutencao", "reservado", "inativo"}
+    if "status" in payload and payload["status"] not in VALID_STATUS:
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Status invalido. Valores aceitos: {', '.join(sorted(VALID_STATUS))}",
+        )
+
     sanitized: dict = {}
     for key, value in payload.items():
         if not hasattr(Veiculo, key):
@@ -141,9 +152,9 @@ def search_veiculos(
 
     if q:
         query = query.filter(
-            (Veiculo.placa.ilike("%{}%".format(q)))
-            | (Veiculo.marca.ilike("%{}%".format(q)))
-            | (Veiculo.modelo.ilike("%{}%".format(q)))
+            (Veiculo.placa.ilike("%{}%".format(escape_like(q))))
+            | (Veiculo.marca.ilike("%{}%".format(escape_like(q))))
+            | (Veiculo.modelo.ilike("%{}%".format(escape_like(q))))
         )
 
     if status:
@@ -250,7 +261,7 @@ def get_veiculo_financial_analysis(
 
     # Custos com IPVA
     total_ipva = float(db.query(
-        sqlfunc.coalesce(sqlfunc.sum(IpvaRegistro.valor), 0)
+        sqlfunc.coalesce(sqlfunc.sum(IpvaRegistro.valor_ipva), 0)
     ).filter(IpvaRegistro.veiculo_id == veiculo_id).scalar())
 
     # Totais
@@ -608,6 +619,10 @@ def update_veiculo(
         )
 
     update_data = _sanitize_veiculo_payload(veiculo_data.model_dump(exclude_unset=True))
+    if 'placa' in update_data and update_data['placa'] and update_data['placa'] != veiculo.placa:
+        existing = db.query(Veiculo).filter(Veiculo.placa == update_data['placa'], Veiculo.id != veiculo_id).first()
+        if existing:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Placa ja cadastrada em outro veiculo')
     for key, value in update_data.items():
         setattr(veiculo, key, value)
 

@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     SECRET_KEY: Optional[str] = None
 
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
     PASSWORD_MIN_LENGTH: int = 8
     ALLOW_PUBLIC_REGISTRATION: bool = False
     SEED_ON_STARTUP: bool = True
@@ -88,6 +88,9 @@ class Settings(BaseSettings):
 
         if self.ENVIRONMENT in {"production", "staging"} and not self.SECRET_KEY:
             raise ValueError("SECRET_KEY deve ser configurado via secrets em produção")
+        if not self.SECRET_KEY:
+            import secrets as _secrets
+            self.SECRET_KEY = _secrets.token_hex(32)
 
     @field_validator("CORS_ORIGINS", "TRUSTED_HOSTS", mode="before")
     @classmethod

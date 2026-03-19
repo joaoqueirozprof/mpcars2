@@ -200,3 +200,46 @@ def gerar_alertas_diarios():
         raise e
     finally:
         db.close()
+
+
+
+@celery.task(name='app.tasks.alertas.verificar_contratos_expirando')
+def verificar_contratos_expirando():
+    """Verifica contratos que estao perto de expirar (rodada de hora em hora)."""
+    db = SessionLocal()
+    try:
+        now = datetime.now()
+        future_48h = now + timedelta(hours=48)
+        rows = db.execute(text(
+            "SELECT c.id, cl.nome, c.data_fim FROM contratos c "
+            "JOIN clientes cl ON cl.id = c.cliente_id "
+            "WHERE c.status = 'ativo' AND c.data_fim BETWEEN :now AND :future"
+        ), {'now': now, 'future': future_48h}).fetchall()
+        if not rows:
+            return 'Nenhum contrato expirando nas proximas 48h'
+        for r in rows:
+            existing = db.execute(text(
+                "SELECT id FROM alerta_historico WHERE tipo_alerta = 'Contrato expirando' "
+                "AND entidade_id = :eid AND resolvido = false "
+                "AND data_criacao > :hoje"
+            ), {'eid': r[0], 'hoje': now.replace(hour=0, minute=0, second=0)}).first()
+            if existing:
+                continue
+            db.execute(text(
+                "INSERT INTO alerta_historico (tipo_alerta, urgencia, entidade_tipo, entidade_id, "
+                "titulo, descricao, data_criacao, resolvido) "
+                "VALUES ('Contrato expirando', 'critico', 'contrato', :eid, "
+                ":titulo, :desc, :now, false)"
+            ), {
+                'eid': r[0],
+                'titulo': 'Contrato #{} de {} expira em breve'.format(r[0], r[1]),
+                'desc': 'Expira em: {}'.format(r[2]),
+                'now': now,
+            })
+        db.commit()
+        return 'Verificados {} contratos expirando'.format(len(rows))
+    except Exception as e:
+        db.rollback()
+        raise e
+    finally:
+        db.close()

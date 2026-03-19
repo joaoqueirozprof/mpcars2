@@ -23,6 +23,7 @@ celery.conf.update(
     result_expires=86400,
     task_acks_late=True,
     task_reject_on_worker_lost=True,
+    broker_connection_retry_on_startup=True,
     worker_concurrency=4,
 )
 
@@ -83,7 +84,7 @@ celery.conf.beat_schedule = {
     },
     "verificar-contratos-expirando": {
         "task": "app.tasks.alertas.verificar_contratos_expirando",
-        "schedule": crontab(hour="*/1"),
+        "schedule": crontab(minute=0, hour="*/1"),
     },
     "backup-diario": {
         "task": "app.tasks.backup.executar_backup",
@@ -91,7 +92,7 @@ celery.conf.beat_schedule = {
     },
 }
 
-celery.autodiscover_tasks(["app.tasks"])
+celery.autodiscover_tasks(["app.tasks", "app.tasks.alertas", "app.tasks.maintenance", "app.tasks.backup"])
 
 
 @celery.task(bind=True, max_retries=3)

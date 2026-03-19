@@ -89,7 +89,7 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     nome = Column(String, nullable=False)
-    perfil = Column(String, default="admin")
+    perfil = Column(String, default="operador")
     ativo = Column(Boolean, default=True)
     permitted_pages = Column(JSON, default=list)
     password_reset_token_hash = Column(String, nullable=True)

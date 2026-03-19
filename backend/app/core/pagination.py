@@ -1,7 +1,19 @@
 """Pagination helper for all routers."""
+import logging
 from typing import Optional
 from sqlalchemy.orm import Query
 import math
+
+
+def strip_html(value: str) -> str:
+    """Remove HTML tags from user input to prevent stored XSS."""
+    import re
+    return re.sub(r'<[^>]+>', '', value).strip() if value else value
+
+
+def escape_like(value: str) -> str:
+    """Escape LIKE wildcard characters in user input."""
+    return value.replace("%", r"\%").replace("_", r"\_")
 
 
 def _apply_legacy_aliases(item, result: dict) -> dict:
@@ -87,7 +99,7 @@ def _serialize_item(item) -> dict:
                 else:
                     result[rel_name] = None
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("Pagination serialization error", exc_info=True)
 
     return _apply_legacy_aliases(item, result)
 
@@ -107,6 +119,10 @@ def paginate(
     Apply pagination, search, and filters to a SQLAlchemy query.
     Returns dict matching PaginatedResponse format.
     """
+    # Clamp page and limit to valid values
+    page = max(1, page)
+    limit = max(1, min(limit, 500))
+
     from sqlalchemy import or_
 
     # Apply search filter
@@ -115,7 +131,7 @@ def paginate(
         for field_name in search_fields:
             field = getattr(model, field_name, None)
             if field is not None:
-                search_conditions.append(field.ilike(f"%{search}%"))
+                search_conditions.append(field.ilike(f"%{escape_like(search)}%"))
         if search_conditions:
             query = query.filter(or_(*search_conditions))
 

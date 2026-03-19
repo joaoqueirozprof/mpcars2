@@ -155,8 +155,7 @@ async def validation_exception_handler(
             })
 
     logger.warning(
-        f"Validation error: {len(errors)} errors",
-        extra={"path": str(request.url), "errors": errors},
+        f"Validation error on {request.method} {request.url.path}: {errors}",
     )
 
     return JSONResponse(

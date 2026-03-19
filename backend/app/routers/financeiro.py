@@ -1,10 +1,10 @@
 from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, ConfigDict, field_validator
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_page_access
@@ -87,6 +87,13 @@ class LancamentoFinanceiroUpdate(BaseModel):
     valor: Optional[float] = None
     data: Optional[date] = None
     status: Optional[str] = None
+
+    @field_validator("valor")
+    @classmethod
+    def valor_must_be_positive(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("Valor deve ser positivo")
+        return v
 
 
 def _parse_date_range(
@@ -393,7 +400,9 @@ def _serialize_contrato_record(contrato: Contrato, cliente_nome: str) -> dict:
 
 
 def _relatorio_nf_total(relatorio: RelatorioNF, uso: Optional[UsoVeiculoEmpresa]) -> float:
-    valor_base = float(uso.valor_diaria_empresa or 0) if uso else 0.0
+    if relatorio.valor_total_periodo:
+        return float(relatorio.valor_total_periodo)
+    valor_base = float(relatorio.valor_diaria or (uso.valor_diaria_empresa if uso else 0) or 0)
     valor_extra = float(relatorio.valor_total_extra or 0)
     return round(valor_base + valor_extra, 2)
 
@@ -428,7 +437,7 @@ def _serialize_relatorio_nf_record(
         ),
         "valor": _relatorio_nf_total(relatorio, uso),
         "valor_recebido": 0.0,
-        "status": "pendente",
+        "status": "pago" if relatorio.pago else "pendente",
         "veiculo_id": str(relatorio.veiculo_id) if relatorio.veiculo_id else None,
         "origem_tipo": "nf_empresa",
     }
@@ -446,6 +455,7 @@ def list_financeiro(
     mes: Optional[int] = None,
     ano: Optional[int] = None,
     veiculo_id: Optional[int] = None,
+    categoria: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -459,12 +469,16 @@ def list_financeiro(
     )
     records = []
 
-    contratos = db.query(Contrato).all()
+    contratos_query = db.query(Contrato)
+    if start_date:
+        contratos_query = contratos_query.filter(Contrato.data_criacao >= start_date)
+    if end_date:
+        contratos_query = contratos_query.filter(Contrato.data_criacao <= end_date)
+    contratos = contratos_query.options(joinedload(Contrato.cliente)).all()
     for contrato in contratos:
         if str(contrato.tipo or "").lower() == "empresa":
             continue
-        cliente = db.query(Cliente).filter(Cliente.id == contrato.cliente_id).first() if contrato.cliente_id else None
-        cliente_nome = cliente.nome if cliente else "Desconhecido"
+        cliente_nome = contrato.cliente.nome if contrato.cliente else "Desconhecido"
         records.append(
             {
                 "id": f"c-{contrato.id}",
@@ -477,7 +491,12 @@ def list_financeiro(
             }
         )
 
-    relatorios_nf = db.query(RelatorioNF).all()
+    nf_query = db.query(RelatorioNF)
+    if start_date:
+        nf_query = nf_query.filter(RelatorioNF.data_criacao >= start_date)
+    if end_date:
+        nf_query = nf_query.filter(RelatorioNF.data_criacao <= end_date)
+    relatorios_nf = nf_query.all()
     uso_ids = [relatorio.uso_id for relatorio in relatorios_nf if relatorio.uso_id]
     usos_empresa = {}
     empresas = {}
@@ -642,6 +661,8 @@ def list_financeiro(
     if tipo:
         records = [record for record in records if record["tipo"] == tipo]
 
+    if categoria:
+        records = [r for r in records if categoria.lower() in (r.get("categoria") or "").lower()]
     if status:
         records = [record for record in records if record["status"] == status]
 
@@ -724,6 +745,11 @@ def get_resumo(
         _relatorio_nf_total(relatorio, usos_empresa.get(relatorio.uso_id))
         for relatorio in relatorios_nf
     )
+    total_receita_nf_recebida = sum(
+        _relatorio_nf_total(relatorio, usos_empresa.get(relatorio.uso_id))
+        for relatorio in relatorios_nf
+        if relatorio.pago
+    )
 
     total_despesa_contrato = 0.0 if veiculo_id else sum(float(despesa.valor) for despesa in query_dc.all() if despesa.valor)
     total_despesa_veiculo = sum(float(despesa.valor) for despesa in query_dv.all() if despesa.valor)
@@ -757,7 +783,7 @@ def get_resumo(
         )
 
     total_receita += total_manual_receita + total_receita_nf
-    total_receita_recebida += total_manual_receita_recebida
+    total_receita_recebida += total_manual_receita_recebida + total_receita_nf_recebida
     total_receita_pendente = max(total_receita - total_receita_recebida, 0.0)
     total_despesa = (
         total_despesa_contrato
@@ -1096,13 +1122,47 @@ def delete_registro_financeiro(
         )
         db.query(Multa).filter(Multa.contrato_id == real_id).delete(synchronize_session=False)
         obj = contrato
+    elif prefix == "mt":
+        obj = db.query(Manutencao).filter(Manutencao.id == real_id).first()
+    elif prefix == "sg":
+        obj = db.query(Seguro).filter(Seguro.id == real_id).first()
+    elif prefix == "ip":
+        obj = db.query(IpvaRegistro).filter(IpvaRegistro.id == real_id).first()
+    elif prefix == "ml":
+        obj = db.query(Multa).filter(Multa.id == real_id).first()
+    elif prefix == "nf":
+        obj = db.query(RelatorioNF).filter(RelatorioNF.id == real_id).first()
     else:
         raise HTTPException(status_code=400, detail="Tipo de registro desconhecido")
 
     if not obj:
         raise HTTPException(status_code=404, detail="Registro não encontrado")
 
+    # Track vehicle for status recalculation after deletion
+    veiculo_to_update = None
+    if prefix in ("c", "mt") and hasattr(obj, "veiculo_id") and obj.veiculo_id:
+        veiculo_to_update = db.query(Veiculo).filter(Veiculo.id == obj.veiculo_id).first()
+
     db.delete(obj)
+    db.flush()
+
+    # Recalculate vehicle status after deletion
+    if veiculo_to_update:
+        if prefix == "c":
+            active = db.query(Contrato).filter(
+                Contrato.veiculo_id == veiculo_to_update.id,
+                Contrato.status == "ativo"
+            ).first()
+            if not active:
+                veiculo_to_update.status = "disponivel"
+        elif prefix == "mt":
+            open_maint = db.query(Manutencao).filter(
+                Manutencao.veiculo_id == veiculo_to_update.id,
+                Manutencao.status.in_(["pendente", "agendada", "em_andamento"])
+            ).first()
+            if not open_maint and veiculo_to_update.status == "manutencao":
+                veiculo_to_update.status = "disponivel"
+
     db.commit()
     log_activity(
         db,
@@ -1117,8 +1177,8 @@ def delete_registro_financeiro(
 
 @router.get("/faturamento")
 def get_faturamento(
-    mes: Optional[int] = None,
-    ano: Optional[int] = None,
+    mes: Optional[int] = Query(None, ge=1, le=12),
+    ano: Optional[int] = Query(None, ge=2020, le=2099),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1154,6 +1214,12 @@ def get_relatorio_avancado(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Formato de data inválido"
+        )
+
+    if inicio > fim:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Data inicio deve ser anterior a data fim",
         )
 
     contratos = db.query(Contrato).filter(
@@ -1200,13 +1266,29 @@ def exportar_contratos_csv(
 
 @router.get("/relatorio-pdf")
 def get_relatorio_pdf(
-    data_inicio: str,
-    data_fim: str,
+    data_inicio: str = "2020-01-01",
+    data_fim: str = "2099-12-31",
+    tipo: Optional[str] = None,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    categoria: Optional[str] = None,
+    veiculo_id: Optional[int] = None,
+    search: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate financial report PDF."""
-    pdf_buffer = PDFService.generate_relatorio_financeiro_pdf(db, data_inicio, data_fim)
+    """Generate financial report PDF with filters."""
+    try:
+        inicio = datetime.strptime(data_inicio, "%Y-%m-%d")
+        fim = datetime.strptime(data_fim, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Formato de data invalido (YYYY-MM-DD)")
+    if inicio > fim:
+        raise HTTPException(status_code=400, detail="Data inicio deve ser anterior a data fim")
+    pdf_buffer = PDFService.generate_relatorio_financeiro_pdf(
+        db, data_inicio, data_fim,
+        tipo=tipo, status_filter=status_filter, categoria=categoria,
+        veiculo_id=veiculo_id, search=search,
+    )
     return StreamingResponse(
         iter([pdf_buffer.getvalue()]),
         media_type="application/pdf",

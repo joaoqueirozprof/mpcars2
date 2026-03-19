@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 import csv
 
 
+MAX_EXPORT_ROWS = 10000
+
 class ExportService:
     """Service for exporting data to CSV and XLSX formats."""
 
@@ -56,7 +58,7 @@ class ExportService:
             if filters.get("status"):
                 query = query.filter(Contrato.status == filters["status"])
 
-        contratos = query.all()
+        contratos = query.limit(MAX_EXPORT_ROWS).all()
 
         # Add data
         for contrato, cliente, veiculo in contratos:
@@ -127,7 +129,7 @@ class ExportService:
             cell.font = header_font
 
         # Query vehicles
-        veiculos = db.query(Veiculo).all()
+        veiculos = db.query(Veiculo).limit(MAX_EXPORT_ROWS).all()
 
         # Add data
         for veiculo in veiculos:
@@ -186,7 +188,7 @@ class ExportService:
             cell.font = header_font
 
         # Query clients
-        clientes = db.query(Cliente).all()
+        clientes = db.query(Cliente).limit(MAX_EXPORT_ROWS).all()
 
         # Add data
         for cliente in clientes:
@@ -241,7 +243,7 @@ class ExportService:
             cell.fill = header_fill
             cell.font = header_font
 
-        despesas_contrato = db.query(DespesaContrato).all()
+        despesas_contrato = db.query(DespesaContrato).limit(MAX_EXPORT_ROWS).all()
         for despesa in despesas_contrato:
             ws1.append(
                 [
@@ -263,7 +265,7 @@ class ExportService:
             cell.fill = header_fill
             cell.font = header_font
 
-        despesas_veiculo = db.query(DespesaVeiculo).all()
+        despesas_veiculo = db.query(DespesaVeiculo).limit(MAX_EXPORT_ROWS).all()
         for despesa in despesas_veiculo:
             ws2.append(
                 [
@@ -285,7 +287,7 @@ class ExportService:
             cell.fill = header_fill
             cell.font = header_font
 
-        despesas_loja = db.query(DespesaLoja).all()
+        despesas_loja = db.query(DespesaLoja).limit(MAX_EXPORT_ROWS).all()
         for despesa in despesas_loja:
             ws3.append(
                 [
@@ -320,7 +322,7 @@ class ExportService:
             Cliente, Contrato.cliente_id == Cliente.id
         ).join(Veiculo, Contrato.veiculo_id == Veiculo.id)
 
-        contratos = query.all()
+        contratos = query.limit(MAX_EXPORT_ROWS).all()
 
         # Write CSV
         text_buffer = StringIO()

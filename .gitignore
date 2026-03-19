@@ -14,3 +14,9 @@ node_modules/
 frontend/.npm-cache/
 backend/tests/.test.sqlite3
 secrets/
+backups/
+emergency_backups/
+frontend/dist_backup_*/
+frontend/dist/
+*.sql.gz
+*.bak

@@ -153,7 +153,7 @@ def validate_phone(phone: str) -> bool:
     if not phone:
         return False
     
-    phone = re.sub(r'[^0-9]', '')
+    phone = re.sub(r'[^0-9]', '', phone)
     
     if len(phone) < 10 or len(phone) > 13:
         return False

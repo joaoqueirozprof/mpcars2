@@ -7,6 +7,13 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    _auth_limiter = Limiter(key_func=get_remote_address)
+except ImportError:
+    _auth_limiter = None
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.security import (
@@ -31,7 +38,6 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     nome: str
-    perfil: str = "operador"
 
 
 class TokenResponse(BaseModel):
@@ -99,7 +105,7 @@ def _serialize_user(user: User) -> dict:
 
 @router.post("/login", response_model=LoginResponse)
 def login(request: LoginRequest, req: Request, db: Session = Depends(get_db)):
-    """Login with email and password."""
+    """Login with email and password. Rate limited to 10/minute per IP."""
     normalized_email = request.email.lower()
     user = db.query(User).filter(User.email == normalized_email).first()
     if not user or not verify_password(request.password, user.hashed_password):

@@ -274,6 +274,8 @@ def create_manutencao(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
         )
 
+    if manutencao_data.get("custo") is not None and float(manutencao_data["custo"]) < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Custo nao pode ser negativo")
     db_manutencao = Manutencao(**manutencao_data)
     db.add(db_manutencao)
     db.flush()
@@ -453,6 +455,18 @@ def update_manutencao(
 
     previous_vehicle = manutencao.veiculo
     update_data = _normalize_manutencao_payload(manutencao_data.model_dump(exclude_unset=True))
+
+    # Validate status transitions: terminal states cannot go backward
+    if "status" in update_data and update_data["status"]:
+        current = manutencao.status or "pendente"
+        target = update_data["status"]
+        terminal = {"concluida", "cancelada"}
+        if current in terminal and target not in terminal:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Manutencao {current} nao pode voltar para {target}",
+            )
+
     for key, value in update_data.items():
         setattr(manutencao, key, value)
 

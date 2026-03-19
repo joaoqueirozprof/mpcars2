@@ -1,22 +1,20 @@
-import math
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy import distinct, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_page_access
-from app.core.pagination import paginate
+from app.core.pagination import escape_like, paginate
 from app.models import (
     CheckinCheckout,
     Cliente,
     Contrato,
     DespesaContrato,
-    Empresa,
     Multa,
     ProrrogacaoContrato,
     Quilometragem,
@@ -24,8 +22,32 @@ from app.models import (
     Veiculo,
 )
 from app.models.user import User
+from app.schemas.contratos import (
+    ContratoCreate,
+    ContratoFinalizeRequest,
+    ContratoPaymentUpdate,
+    ContratoResponse,
+    ContratoUpdate,
+    DespesaContratoResponse,
+)
 from app.services.activity_logger import log_activity
+from app.services.contratos import (
+    apply_payment_details,
+    append_observacao,
+    calcular_qtd_diarias,
+    calcular_valor_total,
+    ensure_cliente_exists,
+    ensure_veiculo_available,
+    normalize_contrato_payload,
+    normalize_finalizacao_payload,
+    recalcular_status_veiculo,
+    resolve_cliente_contrato,
+    resolver_data_fim,
+    sincronizar_uso_empresa,
+    validar_datas,
+)
 from app.services.pdf_service import PDFService
+from app.routers.dashboard import invalidate_dashboard_cache
 
 
 router = APIRouter(
@@ -33,581 +55,6 @@ router = APIRouter(
     tags=["Contratos"],
     dependencies=[Depends(require_page_access("contratos"))],
 )
-
-
-class ContratoBase(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    numero: Optional[str] = None
-    cliente_id: int
-    veiculo_id: int
-    data_inicio: datetime | date
-    data_fim: Optional[datetime | date] = None
-    km_inicial: Optional[float] = None
-    quilometragem_inicial: Optional[float] = None
-    km_atual_veiculo: Optional[float] = None
-    km_final: Optional[float] = None
-    quilometragem_final: Optional[float] = None
-    valor_diaria: float
-    valor_total: Optional[float] = None
-    status: str = "ativo"
-    observacoes: Optional[str] = None
-    hora_saida: Optional[str] = None
-    combustivel_saida: Optional[str] = None
-    combustivel_retorno: Optional[str] = None
-    km_livres: Optional[float] = None
-    qtd_diarias: Optional[int] = None
-    valor_hora_extra: Optional[float] = None
-    valor_km_excedente: Optional[float] = None
-    valor_avarias: Optional[float] = None
-    taxa_combustivel: Optional[float] = None
-    taxa_limpeza: Optional[float] = None
-    taxa_higienizacao: Optional[float] = None
-    taxa_pneus: Optional[float] = None
-    taxa_acessorios: Optional[float] = None
-    valor_franquia_seguro: Optional[float] = None
-    taxa_administrativa: Optional[float] = None
-    desconto: Optional[float] = None
-    status_pagamento: Optional[str] = "pendente"
-    forma_pagamento: Optional[str] = None
-    data_vencimento_pagamento: Optional[date] = None
-    data_pagamento: Optional[date] = None
-    valor_recebido: Optional[float] = None
-    tipo: Optional[str] = "cliente"
-    vigencia_indeterminada: Optional[bool] = False
-    empresa_uso_id: Optional[int] = None
-    empresa_id: Optional[int] = None
-
-
-class ContratoCreate(ContratoBase):
-    pass
-
-
-class ContratoUpdate(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    numero: Optional[str] = None
-    cliente_id: Optional[int] = None
-    veiculo_id: Optional[int] = None
-    data_inicio: Optional[datetime | date] = None
-    data_fim: Optional[datetime | date] = None
-    km_inicial: Optional[float] = None
-    quilometragem_inicial: Optional[float] = None
-    km_atual_veiculo: Optional[float] = None
-    km_final: Optional[float] = None
-    quilometragem_final: Optional[float] = None
-    valor_diaria: Optional[float] = None
-    valor_total: Optional[float] = None
-    status: Optional[str] = None
-    observacoes: Optional[str] = None
-    hora_saida: Optional[str] = None
-    combustivel_saida: Optional[str] = None
-    combustivel_retorno: Optional[str] = None
-    km_livres: Optional[float] = None
-    qtd_diarias: Optional[int] = None
-    valor_hora_extra: Optional[float] = None
-    valor_km_excedente: Optional[float] = None
-    valor_avarias: Optional[float] = None
-    taxa_combustivel: Optional[float] = None
-    taxa_limpeza: Optional[float] = None
-    taxa_higienizacao: Optional[float] = None
-    taxa_pneus: Optional[float] = None
-    taxa_acessorios: Optional[float] = None
-    valor_franquia_seguro: Optional[float] = None
-    taxa_administrativa: Optional[float] = None
-    desconto: Optional[float] = None
-    status_pagamento: Optional[str] = None
-    forma_pagamento: Optional[str] = None
-    data_vencimento_pagamento: Optional[date] = None
-    data_pagamento: Optional[date] = None
-    valor_recebido: Optional[float] = None
-    tipo: Optional[str] = None
-    vigencia_indeterminada: Optional[bool] = None
-    empresa_uso_id: Optional[int] = None
-    empresa_id: Optional[int] = None
-
-
-class ContratoFinalizeRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    km_final: Optional[float] = None
-    quilometragem_final: Optional[float] = None
-    km_atual_veiculo: Optional[float] = None
-    combustivel_retorno: Optional[str] = None
-    itens_checklist: Optional[dict] = None
-    valor_avarias: Optional[float] = None
-    taxa_combustivel: Optional[float] = None
-    taxa_limpeza: Optional[float] = None
-    taxa_higienizacao: Optional[float] = None
-    taxa_pneus: Optional[float] = None
-    taxa_acessorios: Optional[float] = None
-    valor_franquia_seguro: Optional[float] = None
-    taxa_administrativa: Optional[float] = None
-    desconto: Optional[float] = None
-    status_pagamento: Optional[str] = None
-    forma_pagamento: Optional[str] = None
-    data_vencimento_pagamento: Optional[date] = None
-    data_pagamento: Optional[date] = None
-    valor_recebido: Optional[float] = None
-    observacoes: Optional[str] = None
-    data_finalizacao: Optional[datetime | date] = None
-
-
-class ContratoPaymentUpdate(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    status_pagamento: Optional[str] = None
-    forma_pagamento: Optional[str] = None
-    data_vencimento_pagamento: Optional[date] = None
-    data_pagamento: Optional[date] = None
-    valor_recebido: Optional[float] = None
-
-
-class ContratoResponse(ContratoBase):
-    id: int
-    data_criacao: datetime
-    data_finalizacao: Optional[datetime] = None
-    frota_count: Optional[int] = None
-
-    class Config:
-        from_attributes = True
-
-
-class DespesaContratoResponse(BaseModel):
-    id: int
-    tipo: str
-    descricao: str
-    valor: float
-    data_registro: datetime
-
-    class Config:
-        from_attributes = True
-
-
-def _generate_numero_contrato() -> str:
-    return "CTR-{}".format(datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3])
-
-
-def _validar_datas(data_inicio: datetime, data_fim: datetime):
-    if data_inicio >= data_fim:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Data de inicio deve ser anterior a data de fim",
-        )
-
-
-def _resolver_data_fim(
-    data_inicio: datetime,
-    data_fim: Optional[datetime],
-    *,
-    tipo: Optional[str] = None,
-    vigencia_indeterminada: bool = False,
-) -> datetime:
-    if data_fim:
-        return data_fim
-
-    if vigencia_indeterminada or str(tipo or "").lower() == "empresa":
-        return data_inicio + timedelta(days=3650)
-
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Data final obrigatoria para contratos com prazo definido",
-    )
-
-
-def _calcular_qtd_diarias(data_inicio: datetime, data_fim: datetime) -> int:
-    total_seconds = max((data_fim - data_inicio).total_seconds(), 0)
-    return max(1, math.ceil(total_seconds / 86400))
-
-
-def _calcular_km_excedente(
-    km_inicial: Optional[float],
-    km_final: Optional[float],
-    km_livres: Optional[float],
-) -> float:
-    if km_inicial is None or km_final is None:
-        return 0.0
-
-    km_rodado = max(float(km_final) - float(km_inicial), 0.0)
-    franquia = float(km_livres or 0)
-    return max(km_rodado - franquia, 0.0)
-
-
-def _calcular_valor_total(
-    data_inicio: datetime,
-    data_fim: datetime,
-    valor_diaria: float,
-    *,
-    tipo: Optional[str] = None,
-    km_inicial: Optional[float] = None,
-    km_final: Optional[float] = None,
-    km_livres: Optional[float] = None,
-    valor_km_excedente: Optional[float] = None,
-    valor_avarias: Optional[float] = None,
-    taxa_combustivel: Optional[float] = None,
-    taxa_limpeza: Optional[float] = None,
-    taxa_higienizacao: Optional[float] = None,
-    taxa_pneus: Optional[float] = None,
-    taxa_acessorios: Optional[float] = None,
-    valor_franquia_seguro: Optional[float] = None,
-    taxa_administrativa: Optional[float] = None,
-    desconto: Optional[float] = None,
-) -> float:
-    qtd_diarias = _calcular_qtd_diarias(data_inicio, data_fim)
-    total_base = float(valor_diaria or 0) if str(tipo or "").lower() == "empresa" else qtd_diarias * float(valor_diaria or 0)
-    km_excedente = _calcular_km_excedente(km_inicial, km_final, km_livres)
-    total_km = km_excedente * float(valor_km_excedente or 0)
-    total_taxas = sum(
-        float(valor or 0)
-        for valor in (
-            valor_avarias,
-            taxa_combustivel,
-            taxa_limpeza,
-            taxa_higienizacao,
-            taxa_pneus,
-            taxa_acessorios,
-            valor_franquia_seguro,
-            taxa_administrativa,
-        )
-    )
-    total = total_base + total_km + total_taxas - float(desconto or 0)
-    return round(max(total, 0.0), 2)
-
-
-def _normalize_contrato_payload(payload: dict, is_create: bool = False) -> dict:
-    data = dict(payload)
-
-    if data.get("km_inicial") is None and data.get("quilometragem_inicial") is not None:
-        data["km_inicial"] = data.pop("quilometragem_inicial")
-    else:
-        data.pop("quilometragem_inicial", None)
-
-    if data.get("km_inicial") is None and data.get("km_atual_veiculo") is not None:
-        data["km_inicial"] = data.pop("km_atual_veiculo")
-    else:
-        data.pop("km_atual_veiculo", None)
-
-    if data.get("km_final") is None and data.get("quilometragem_final") is not None:
-        data["km_final"] = data.pop("quilometragem_final")
-    else:
-        data.pop("quilometragem_final", None)
-
-    if is_create and not data.get("numero"):
-        data["numero"] = _generate_numero_contrato()
-
-    normalized = {}
-    for key, value in data.items():
-        if value == "":
-            normalized[key] = None
-        elif key in {"status", "tipo", "status_pagamento"} and isinstance(value, str):
-            normalized[key] = value.lower()
-        else:
-            normalized[key] = value
-
-    data_inicio = normalized.get("data_inicio")
-    if isinstance(data_inicio, date) and not isinstance(data_inicio, datetime):
-        normalized["data_inicio"] = datetime.combine(data_inicio, datetime.min.time())
-
-    data_fim = normalized.get("data_fim")
-    if isinstance(data_fim, date) and not isinstance(data_fim, datetime):
-        normalized["data_fim"] = datetime.combine(data_fim, datetime.max.time().replace(microsecond=0))
-
-    return normalized
-
-
-def _normalize_finalizacao_payload(payload: dict) -> dict:
-    data = dict(payload)
-
-    if data.get("km_final") is None and data.get("quilometragem_final") is not None:
-        data["km_final"] = data.pop("quilometragem_final")
-    else:
-        data.pop("quilometragem_final", None)
-
-    if data.get("km_final") is None and data.get("km_atual_veiculo") is not None:
-        data["km_final"] = data.pop("km_atual_veiculo")
-    else:
-        data.pop("km_atual_veiculo", None)
-
-    normalized = {}
-    for key, value in data.items():
-        if value == "":
-            normalized[key] = None
-        elif key == "status_pagamento" and isinstance(value, str):
-            normalized[key] = value.lower()
-        else:
-            normalized[key] = value
-
-    data_finalizacao = normalized.get("data_finalizacao")
-    if isinstance(data_finalizacao, date) and not isinstance(data_finalizacao, datetime):
-        normalized["data_finalizacao"] = datetime.combine(
-            data_finalizacao,
-            datetime.max.time().replace(microsecond=0),
-        )
-
-    return normalized
-
-
-def _status_pagamento_atual(contrato: Contrato) -> str:
-    if contrato.status_pagamento:
-        return str(contrato.status_pagamento).lower()
-    if contrato.status == "finalizado":
-        return "pago"
-    return "pendente"
-
-
-def _apply_payment_details(
-    contrato: Contrato,
-    payment_data: dict,
-    *,
-    reference_date: Optional[datetime] = None,
-) -> None:
-    data = dict(payment_data or {})
-    allowed_status = {"pendente", "pago", "cancelado"}
-    current_status = _status_pagamento_atual(contrato)
-    next_status = current_status
-
-    if data.get("status_pagamento"):
-        next_status = str(data["status_pagamento"]).lower()
-        if next_status not in allowed_status:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Status de pagamento invalido",
-            )
-
-    if "forma_pagamento" in data:
-        contrato.forma_pagamento = data.get("forma_pagamento")
-    if "data_vencimento_pagamento" in data:
-        contrato.data_vencimento_pagamento = data.get("data_vencimento_pagamento")
-    if "data_pagamento" in data:
-        contrato.data_pagamento = data.get("data_pagamento")
-    if "valor_recebido" in data:
-        contrato.valor_recebido = data.get("valor_recebido")
-
-    contrato.status_pagamento = next_status
-    default_due_date = (
-        reference_date.date()
-        if reference_date
-        else contrato.data_finalizacao.date()
-        if contrato.data_finalizacao
-        else contrato.data_fim.date()
-        if contrato.data_fim
-        else datetime.now().date()
-    )
-
-    if not contrato.data_vencimento_pagamento:
-        contrato.data_vencimento_pagamento = default_due_date
-
-    if next_status == "pago":
-        if not contrato.data_pagamento:
-            contrato.data_pagamento = (
-                reference_date.date() if reference_date else datetime.now().date()
-            )
-        if contrato.valor_recebido is None or float(contrato.valor_recebido or 0) <= 0:
-            contrato.valor_recebido = float(contrato.valor_total or 0)
-    elif next_status == "cancelado":
-        if contrato.valor_recebido is None:
-            contrato.valor_recebido = 0
-
-
-def _append_observacao(existing_value: Optional[str], extra_value: Optional[str], titulo: str) -> Optional[str]:
-    if not extra_value:
-        return existing_value
-
-    extra_value = extra_value.strip()
-    if not extra_value:
-        return existing_value
-
-    bloco = "[{}] {}".format(titulo, extra_value)
-    if not existing_value:
-        return bloco
-    return "{}\n{}".format(existing_value.strip(), bloco)
-
-
-def _ensure_cliente_exists(db: Session, cliente_id: int) -> Cliente:
-    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
-    if not cliente:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Cliente nao encontrado",
-        )
-    return cliente
-
-
-def _resolve_cliente_contrato(
-    db: Session,
-    *,
-    tipo: Optional[str],
-    cliente_id: Optional[int],
-    empresa_id: Optional[int] = None,
-) -> Cliente:
-    if str(tipo or "").lower() != "empresa":
-        if cliente_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cliente obrigatorio para criar contrato",
-            )
-        return _ensure_cliente_exists(db, cliente_id)
-
-    target_empresa_id = empresa_id
-    if not target_empresa_id and cliente_id:
-        cliente_existente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
-        if cliente_existente and cliente_existente.empresa_id:
-            return cliente_existente
-
-        empresa_existente = db.query(Empresa).filter(Empresa.id == cliente_id).first()
-        if empresa_existente:
-            target_empresa_id = empresa_existente.id
-
-    if not target_empresa_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Empresa obrigatoria para criar contrato corporativo",
-        )
-
-    empresa = db.query(Empresa).filter(Empresa.id == target_empresa_id).first()
-    if not empresa:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Empresa nao encontrada",
-        )
-
-    cliente = (
-        db.query(Cliente)
-        .filter(Cliente.empresa_id == target_empresa_id)
-        .order_by(Cliente.id.asc())
-        .first()
-    )
-    if cliente:
-        return cliente
-
-    cpf_base = "".join(ch for ch in str(empresa.cnpj or "") if ch.isdigit()) or f"empresa-{empresa.id}"
-    cpf = cpf_base
-    if db.query(Cliente).filter(Cliente.cpf == cpf).first():
-        cpf = f"{cpf_base}-{empresa.id}"
-
-    cliente = Cliente(
-        nome=empresa.nome,
-        cpf=cpf,
-        telefone=empresa.telefone,
-        email=None,
-        empresa_id=empresa.id,
-        ativo=True,
-    )
-    db.add(cliente)
-    db.flush()
-    return cliente
-
-
-def _sincronizar_uso_empresa(
-    db: Session,
-    contrato: Contrato,
-    cliente: Cliente,
-    *,
-    empresa_uso_id: Optional[int] = None,
-    encerrar: bool = False,
-):
-    empresa_id = getattr(cliente, "empresa_id", None)
-    if contrato.tipo != "empresa" or not empresa_id:
-        return
-
-    uso = None
-    if empresa_uso_id:
-        uso = (
-            db.query(UsoVeiculoEmpresa)
-            .filter(
-                UsoVeiculoEmpresa.id == empresa_uso_id,
-                UsoVeiculoEmpresa.empresa_id == empresa_id,
-            )
-            .first()
-        )
-    if not uso and contrato.id:
-        uso = (
-            db.query(UsoVeiculoEmpresa)
-            .filter(UsoVeiculoEmpresa.contrato_id == contrato.id)
-            .first()
-        )
-    if not uso:
-        uso = (
-            db.query(UsoVeiculoEmpresa)
-            .filter(
-                UsoVeiculoEmpresa.empresa_id == empresa_id,
-                UsoVeiculoEmpresa.veiculo_id == contrato.veiculo_id,
-                UsoVeiculoEmpresa.status == "ativo",
-            )
-            .order_by(UsoVeiculoEmpresa.data_criacao.desc())
-            .first()
-        )
-
-    if not uso:
-        uso = UsoVeiculoEmpresa(
-            empresa_id=empresa_id,
-            veiculo_id=contrato.veiculo_id,
-            status="ativo",
-        )
-        db.add(uso)
-
-    uso.empresa_id = empresa_id
-    uso.veiculo_id = contrato.veiculo_id
-    uso.contrato_id = contrato.id
-    uso.km_inicial = float(contrato.km_inicial or 0)
-    uso.km_referencia = float(contrato.km_livres or 0) if contrato.km_livres is not None else uso.km_referencia
-    uso.valor_km_extra = contrato.valor_km_excedente
-    uso.valor_diaria_empresa = contrato.valor_diaria
-    uso.data_inicio = contrato.data_inicio
-
-    if encerrar:
-        uso.km_final = float(contrato.km_final or uso.km_final or contrato.km_inicial or 0)
-        if uso.km_inicial is not None and uso.km_final is not None:
-            uso.km_percorrido = max(float(uso.km_final) - float(uso.km_inicial), 0.0)
-        uso.data_fim = contrato.data_finalizacao or contrato.data_fim
-        uso.status = "finalizado"
-    else:
-        uso.data_fim = None if contrato.status == "ativo" else (contrato.data_finalizacao or contrato.data_fim)
-        uso.status = "ativo" if contrato.status == "ativo" else "finalizado"
-
-
-def _ensure_veiculo_available(
-    db: Session,
-    veiculo_id: int,
-    contrato_id: Optional[int] = None,
-) -> Veiculo:
-    veiculo = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
-    if not veiculo:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Veiculo nao encontrado",
-        )
-
-    contrato_ativo = db.query(Contrato).filter(
-        Contrato.veiculo_id == veiculo_id,
-        Contrato.status == "ativo",
-        Contrato.id != contrato_id,
-    ).first()
-    if contrato_ativo:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Veiculo ja possui contrato ativo (#{})".format(contrato_ativo.numero),
-        )
-
-    if contrato_id is None and veiculo.status not in {"disponivel", "reservado"}:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Veiculo nao esta disponivel (status atual: {})".format(veiculo.status),
-        )
-
-    return veiculo
-
-
-def _recalcular_status_veiculo(db: Session, veiculo_id: int):
-    veiculo = db.query(Veiculo).filter(Veiculo.id == veiculo_id).first()
-    if not veiculo:
-        return
-
-    contratos_ativos = db.query(Contrato).filter(
-        Contrato.veiculo_id == veiculo_id,
-        Contrato.status == "ativo",
-    ).count()
-    veiculo.status = "alugado" if contratos_ativos > 0 else "disponivel"
 
 
 @router.get("/")
@@ -640,7 +87,7 @@ def list_contratos(
     )
 
     if search:
-        search_term = "%{}%".format(search.strip())
+        search_term = "%{}%".format(escape_like(search.strip()))
         query = query.filter(
             or_(
                 Contrato.numero.ilike(search_term),
@@ -675,6 +122,25 @@ def list_contratos(
                 item_dict["frota_count"] = count or 0
             else:
                 item_dict["frota_count"] = 0
+
+        # For empresa contracts: override valor_total and valor_recebido with real NF data
+        if str(item_dict.get("tipo") or "").lower() == "empresa":
+            from app.models import RelatorioNF as _ListNF
+            nf_records = db.query(_ListNF).filter(
+                _ListNF.veiculo_id == item_dict.get("veiculo_id")
+            ).all()
+            nf_total = sum(float(nf.valor_total_periodo or 0) for nf in nf_records)
+            nf_recebido = sum(float(nf.valor_total_periodo or 0) for nf in nf_records if nf.pago)
+            if nf_total > 0:
+                item_dict["valor_total"] = nf_total
+                item_dict["valor_recebido"] = nf_recebido
+                # Update status_pagamento based on NF payments
+                if nf_recebido >= nf_total - 0.01:
+                    item_dict["status_pagamento"] = "pago"
+                elif nf_recebido > 0:
+                    item_dict["status_pagamento"] = "parcial"
+                else:
+                    item_dict["status_pagamento"] = "pendente"
     
     return result
 
@@ -723,17 +189,24 @@ def create_contrato(
     vigencia_indeterminada = bool(raw_payload.pop("vigencia_indeterminada", False))
     empresa_uso_id = raw_payload.pop("empresa_uso_id", None)
     empresa_id = raw_payload.pop("empresa_id", None)
-    contrato_data = _normalize_contrato_payload(
+    contrato_data = normalize_contrato_payload(
         raw_payload,
         is_create=True,
     )
-    contrato_data["data_fim"] = _resolver_data_fim(
+    contrato_data["data_fim"] = resolver_data_fim(
         contrato_data["data_inicio"],
         contrato_data.get("data_fim"),
         tipo=contrato_data.get("tipo"),
         vigencia_indeterminada=vigencia_indeterminada,
     )
-    _validar_datas(contrato_data["data_inicio"], contrato_data["data_fim"])
+    if contrato_data.get("data_fim"):
+        validar_datas(contrato_data["data_inicio"], contrato_data["data_fim"])
+
+    if float(contrato_data.get("valor_diaria") or 0) < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Valor da diaria nao pode ser negativo",
+        )
 
     existing = db.query(Contrato).filter(Contrato.numero == contrato_data["numero"]).first()
     if existing:
@@ -742,14 +215,14 @@ def create_contrato(
             detail="Numero de contrato ja existe",
         )
 
-    cliente = _resolve_cliente_contrato(
+    cliente = resolve_cliente_contrato(
         db,
         tipo=contrato_data.get("tipo"),
         cliente_id=contrato_data.get("cliente_id"),
         empresa_id=empresa_id,
     )
     contrato_data["cliente_id"] = cliente.id
-    veiculo = _ensure_veiculo_available(db, contrato_data["veiculo_id"])
+    veiculo = ensure_veiculo_available(db, contrato_data["veiculo_id"])
 
     if contrato_data.get("km_inicial") is None:
         contrato_data["km_inicial"] = float(veiculo.km_atual or 0)
@@ -758,16 +231,16 @@ def create_contrato(
         contrato_data["qtd_diarias"] = (
             1
             if str(contrato_data.get("tipo") or "").lower() == "empresa"
-            else _calcular_qtd_diarias(
+            else calcular_qtd_diarias(
                 contrato_data["data_inicio"],
                 contrato_data["data_fim"],
             )
         )
 
     if not contrato_data.get("valor_total"):
-        contrato_data["valor_total"] = _calcular_valor_total(
+        contrato_data["valor_total"] = calcular_valor_total(
             contrato_data["data_inicio"],
-            contrato_data["data_fim"],
+            contrato_data.get("data_fim") or contrato_data["data_inicio"],
             float(contrato_data["valor_diaria"]),
             tipo=contrato_data.get("tipo"),
             km_inicial=contrato_data.get("km_inicial"),
@@ -786,7 +259,7 @@ def create_contrato(
         )
 
     db_contrato = Contrato(**contrato_data)
-    _apply_payment_details(
+    apply_payment_details(
         db_contrato,
         contrato_data,
         reference_date=contrato_data["data_fim"],
@@ -804,15 +277,23 @@ def create_contrato(
         )
     )
     veiculo.status = "alugado"
-    _sincronizar_uso_empresa(
+    sincronizar_uso_empresa(
         db,
         db_contrato,
         cliente,
         empresa_uso_id=empresa_uso_id,
     )
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Veiculo ja possui contrato ativo. Operacao cancelada.",
+        )
     db.refresh(db_contrato)
+    invalidate_dashboard_cache()
     log_activity(
         db,
         current_user,
@@ -965,7 +446,7 @@ def update_contrato(
     vigencia_indeterminada = raw_payload.pop("vigencia_indeterminada", None)
     empresa_uso_id = raw_payload.pop("empresa_uso_id", None)
     empresa_id = raw_payload.pop("empresa_id", None)
-    update_data = _normalize_contrato_payload(raw_payload)
+    update_data = normalize_contrato_payload(raw_payload)
 
     if "numero" in update_data and update_data["numero"]:
         existing = db.query(Contrato).filter(
@@ -985,15 +466,16 @@ def update_contrato(
     novo_status = update_data.get("status", contrato.status)
     novo_valor_diaria = update_data.get("valor_diaria", contrato.valor_diaria)
 
-    nova_data_fim = _resolver_data_fim(
+    nova_data_fim = resolver_data_fim(
         nova_data_inicio,
         nova_data_fim,
         tipo=update_data.get("tipo", contrato.tipo),
         vigencia_indeterminada=bool(vigencia_indeterminada),
     )
     update_data["data_fim"] = nova_data_fim
-    _validar_datas(nova_data_inicio, nova_data_fim)
-    cliente = _resolve_cliente_contrato(
+    if nova_data_fim:
+        validar_datas(nova_data_inicio, nova_data_fim)
+    cliente = resolve_cliente_contrato(
         db,
         tipo=update_data.get("tipo", contrato.tipo),
         cliente_id=novo_cliente_id,
@@ -1003,7 +485,7 @@ def update_contrato(
 
     veiculo_destino = None
     if novo_status == "ativo":
-        veiculo_destino = _ensure_veiculo_available(
+        veiculo_destino = ensure_veiculo_available(
             db,
             novo_veiculo_id,
             contrato_id=contrato_id,
@@ -1021,7 +503,7 @@ def update_contrato(
         contrato.qtd_diarias = (
             1
             if str(contrato.tipo or "").lower() == "empresa"
-            else _calcular_qtd_diarias(nova_data_inicio, nova_data_fim)
+            else calcular_qtd_diarias(nova_data_inicio, nova_data_fim or nova_data_inicio)
         )
 
     if "valor_total" not in update_data and (
@@ -1045,9 +527,9 @@ def update_contrato(
         }
         & set(update_data.keys())
     ):
-        contrato.valor_total = _calcular_valor_total(
+        contrato.valor_total = calcular_valor_total(
             nova_data_inicio,
-            nova_data_fim,
+            nova_data_fim or nova_data_inicio,
             float(novo_valor_diaria or 0),
             tipo=contrato.tipo,
             km_inicial=contrato.km_inicial,
@@ -1065,22 +547,22 @@ def update_contrato(
             desconto=contrato.desconto,
         )
 
-    _apply_payment_details(
+    apply_payment_details(
         contrato,
         update_data,
         reference_date=contrato.data_finalizacao or contrato.data_fim,
     )
 
     db.flush()
-    _sincronizar_uso_empresa(
+    sincronizar_uso_empresa(
         db,
         contrato,
         cliente,
         empresa_uso_id=empresa_uso_id,
         encerrar=contrato.status != "ativo",
     )
-    _recalcular_status_veiculo(db, veiculo_antigo_id)
-    _recalcular_status_veiculo(db, contrato.veiculo_id)
+    recalcular_status_veiculo(db, veiculo_antigo_id)
+    recalcular_status_veiculo(db, contrato.veiculo_id)
 
     db.commit()
     db.refresh(contrato)
@@ -1126,7 +608,7 @@ def finalizar_contrato(
             detail="Veiculo nao encontrado",
         )
 
-    finalize_data = _normalize_finalizacao_payload(
+    finalize_data = normalize_finalizacao_payload(
         (payload or ContratoFinalizeRequest()).model_dump(exclude_unset=True)
     )
     data_finalizacao = finalize_data.get("data_finalizacao") or datetime.now()
@@ -1172,7 +654,7 @@ def finalizar_contrato(
     if "desconto" in finalize_data:
         contrato.desconto = finalize_data.get("desconto")
     if finalize_data.get("observacoes"):
-        contrato.observacoes = _append_observacao(
+        contrato.observacoes = append_observacao(
             contrato.observacoes,
             finalize_data.get("observacoes"),
             "Encerramento",
@@ -1182,30 +664,46 @@ def finalizar_contrato(
     contrato.qtd_diarias = (
         1
         if str(contrato.tipo or "").lower() == "empresa"
-        else _calcular_qtd_diarias(contrato.data_inicio, data_base_cobranca)
+        else calcular_qtd_diarias(contrato.data_inicio, data_base_cobranca)
     )
-    contrato.valor_total = _calcular_valor_total(
-        contrato.data_inicio,
-        data_base_cobranca,
-        float(contrato.valor_diaria or 0),
-        tipo=contrato.tipo,
-        km_inicial=contrato.km_inicial,
-        km_final=contrato.km_final,
-        km_livres=contrato.km_livres,
-        valor_km_excedente=contrato.valor_km_excedente,
-        valor_avarias=contrato.valor_avarias,
-        taxa_combustivel=contrato.taxa_combustivel,
-        taxa_limpeza=contrato.taxa_limpeza,
-        taxa_higienizacao=contrato.taxa_higienizacao,
-        taxa_pneus=contrato.taxa_pneus,
-        taxa_acessorios=contrato.taxa_acessorios,
-        valor_franquia_seguro=contrato.valor_franquia_seguro,
+    # For empresa: valor_total = sum of all NF periods + extra fees
+    if str(contrato.tipo or "").lower() == "empresa":
+        from app.models import RelatorioNF as _FinalNF
+        nf_total = sum(
+            float(nf.valor_total_periodo or 0)
+            for nf in db.query(_FinalNF).filter(_FinalNF.veiculo_id == contrato.veiculo_id).all()
+        )
+        taxas = sum(float(v or 0) for v in [
+            finalize_data.get("valor_avarias"), finalize_data.get("taxa_combustivel"),
+            finalize_data.get("taxa_limpeza"), finalize_data.get("taxa_higienizacao"),
+            finalize_data.get("taxa_pneus"), finalize_data.get("taxa_acessorios"),
+            finalize_data.get("valor_franquia_seguro"), finalize_data.get("taxa_administrativa"),
+        ])
+        desconto = float(finalize_data.get("desconto") or 0)
+        contrato.valor_total = round(max(nf_total + taxas - desconto, 0), 2)
+    else:
+        contrato.valor_total = calcular_valor_total(
+            contrato.data_inicio,
+            data_base_cobranca,
+            float(contrato.valor_diaria or 0),
+            tipo=contrato.tipo,
+            km_inicial=contrato.km_inicial,
+            km_final=contrato.km_final,
+            km_livres=contrato.km_livres,
+            valor_km_excedente=contrato.valor_km_excedente,
+            valor_avarias=contrato.valor_avarias,
+            taxa_combustivel=contrato.taxa_combustivel,
+            taxa_limpeza=contrato.taxa_limpeza,
+            taxa_higienizacao=contrato.taxa_higienizacao,
+            taxa_pneus=contrato.taxa_pneus,
+            taxa_acessorios=contrato.taxa_acessorios,
+            valor_franquia_seguro=contrato.valor_franquia_seguro,
         taxa_administrativa=contrato.taxa_administrativa,
         desconto=contrato.desconto,
     )
     contrato.status = "finalizado"
     contrato.data_finalizacao = data_finalizacao
-    _apply_payment_details(contrato, finalize_data, reference_date=data_finalizacao)
+    apply_payment_details(contrato, finalize_data, reference_date=data_finalizacao)
 
     db.flush()
     db.add(
@@ -1219,12 +717,13 @@ def finalizar_contrato(
             avarias=finalize_data.get("observacoes"),
         )
     )
-    cliente = _ensure_cliente_exists(db, contrato.cliente_id)
-    _sincronizar_uso_empresa(db, contrato, cliente, encerrar=True)
-    _recalcular_status_veiculo(db, contrato.veiculo_id)
+    cliente = ensure_cliente_exists(db, contrato.cliente_id)
+    sincronizar_uso_empresa(db, contrato, cliente, encerrar=True)
+    recalcular_status_veiculo(db, contrato.veiculo_id)
 
     db.commit()
     db.refresh(contrato)
+    invalidate_dashboard_cache()
     log_activity(
         db,
         current_user,
@@ -1252,7 +751,7 @@ def atualizar_pagamento_contrato(
             detail="Contrato nao encontrado",
         )
 
-    update_data = _normalize_contrato_payload(
+    update_data = normalize_contrato_payload(
         pagamento_data.model_dump(exclude_unset=True)
     )
     if not update_data:
@@ -1261,7 +760,7 @@ def atualizar_pagamento_contrato(
             detail="Nenhum dado de pagamento informado",
         )
 
-    _apply_payment_details(
+    apply_payment_details(
         contrato,
         update_data,
         reference_date=contrato.data_finalizacao or contrato.data_fim or datetime.now(),
@@ -1298,6 +797,12 @@ def prorrogar_contrato(
             detail="Contrato nao encontrado",
         )
 
+    if contrato.status != "ativo":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Somente contratos ativos podem ser prorrogados",
+        )
+
     if data_nova <= contrato.data_fim:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1316,10 +821,10 @@ def prorrogar_contrato(
     contrato.qtd_diarias = (
         1
         if str(contrato.tipo or "").lower() == "empresa"
-        else _calcular_qtd_diarias(contrato.data_inicio, data_nova)
+        else calcular_qtd_diarias(contrato.data_inicio, data_nova)
     )
     if contrato.valor_diaria:
-        contrato.valor_total = _calcular_valor_total(
+        contrato.valor_total = calcular_valor_total(
             contrato.data_inicio,
             data_nova,
             float(contrato.valor_diaria),
@@ -1486,9 +991,10 @@ def delete_contrato(
 
     db.delete(contrato)
     db.flush()
-    _recalcular_status_veiculo(db, veiculo_id)
+    recalcular_status_veiculo(db, veiculo_id)
 
     db.commit()
+    invalidate_dashboard_cache()
     log_activity(
         db,
         current_user,

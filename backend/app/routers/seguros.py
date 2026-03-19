@@ -150,6 +150,8 @@ def create_seguro(
             detail="Número de apólice já cadastrado",
         )
 
+    if float(seguro_data.get("valor") or 0) <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valor do seguro deve ser positivo")
     db_seguro = Seguro(**seguro.model_dump(exclude={'parcelas'}))
     db.add(db_seguro)
     db.commit()
@@ -293,6 +295,7 @@ def get_seguro_parcelas(
     return parcelas
 
 
+@router.post("/parcelas/{parcela_id}/pagar")
 @router.post("/{parcela_id}/pagar")
 def pagar_parcela(
     parcela_id: int,

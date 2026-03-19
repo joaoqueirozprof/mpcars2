@@ -203,6 +203,11 @@ def create_reserva(
 
     db_reserva = Reserva(**reserva.model_dump())
     db.add(db_reserva)
+
+    # Mark vehicle as reserved if currently available
+    if veiculo.status == "disponivel":
+        veiculo.status = "reservado"
+
     db.commit()
     db.refresh(db_reserva)
     return db_reserva
@@ -262,8 +267,22 @@ def update_reserva(
             excluir_reserva_id=reserva_id,
         )
 
+    old_status = reserva.status
     for key, value in update_data.items():
         setattr(reserva, key, value)
+
+    # Free vehicle when reservation is canceled or completed
+    if reserva.status in ("cancelada", "concluida") and old_status not in ("cancelada", "concluida"):
+        veiculo = db.query(Veiculo).filter(Veiculo.id == reserva.veiculo_id).first()
+        if veiculo and veiculo.status == "reservado":
+            # Only free if no other active reservations for this vehicle
+            other_active = db.query(Reserva).filter(
+                Reserva.veiculo_id == reserva.veiculo_id,
+                Reserva.id != reserva_id,
+                Reserva.status.in_(["pendente", "confirmada"]),
+            ).first()
+            if not other_active:
+                veiculo.status = "disponivel"
 
     db.commit()
     db.refresh(reserva)

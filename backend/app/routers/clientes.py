@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_page_access
-from app.core.pagination import paginate
+from app.core.pagination import escape_like, paginate, strip_html
 from app.models import (
     CheckinCheckout,
     Cliente,
@@ -125,6 +125,10 @@ def _clean_digits(value: Optional[str]) -> Optional[str]:
 
 
 def _normalize_cliente_payload(payload: dict) -> dict:
+    # Sanitize text fields against XSS
+    for field in ("nome", "endereco_residencial", "endereco_comercial", "observacoes"):
+        if field in payload and isinstance(payload[field], str):
+            payload[field] = strip_html(payload[field])
     data = dict(payload)
 
     cpf = data.pop("cpf", None) or data.pop("cpf_cnpj", None)
@@ -205,9 +209,9 @@ def search_clientes(
 
     if q:
         query = query.filter(
-            (Cliente.nome.ilike(f"%{q}%"))
-            | (Cliente.cpf.ilike(f"%{q}%"))
-            | (Cliente.email.ilike(f"%{q}%"))
+            (Cliente.nome.ilike(f"%{escape_like(q)}%"))
+            | (Cliente.cpf.ilike(f"%{escape_like(q)}%"))
+            | (Cliente.email.ilike(f"%{escape_like(q)}%"))
         )
 
     if ativo is not None:
@@ -331,6 +335,17 @@ def update_cliente(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="CPF já cadastrado",
+            )
+
+    if "email" in update_data and update_data["email"]:
+        existing = db.query(Cliente).filter(
+            Cliente.email == update_data["email"],
+            Cliente.id != cliente_id,
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email já cadastrado",
             )
 
     for key, value in update_data.items():

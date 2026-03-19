@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func as sqlfunc
+from sqlalchemy import func as sqlfunc, case
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date, datetime
@@ -119,7 +119,7 @@ def get_multas_resumo(
         sqlfunc.count(sqlfunc.nullif(Multa.status != "pendente", True)).label("pendentes"),
         sqlfunc.coalesce(sqlfunc.sum(Multa.valor), 0).label("total_valor"),
         sqlfunc.coalesce(
-            sqlfunc.sum(sqlfunc.case((Multa.status == "pendente", Multa.valor), else_=0)), 0
+            sqlfunc.sum(case((Multa.status == "pendente", Multa.valor), else_=0)), 0
         ).label("valor_pendente"),
     ).first()
 
@@ -175,6 +175,11 @@ def update_multa(
         )
 
     update_data = multa_data.model_dump(exclude_unset=True)
+    if 'valor' in update_data and update_data['valor'] is not None and update_data['valor'] <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Valor da multa deve ser positivo',
+        )
     for key, value in update_data.items():
         setattr(multa, key, value)
 
@@ -194,6 +199,12 @@ def pagar_multa(
     if not multa:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Multa não encontrada"
+        )
+
+    if multa.status == "pago":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Multa ja foi paga",
         )
 
     multa.status = "pago"

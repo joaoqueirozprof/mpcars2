@@ -75,7 +75,7 @@ from app.routers import (
 
 logger = logging.getLogger(__name__)
 
-limiter = Limiter(key_func=get_remote_address) if Limiter else None
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute", "20/second"]) if Limiter else None
 
 
 def setup_logging():
@@ -232,8 +232,8 @@ def _get_cors_origins() -> list[str]:
             "https://mpcars.com.br",
             "https://www.mpcars.com.br",
         ]
-        allowed = [o for o in settings.CORS_ORIGINS if o.startswith("https://")]
-        return list(set(production_origins + allowed))
+        configured_origins = [o.strip() for o in settings.CORS_ORIGINS if (o or "").strip()]
+        return list(dict.fromkeys(production_origins + configured_origins))
     return settings.CORS_ORIGINS or ["*"]
 
 
@@ -243,7 +243,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 

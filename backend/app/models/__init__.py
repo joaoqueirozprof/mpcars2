@@ -187,7 +187,7 @@ class Contrato(Base):
     cliente_id = Column(Integer, ForeignKey("clientes.id", ondelete="RESTRICT"), nullable=False)
     veiculo_id = Column(Integer, ForeignKey("veiculos.id", ondelete="RESTRICT"), nullable=False)
     data_inicio = Column(DateTime, nullable=False)
-    data_fim = Column(DateTime, nullable=False)
+    data_fim = Column(DateTime, nullable=True)
     km_inicial = Column(Float)
     km_final = Column(Float)
     valor_diaria = Column(Numeric(10, 2), nullable=False)
@@ -199,9 +199,10 @@ class Contrato(Base):
     cartao_titular = Column(String)
     cartao_preautorizacao = Column(String)
     # Colunas antigas mantidas para migração gradual
-    cartao_numero = Column(String)
-    cartao_validade = Column(String)
-    cartao_codigo = Column(String)
+    # PCI: card columns removed - never store card numbers/CVV
+    # cartao_numero = Column(String)
+    # cartao_validade = Column(String)
+    # cartao_codigo = Column(String)
     observacoes = Column(Text)
     hora_saida = Column(String)
     combustivel_saida = Column(String)
@@ -608,7 +609,26 @@ class RelatorioNF(Base):
     km_percorrida = Column(Float)
     km_excedente = Column(Float)
     valor_total_extra = Column(Numeric(10, 2))
+    valor_diaria = Column(Numeric(10, 2))
+    valor_total_periodo = Column(Numeric(10, 2))
+    pago = Column(Boolean, default=False)
+    data_pagamento = Column(Date)
+    forma_pagamento = Column(String)
+    comprovante_url = Column(String)
     caminho_pdf = Column(String)
+    data_criacao = Column(DateTime, server_default=func.now())
+
+
+class PagamentoNF(Base):
+    __tablename__ = "pagamento_nf"
+
+    id = Column(Integer, primary_key=True, index=True)
+    relatorio_nf_id = Column(Integer, ForeignKey("relatorio_nf.id", ondelete="CASCADE"), nullable=False)
+    valor = Column(Numeric(10, 2), nullable=False)
+    data_pagamento = Column(Date)
+    forma_pagamento = Column(String)
+    comprovante_url = Column(String)
+    observacao = Column(String)
     data_criacao = Column(DateTime, server_default=func.now())
 
 

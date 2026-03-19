@@ -318,6 +318,11 @@ def pagar_ipva(
         )
     elif valor_pago + 0.01 >= total_ipva:
         registro.status = "pago"
+        # Sync parcelas: mark all as paid when full IPVA is paid
+        db.query(IpvaParcela).filter(
+            IpvaParcela.ipva_id == registro_id,
+            IpvaParcela.status != "pago",
+        ).update({"status": "pago", "data_pagamento": date.today()}, synchronize_session=False)
     else:
         registro.status = "parcial"
     db.commit()
@@ -330,6 +335,8 @@ def calcular_ipva(
     veiculo_id: int,
     ano_referencia: int,
     valor_venal: float,
+    estado: str = "SP",
+    tipo_veiculo: str = "Automovel",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -339,9 +346,6 @@ def calcular_ipva(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veículo não encontrado"
         )
-
-    estado = "SP"
-    tipo_veiculo = "Automovel"
 
     aliquota_obj = db.query(IpvaAliquota).filter(
         (IpvaAliquota.estado == estado)
@@ -436,6 +440,7 @@ def pagar_parcela_ipva(
     )
     parcela.status = "pago"
     parcela.data_pagamento = datetime.now().date()
+    db.flush()
     _sync_ipva_status(db, parcela.ipva_id)
     db.commit()
     db.refresh(parcela)

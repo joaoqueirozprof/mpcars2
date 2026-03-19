@@ -183,6 +183,27 @@ def create_empresa(
 
     db_empresa = Empresa(**empresa_data)
     db.add(db_empresa)
+    db.flush()  # get the ID
+
+    # Auto-create a client linked to this company
+    existing_client = db.query(Cliente).filter(
+        Cliente.empresa_id == db_empresa.id
+    ).first()
+    if not existing_client:
+        cpf_base = "".join(ch for ch in str(db_empresa.cnpj or "") if ch.isdigit())
+        cpf = cpf_base or f"empresa-{db_empresa.id}"
+        if db.query(Cliente).filter(Cliente.cpf == cpf).first():
+            cpf = f"{cpf_base}-{db_empresa.id}"
+        cliente_pj = Cliente(
+            nome=db_empresa.nome,
+            cpf=cpf,
+            telefone=db_empresa.telefone,
+            email=db_empresa.email,
+            empresa_id=db_empresa.id,
+            ativo=True,
+        )
+        db.add(cliente_pj)
+
     db.commit()
     db.refresh(db_empresa)
     return db_empresa
@@ -235,6 +256,18 @@ def update_empresa(
 
     if not empresa.razao_social:
         empresa.razao_social = empresa.nome
+
+    # Sync linked client data
+    linked_client = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id
+    ).first()
+    if linked_client:
+        if "nome" in update_data:
+            linked_client.nome = empresa.nome
+        if "telefone" in update_data:
+            linked_client.telefone = empresa.telefone
+        if "email" in update_data:
+            linked_client.email = empresa.email
 
     db.commit()
     db.refresh(empresa)
