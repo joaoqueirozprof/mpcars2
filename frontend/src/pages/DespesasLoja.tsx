@@ -6,6 +6,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import CurrencyInput from '@/components/shared/CurrencyInput'
 import toast from 'react-hot-toast'
 import api from '@/services/api'
+import { useDebounce } from '../hooks/useDebounce'
 
 interface DespesaLoja {
   id: number
@@ -59,6 +60,7 @@ const DespesasLoja: React.FC = () => {
 
   // Filters
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 300)
   const [filterCategoria, setFilterCategoria] = useState('')
   const [filterMes, setFilterMes] = useState('')
   const [filterAno, setFilterAno] = useState(String(new Date().getFullYear()))
@@ -70,7 +72,7 @@ const DespesasLoja: React.FC = () => {
   const [formData, setFormData] = useState({
     categoria: 'Outros',
     descricao: '',
-    valor: '',
+    valor: '' as any,
     mes: String(new Date().getMonth() + 1),
     ano: String(new Date().getFullYear()),
   })
@@ -85,7 +87,7 @@ const DespesasLoja: React.FC = () => {
     setLoading(true)
     try {
       let url = `/despesas-loja/?page=${page}&limit=20`
-      if (search) url += `&search=${encodeURIComponent(search)}`
+      if (debouncedSearch) url += `&search=${encodeURIComponent(debouncedSearch)}`
       if (filterCategoria) url += `&categoria=${encodeURIComponent(filterCategoria)}`
       if (filterMes) url += `&mes=${filterMes}`
       if (filterAno) url += `&ano=${filterAno}`
@@ -99,7 +101,7 @@ const DespesasLoja: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [page, search, filterCategoria, filterMes, filterAno])
+  }, [page, debouncedSearch, filterCategoria, filterMes, filterAno])
 
   const loadResumo = useCallback(async () => {
     try {
@@ -111,8 +113,10 @@ const DespesasLoja: React.FC = () => {
   }, [filterAno])
 
   useEffect(() => {
-    loadDespesas()
+    let cancelled = false
+    loadDespesas().finally(() => { if (cancelled) return })
     loadResumo()
+    return () => { cancelled = true }
   }, [loadDespesas, loadResumo])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -177,7 +181,7 @@ const DespesasLoja: React.FC = () => {
     setFormData({
       categoria: 'Outros',
       descricao: '',
-      valor: '',
+      valor: '' as any,
       mes: String(new Date().getMonth() + 1),
       ano: String(new Date().getFullYear()),
     })
@@ -248,7 +252,7 @@ const DespesasLoja: React.FC = () => {
                 <div>
                   <p className="text-sm text-slate-500">Media Mensal</p>
                   <p className="text-2xl font-bold text-slate-900">
-                    {formatCurrency(resumo.quantidade > 0 ? resumo.total / Math.min(12, resumo.quantidade) : 0)}
+                    {formatCurrency(resumo.total > 0 ? resumo.total / 12 : 0)}
                   </p>
                 </div>
               </div>

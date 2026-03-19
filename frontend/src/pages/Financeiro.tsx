@@ -4,6 +4,7 @@ import {
   Plus,
   Edit,
   Trash2,
+  Download,
   DollarSign,
   TrendingUp,
   TrendingDown,
@@ -21,6 +22,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import CurrencyInput from '@/components/shared/CurrencyInput'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
+import { useDebounce } from '../hooks/useDebounce'
 
 interface Financeiro {
   id: string
@@ -63,7 +65,7 @@ interface PaginationParams {
 }
 
 const EDITABLE_FINANCE_PREFIXES = ['fm-', 'dc-', 'dv-', 'dl-', 'mt-', 'ip-', 'ml-', 'sg-']
-const DELETABLE_FINANCE_PREFIXES = ['fm-', 'dc-', 'dv-', 'dl-']
+const DELETABLE_FINANCE_PREFIXES = ['fm-', 'dc-', 'dv-', 'dl-', 'mt-', 'sg-', 'ip-', 'ml-', 'c-', 'nf-']
 const FINANCE_CATEGORIES = ['Salarios', 'Aluguel', 'Combustivel', 'Manutencao', 'Seguros', 'Publicidade', 'Vendas', 'Juros', 'Outros']
 
 const FinanceiroPage: React.FC = () => {
@@ -77,9 +79,11 @@ const FinanceiroPage: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<'todos' | 'receita' | 'despesa'>('todos')
   const [statusFilter, setStatusFilter] = useState<'todos' | 'pendente' | 'pago' | 'cancelado'>('todos')
   const [searchTerm, setSearchTerm] = useState('')
+  const debouncedSearch = useDebounce(searchTerm, 300)
   const [periodStart, setPeriodStart] = useState('')
   const [periodEnd, setPeriodEnd] = useState('')
   const [veiculoFilter, setVeiculoFilter] = useState('')
+  const [categoriaFilter, setCategoriaFilter] = useState('')
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
     tipo: 'receita' as 'receita' | 'despesa',
@@ -98,7 +102,7 @@ const FinanceiroPage: React.FC = () => {
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['financeiro', pagination, typeFilter, statusFilter, searchTerm, periodStart, periodEnd, veiculoFilter],
+    queryKey: ['financeiro', pagination, typeFilter, statusFilter, debouncedSearch, periodStart, periodEnd, veiculoFilter, categoriaFilter],
     queryFn: async () => {
       const { data } = await api.get<PaginatedResponse<Financeiro>>('/financeiro', {
         params: {
@@ -106,10 +110,11 @@ const FinanceiroPage: React.FC = () => {
           limit: pagination.limit,
           tipo: typeFilter !== 'todos' ? typeFilter : undefined,
           status: statusFilter !== 'todos' ? statusFilter : undefined,
-          search: searchTerm || undefined,
+          search: debouncedSearch || undefined,
           data_inicio: periodStart || undefined,
           data_fim: periodEnd || undefined,
           veiculo_id: veiculoFilter || undefined,
+          categoria: categoriaFilter || undefined,
         },
       })
       return data
@@ -373,7 +378,7 @@ const FinanceiroPage: React.FC = () => {
         </div>
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
           {/* Receitas Card */}
           <div className="kpi-card">
             <div className="flex items-start justify-between">
@@ -516,6 +521,29 @@ const FinanceiroPage: React.FC = () => {
               </select>
             </div>
 
+            {/* Category Filter */}
+            <div className="border-t border-slate-200 pt-4">
+              <p className="text-sm font-semibold text-slate-900 mb-3">Categoria</p>
+              <select
+                value={categoriaFilter}
+                onChange={(e) => {
+                  setCategoriaFilter(e.target.value)
+                  setPagination((current) => ({ ...current, page: 1 }))
+                }}
+                className="input-field max-w-xs"
+              >
+                <option value="">Todas as categorias</option>
+                <option value="Faturamento empresa">Faturamento empresa</option>
+                <option value="Manutencao">Manutenção</option>
+                <option value="Seguro">Seguro</option>
+                <option value="IPVA">IPVA</option>
+                <option value="Loja">Despesas Loja</option>
+                <option value="Veículo">Despesas Veículo</option>
+                <option value="Aluguel">Aluguel</option>
+                <option value="Locação">Locação</option>
+              </select>
+            </div>
+
             {/* Search */}
             <div className="border-t border-slate-200 pt-4">
               <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
@@ -530,6 +558,78 @@ const FinanceiroPage: React.FC = () => {
                   }}
                   className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
                 />
+              </div>
+            </div>
+
+            {/* Export Buttons */}
+            <div className="border-t border-slate-200 pt-4">
+              <p className="text-sm font-semibold text-slate-900 mb-3">Relatorios</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={async () => {
+                    const tid = toast.loading('Gerando Excel...')
+                    try {
+                      const response = await api.get('/relatorios/exportar/financeiro', { params: { data_inicio: periodStart || undefined, data_fim: periodEnd || undefined }, responseType: 'blob' })
+                      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+                      const url = window.URL.createObjectURL(blob)
+                      const link = document.createElement('a')
+                      link.href = url
+                      link.download = 'financeiro_' + new Date().toISOString().split('T')[0] + '.xlsx'
+                      document.body.appendChild(link)
+                      link.click()
+                      document.body.removeChild(link)
+                      toast.dismiss(tid)
+                      toast.success('Excel gerado!')
+                    } catch { toast.dismiss(tid); toast.error('Erro ao gerar Excel') }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors"
+                >
+                  <Download size={14} /> Excel
+                </button>
+                <button
+                  onClick={async () => {
+                    const start = periodStart || new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0]
+                    const end = periodEnd || new Date().toISOString().split('T')[0]
+                    const tid = toast.loading('Gerando PDF...')
+                    try {
+                      const response = await api.get('/financeiro/relatorio-pdf', { params: { data_inicio: start, data_fim: end, tipo: typeFilter !== 'todos' ? typeFilter : undefined, status: statusFilter !== 'todos' ? statusFilter : undefined, categoria: categoriaFilter || undefined, veiculo_id: veiculoFilter || undefined, search: debouncedSearch || undefined }, responseType: 'blob' })
+                      const blob = new Blob([response.data], { type: 'application/pdf' })
+                      const url = window.URL.createObjectURL(blob)
+                      const link = document.createElement('a')
+                      link.href = url
+                      link.download = 'relatorio_financeiro_' + start + '_' + end + '.pdf'
+                      document.body.appendChild(link)
+                      link.click()
+                      document.body.removeChild(link)
+                      toast.dismiss(tid)
+                      toast.success('PDF gerado!')
+                    } catch { toast.dismiss(tid); toast.error('Erro ao gerar PDF. Selecione um periodo valido.') }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors"
+                >
+                  <Download size={14} /> PDF
+                </button>
+                <button
+                  onClick={async () => {
+                    const tid = toast.loading('Gerando CSV...')
+                    try {
+                      const response = await api.get('/financeiro/exportar/csv', { responseType: 'blob' })
+                      const blob = new Blob([response.data], { type: 'text/csv' })
+                      const url = window.URL.createObjectURL(blob)
+                      const link = document.createElement('a')
+                      link.href = url
+                      link.download = 'financeiro_' + new Date().toISOString().split('T')[0] + '.csv'
+                      document.body.appendChild(link)
+                      link.click()
+                      document.body.removeChild(link)
+                      toast.dismiss(tid)
+                      toast.success('CSV gerado!')
+                    } catch { toast.dismiss(tid); toast.error('Erro ao gerar CSV') }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
+                >
+                  <Download size={14} /> CSV
+                </button>
               </div>
             </div>
 
@@ -599,7 +699,52 @@ const FinanceiroPage: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            {/* Mobile Card List */}
+            <div className="md:hidden space-y-2">
+              {filteredRecords.map((record) => {
+                const canEdit = record.id.startsWith("c-") || EDITABLE_FINANCE_PREFIXES.some((p) => record.id.startsWith(p))
+                const canDelete = DELETABLE_FINANCE_PREFIXES.some((p) => record.id.startsWith(p))
+                return (
+                  <div key={`m-${record.id}`} className="bg-white rounded-xl border border-slate-100 p-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase ${record.tipo === "receita" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                          {record.tipo === "receita" ? "Receita" : "Despesa"}
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase ${getStatusBadgeClass(record.status)}`}>
+                          {getStatusLabel(record.status)}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-400">{formatDate(record.data)}</span>
+                    </div>
+                    <p className="text-[13px] font-semibold text-slate-900 truncate">{record.descricao || record.categoria}</p>
+                    {record.categoria && record.descricao && (
+                      <p className="text-[11px] text-slate-400 truncate">{record.categoria}</p>
+                    )}
+                    {record.origem_tipo === "contrato" && record.forma_pagamento && (
+                      <p className="text-[10px] text-slate-400 mt-0.5">{record.forma_pagamento}{record.data_vencimento_pagamento ? ` • Venc. ${formatDate(record.data_vencimento_pagamento)}` : ""}</p>
+                    )}
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
+                      <span className={`text-[14px] font-bold ${record.tipo === "receita" ? "text-green-600" : "text-red-600"}`}>
+                        {record.tipo === "receita" ? "+" : "-"} {formatCurrency(record.valor)}
+                      </span>
+                      <div className="flex gap-0.5">
+                        <button onClick={() => handleOpenModal(record)} disabled={!canEdit} className={`p-1.5 rounded-lg ${canEdit ? "text-blue-600 active:bg-blue-50" : "text-slate-300"}`} title="Editar">
+                          <Edit size={15} />
+                        </button>
+                        <button onClick={() => setDeleteConfirm({ isOpen: true, id: record.id })} disabled={!canDelete} className={`p-1.5 rounded-lg ${canDelete ? "text-red-500 active:bg-red-50" : "text-slate-300"}`} title="Excluir">
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Desktop Table */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="table-header">
@@ -695,6 +840,7 @@ const FinanceiroPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            </>
           )}
 
           {/* Pagination */}

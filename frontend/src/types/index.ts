@@ -76,6 +76,7 @@ export interface Contrato {
   data_fim: string;
   data_finalizacao?: string;
   data_devolucao_real?: string;
+  km_inicial?: number;
   quilometragem_inicial: number;
   quilometragem_final?: number;
   km_atual_veiculo?: number;
@@ -164,10 +165,14 @@ export interface Seguro {
   veiculo_id: string;
   seguradora: string;
   numero_apolice: string;
+  tipo_seguro?: string;
   data_inicio: string;
   data_fim: string;
+  valor: number;
   valor_mensal: number;
+  valor_franquia?: number;
   cobertura: string;
+  status?: string;
   empresa_id: string;
   ativo: boolean;
 }

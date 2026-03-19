@@ -28,13 +28,19 @@ api.interceptors.request.use(
   }
 )
 
+let _isRedirecting = false
+
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('user')
-      window.location.href = '/login'
+    if (error.response?.status === 401 && !_isRedirecting) {
+      const currentPath = window.location.pathname
+      if (currentPath !== '/login') {
+        _isRedirecting = true
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('user')
+        setTimeout(() => { window.location.href = '/login' }, 100)
+      }
     }
     return Promise.reject(error)
   }

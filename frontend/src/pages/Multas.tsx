@@ -11,6 +11,7 @@ import DataTable from '@/components/shared/DataTable'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import api from '@/services/api'
 import { Multa, PaginatedResponse, PaginationParams } from '@/types'
+import { useDebounce } from '../hooks/useDebounce'
 
 const Multas: React.FC = () => {
   const queryClient = useQueryClient()
@@ -20,12 +21,13 @@ const Multas: React.FC = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
   const [statusFilter, setStatusFilter] = useState<string>('todos')
   const [searchTerm, setSearchTerm] = useState('')
+  const debouncedSearch = useDebounce(searchTerm, 300)
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
     veiculo_id: '',
     numero_infracao: '',
     data_infracao: '',
-    valor: 0,
+    valor: '' as any,
     data_vencimento: '',
     data_pagamento: '',
     status: 'pendente' as 'pendente' | 'pago' | 'vencido',
@@ -33,14 +35,14 @@ const Multas: React.FC = () => {
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['multas', pagination, statusFilter, searchTerm],
+    queryKey: ['multas', pagination, statusFilter, debouncedSearch],
     queryFn: async () => {
       const { data } = await api.get<PaginatedResponse<Multa>>('/multas', {
         params: {
           page: pagination.page,
           limit: pagination.limit,
           status: statusFilter !== 'todos' ? statusFilter : undefined,
-          search: searchTerm || undefined,
+          search: debouncedSearch || undefined,
         },
       })
       return data
@@ -67,7 +69,7 @@ const Multas: React.FC = () => {
       resetForm()
       toast.success('Multa criada com sucesso!')
     },
-    onError: (error: any) => toast.error(error.response?.data?.message || 'Erro ao criar multa'),
+    onError: (error: any) => toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao criar multa'),
   })
 
   const updateMutation = useMutation({
@@ -78,7 +80,7 @@ const Multas: React.FC = () => {
       resetForm()
       toast.success('Multa atualizada com sucesso!')
     },
-    onError: (error: any) => toast.error(error.response?.data?.message || 'Erro ao atualizar multa'),
+    onError: (error: any) => toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao atualizar multa'),
   })
 
   const deleteMutation = useMutation({
@@ -88,7 +90,7 @@ const Multas: React.FC = () => {
       setDeleteConfirm({ isOpen: false })
       toast.success('Multa deletada com sucesso!')
     },
-    onError: (error: any) => toast.error(error.response?.data?.message || 'Erro ao deletar multa'),
+    onError: (error: any) => toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao deletar multa'),
   })
 
   const resetForm = () => {

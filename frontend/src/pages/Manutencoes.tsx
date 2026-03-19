@@ -65,10 +65,10 @@ const defaultFormData = (): MaintenanceFormData => ({
   data_proxima: today(),
   tipo: 'preventiva',
   descricao: '',
-  custo: 0,
+  custo: '' as any,
   oficina: '',
-  km_realizada: 0,
-  km_proxima: 0,
+  km_realizada: '' as any,
+  km_proxima: '' as any,
   status: 'agendada',
 })
 
@@ -323,7 +323,7 @@ const Manutencoes: React.FC = () => {
       toast.success('Manutenção criada com sucesso!')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao criar manutenção')
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao criar manutenção')
     },
   })
 
@@ -336,7 +336,7 @@ const Manutencoes: React.FC = () => {
       toast.success('Manutenção atualizada com sucesso!')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao atualizar manutenção')
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao atualizar manutenção')
     },
   })
 
@@ -348,7 +348,7 @@ const Manutencoes: React.FC = () => {
       toast.success('Manutenção deletada com sucesso!')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao deletar manutenção')
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao deletar manutenção')
     },
   })
 
@@ -358,7 +358,7 @@ const Manutencoes: React.FC = () => {
       data_manutencao: new Date().toISOString().split('T')[0],
       tipo: 'preventiva',
       descricao: '',
-      valor: 0,
+      valor: '' as any,
       oficina: '',
       quilometragem: 0,
       status: 'pendente',
@@ -400,7 +400,7 @@ const Manutencoes: React.FC = () => {
       toast.success('Manutencao criada com sucesso')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao criar manutencao')
+      toast.error(error.response?.data?.detail || error.response?.data?.detail || error.response?.data?.message || 'Erro ao criar manutencao')
     },
   })
 
@@ -413,7 +413,7 @@ const Manutencoes: React.FC = () => {
       toast.success('Manutencao atualizada com sucesso')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao atualizar manutencao')
+      toast.error(error.response?.data?.detail || error.response?.data?.detail || error.response?.data?.message || 'Erro ao atualizar manutencao')
     },
   })
 
@@ -424,7 +424,7 @@ const Manutencoes: React.FC = () => {
       toast.success('Ordem concluida e frota sincronizada')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao concluir manutencao')
+      toast.error(error.response?.data?.detail || error.response?.data?.detail || error.response?.data?.message || 'Erro ao concluir manutencao')
     },
   })
 
@@ -436,7 +436,7 @@ const Manutencoes: React.FC = () => {
       toast.success('Manutencao excluida com sucesso')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao excluir manutencao')
+      toast.error(error.response?.data?.detail || error.response?.data?.detail || error.response?.data?.message || 'Erro ao excluir manutencao')
     },
   })
 

@@ -28,7 +28,7 @@ const Login: React.FC = () => {
       toast.success('Login realizado com sucesso!')
       navigate(getHomeRoute())
     } catch (err: any) {
-      const message = err.response?.data?.message || 'Falha ao fazer login'
+      const message = err.response?.data?.detail || err.response?.data?.message || 'Falha ao fazer login'
       setError(message)
       toast.error(message)
     } finally {

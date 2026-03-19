@@ -24,6 +24,7 @@ import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import { cn, validateEmail } from '@/lib/utils'
 import api from '@/services/api'
 import { AccessCatalog } from '@/types'
+import { useDebounce } from '../hooks/useDebounce'
 
 interface UsuarioType {
   id: number
@@ -80,6 +81,7 @@ const Usuarios: React.FC = () => {
   const [editingUser, setEditingUser] = useState<UsuarioType | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<UsuarioType | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const debouncedSearch = useDebounce(searchQuery, 300)
   const [generatedReset, setGeneratedReset] = useState<ResetLinkResponse | null>(null)
   const [resetTarget, setResetTarget] = useState<UsuarioType | null>(null)
   const [logAcao, setLogAcao] = useState('')
@@ -207,7 +209,7 @@ const Usuarios: React.FC = () => {
   )
 
   const filteredUsers = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
+    const query = debouncedSearch.trim().toLowerCase()
     if (!query) return usuarios
     return usuarios.filter(
       (user) =>
@@ -215,7 +217,7 @@ const Usuarios: React.FC = () => {
         user.email.toLowerCase().includes(query) ||
         user.perfil.toLowerCase().includes(query),
     )
-  }, [searchQuery, usuarios])
+  }, [debouncedSearch, usuarios])
 
   const closeModal = () => {
     setIsModalOpen(false)

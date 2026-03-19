@@ -12,6 +12,7 @@ import DataTable from '@/components/shared/DataTable'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import { Empresa, PaginatedResponse, PaginationParams, Veiculo } from '@/types'
 import { formatPhone, formatCNPJ, formatCurrency, formatDate } from '@/lib/utils'
+import { useDebounce } from '../hooks/useDebounce'
 
 type EmpresaUso = {
   id: string
@@ -64,6 +65,7 @@ const Empresas: React.FC = () => {
   const [usageDeleteConfirm, setUsageDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
   const [searchTerm, setSearchTerm] = useState('')
+  const debouncedSearch = useDebounce(searchTerm, 300)
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
     nome: '',
@@ -87,13 +89,13 @@ const Empresas: React.FC = () => {
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['empresas', pagination, searchTerm],
+    queryKey: ['empresas', pagination, debouncedSearch],
     queryFn: async () => {
       const { data } = await api.get<PaginatedResponse<Empresa>>('/empresas', {
         params: {
           page: pagination.page,
           limit: pagination.limit,
-          search: searchTerm || undefined,
+          search: debouncedSearch || undefined,
         },
       })
       return data
@@ -144,7 +146,7 @@ const Empresas: React.FC = () => {
       toast.success('Empresa criada com sucesso!')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao criar empresa')
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao criar empresa')
     },
   })
 
@@ -161,7 +163,7 @@ const Empresas: React.FC = () => {
       toast.success('Empresa atualizada com sucesso!')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao atualizar empresa')
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao atualizar empresa')
     },
   })
 
@@ -173,7 +175,7 @@ const Empresas: React.FC = () => {
       toast.success('Empresa deletada com sucesso!')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao deletar empresa')
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao deletar empresa')
     },
   })
 

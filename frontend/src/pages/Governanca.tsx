@@ -781,7 +781,7 @@ const Governanca: React.FC = () => {
                     </div>
 
                     <div className="space-y-3">
-                      {versionInfo.recent_commits.map((commit) => (
+                      {(versionInfo.recent_commits || []).map((commit) => (
                         <div key={`${commit.short_hash}-${commit.committed_at}`} className="rounded-[22px] border border-slate-200 bg-white p-4">
                           <div className="flex items-start justify-between gap-3">
                             <div>

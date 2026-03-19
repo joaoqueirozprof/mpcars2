@@ -1,10 +1,11 @@
-import React, { useMemo, useState, useRef } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   Car,
   CheckCircle,
   ChevronDown,
+  DollarSign,
   Download,
   Edit,
   FileText,
@@ -27,6 +28,7 @@ import { useConfig } from '@/contexts/ConfigContext'
 import { calculateDays, formatCurrency, formatDate } from '@/lib/utils'
 import api from '@/services/api'
 import { Contrato, EmpresaUso, PaginatedResponse, PaginationParams, Veiculo } from '@/types'
+import { useDebounce } from '../hooks/useDebounce'
 
 type StatusFilter = 'todos' | 'ativo' | 'finalizado' | 'cancelado' | 'atraso'
 
@@ -225,22 +227,27 @@ const Contratos: React.FC = () => {
     data_fim: '',
     vigencia_indeterminada: false,
     empresa_uso_id: '',
-    km_atual_veiculo: 0,
+    km_atual_veiculo: '',
     hora_saida: '',
     combustivel_saida: '',
-    km_livres: 0,
-    valor_diaria: config.valor_diaria_padrao || 0,
-    valor_km_excedente: 0,
-    desconto: 0,
+    km_livres: '',
+    valor_diaria: config.valor_diaria_padrao || '',
+    valor_km_excedente: '',
+    desconto: '',
     observacoes: '',
   })
 
   const [pagination, setPagination] = useState<PaginationParams>({ page: 1, limit: 10 })
   const [searchTerm, setSearchTerm] = useState('')
+  const debouncedSearch = useDebounce(searchTerm, 300)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingContract, setEditingContract] = useState<Contrato | null>(null)
   const [closingContract, setClosingContract] = useState<Contrato | null>(null)
+  const [closeoutNfHistory, setCloseoutNfHistory] = useState<any[]>([])
+  const [companyNfHistory, setCompanyNfHistory] = useState<Record<number, any[]>>({})
+  const [closeoutDataFim, setCloseoutDataFim] = useState('')
+  const [feePayments, setFeePayments] = useState<Record<string, { pago: boolean; forma: string; comprovante: File | null; comprovanteUrl: string }>>({})
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState<ContractForm>(buildForm())
@@ -270,22 +277,72 @@ const Contratos: React.FC = () => {
     activeTab: 'geral' | 'veiculo' | 'nf';
   }>({ isOpen: false, contrato: null, veiculoUso: null, activeTab: 'geral' })
 
+  const [nfHistory, setNfHistory] = useState<any[]>([])
+
   const [nfFormData, setNfFormData] = useState({
     periodo_inicio: '',
     periodo_fim: '',
-    km_referencia: 0,
-    valor_diaria: 0,
-    km_inicial: 0,
-    km_final: 0,
-    km_percorrido: 0,
-    valor_km_extra: 0,
+    km_referencia: '' as any,
+    valor_diaria: '' as any,
+    km_percorrido: '' as any,
+    valor_km_extra: '' as any,
   })
 
+  const reprintNf = async (nfId: number) => {
+    const loading = toast.loading('Gerando PDF...')
+    try {
+      const response = await api.get('/relatorios/nf/reprint/' + nfId, { responseType: 'blob' })
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'nf_reprint_' + nfId + '.pdf'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+      toast.dismiss(loading)
+      toast.success('PDF gerado!')
+    } catch {
+      toast.dismiss(loading)
+      toast.error('Erro ao gerar PDF')
+    }
+  }
+
+  const loadNfHistory = async (usoId: number) => {
+    try {
+      const { data } = await api.get(`/relatorios/nf/${usoId}/historico`)
+      const history = data || []
+      setNfHistory(history)
+      // Pre-fill NF form with data from last period
+      if (history.length > 0) {
+        const last = history[0] // sorted desc by date
+        const lastEnd = last.periodo_fim || ''
+        // Next period starts day after last period ended
+        let nextStart = lastEnd
+        if (lastEnd) {
+          const d = new Date(lastEnd + 'T12:00:00')
+          d.setDate(d.getDate() + 1)
+          nextStart = d.toISOString().split('T')[0]
+        }
+        setNfFormData(prev => ({
+          ...prev,
+          periodo_inicio: nextStart,
+          periodo_fim: new Date().toISOString().split('T')[0],
+          km_referencia: last.km_percorrida > 0 ? prev.km_referencia : prev.km_referencia,
+          km_percorrido: '', // always empty - user must fill
+        }))
+      }
+    } catch {
+      setNfHistory([])
+    }
+  }
+
   const nfCalculations = useMemo(() => {
-    const kmPercorrido = Math.max((nfFormData.km_final || 0) - (nfFormData.km_inicial || 0), 0)
-    const kmExtra = Math.max(kmPercorrido - (nfFormData.km_referencia || 0), 0)
-    const valorKmExtra = kmExtra * (nfFormData.valor_km_extra || 0)
-    const valorTotal = (nfFormData.valor_diaria || 0) + valorKmExtra
+    const kmPercorrido = Math.max(Number(nfFormData.km_percorrido) || 0, 0)
+    const kmExtra = Math.max(kmPercorrido - (Number(nfFormData.km_referencia) || 0), 0)
+    const valorKmExtra = kmExtra * (Number(nfFormData.valor_km_extra) || 0)
+    const valorTotal = (Number(nfFormData.valor_diaria) || 0) + valorKmExtra
 
     return {
       kmPercorrido,
@@ -324,14 +381,14 @@ const Contratos: React.FC = () => {
   })
 
   const { data: contratos, isLoading } = useQuery({
-    queryKey: ['contratos', pagination, statusFilter, searchTerm],
+    queryKey: ['contratos', pagination, statusFilter, debouncedSearch],
     queryFn: async () => {
       const { data } = await api.get<PaginatedResponse<Contrato>>('/contratos', {
         params: {
           page: pagination.page,
           limit: pagination.limit,
           status: statusFilter !== 'todos' ? statusFilter : undefined,
-          search: searchTerm || undefined,
+          search: debouncedSearch || undefined,
         },
       })
       return data
@@ -604,11 +661,10 @@ const Contratos: React.FC = () => {
           periodo_fim: uso.data_fim ? uso.data_fim.split('T')[0] : new Date().toISOString().split('T')[0],
           km_referencia: uso.km_referencia || 0,
           valor_diaria: uso.valor_diaria_empresa || 0,
-          km_inicial: uso.km_inicial || 0,
-          km_final: uso.km_final || 0,
-          km_percorrido: uso.km_percorrido || 0,
+          km_percorrido: uso.km_percorrido || '',
           valor_km_extra: uso.valor_km_extra || 0,
         })
+        loadNfHistory(uso.id)
       }
     } catch {
       toast.error('Erro ao carregar veículos')
@@ -628,11 +684,24 @@ const Contratos: React.FC = () => {
     setCompanyContractDetails({ isOpen: true, contrato, empresaUsos: [], loading: true })
     try {
       const { data } = await api.get(`/contratos/${contrato.id}`)
+      const usos = data.empresa_usos || []
       setCompanyContractDetails(prev => ({
         ...prev,
-        empresaUsos: data.empresa_usos || [],
+        empresaUsos: usos,
         loading: false,
       }))
+      // Load NF history for all vehicles
+      const histMap: Record<number, any[]> = {}
+      for (const uso of usos) {
+        try {
+          const { data: hist } = await api.get(`/relatorios/nf/${uso.id}/historico`)
+          histMap[uso.id] = hist || []
+        } catch { histMap[uso.id] = [] }
+      }
+      setCompanyNfHistory(histMap)
+      if (usos.length > 0) {
+        loadNfHistory(usos[0].id)
+      }
     } catch {
       toast.error('Erro ao carregar detalhes do contrato')
       setCompanyContractDetails({ isOpen: false, contrato: null, empresaUsos: [], loading: false })
@@ -657,7 +726,7 @@ const Contratos: React.FC = () => {
       
       const veiculos = empresaUsos.map((uso: any) => ({
         uso_id: uso.id,
-        km_percorrido: uso.km_percorrido || 0,
+        km_percorrido: uso.km_percorrido || '',
         km_referencia: uso.km_referencia || 0,
         valor_km_extra: uso.valor_km_extra || 0,
       }))
@@ -680,7 +749,6 @@ const Contratos: React.FC = () => {
       window.URL.revokeObjectURL(url)
       toast.success('Relatório de notas fiscais baixado!')
     } catch (error) {
-      console.error('Error downloading NF report:', error)
       toast.error('Erro ao baixar relatório de notas fiscais')
     } finally {
       setDownloadingPdf(null)
@@ -715,9 +783,9 @@ const Contratos: React.FC = () => {
       data_fim: toDateInput(contrato.data_fim),
       vigencia_indeterminada:
         (contrato.tipo || 'cliente') === 'empresa' &&
-        getRoundedDaysBetween(contrato.data_inicio, contrato.data_fim) >= 3650,
+        !contrato.data_fim || getRoundedDaysBetween(contrato.data_inicio, contrato.data_fim) >= 3650,
       empresa_uso_id: '',
-      km_atual_veiculo: contrato.veiculo?.km_atual ?? contrato.quilometragem_inicial ?? 0,
+      km_atual_veiculo: contrato.km_inicial ?? contrato.veiculo?.km_atual ?? contrato.quilometragem_inicial ?? 0,
       hora_saida: contrato.hora_saida || '',
       combustivel_saida: contrato.combustivel_saida || '',
       km_livres: contrato.km_livres || 0,
@@ -729,10 +797,24 @@ const Contratos: React.FC = () => {
     setIsModalOpen(true)
   }
 
-  const openCloseout = (contrato: Contrato) => {
+  const openCloseout = async (contrato: Contrato) => {
     setClosingContract(contrato)
+    setCloseoutDataFim(new Date().toISOString().split('T')[0])
+    // Load NF history for empresa contracts
+    if (contrato.tipo === 'empresa') {
+      try {
+        const { data } = await api.get(`/contratos/${contrato.id}`)
+        const usos = data.empresa_usos || []
+        if (usos.length > 0) {
+          const { data: hist } = await api.get(`/relatorios/nf/${usos[0].id}/historico`)
+          setCloseoutNfHistory(hist || [])
+        }
+      } catch { setCloseoutNfHistory([]) }
+    } else {
+      setCloseoutNfHistory([])
+    }
     setCloseoutData({
-      km_atual_veiculo: contrato.veiculo?.km_atual ?? contrato.quilometragem_inicial ?? 0,
+      km_atual_veiculo: contrato.veiculo?.km_atual ?? contrato.km_inicial ?? contrato.quilometragem_inicial ?? 0,
       combustivel_retorno: contrato.combustivel_retorno || '',
       itens_checklist: buildCloseoutChecklist(contrato.veiculo),
       valor_avarias: contrato.valor_avarias || 0,
@@ -806,7 +888,7 @@ const Contratos: React.FC = () => {
   )
 
   const closeoutKmRodado = closingContract
-    ? Math.max(closeoutData.km_atual_veiculo - (closingContract.quilometragem_inicial || 0), 0)
+    ? Math.max(closeoutData.km_atual_veiculo - (closingContract.km_inicial ?? closingContract.quilometragem_inicial ?? 0), 0)
     : 0
   const closeoutKmExcedente = closingContract
     ? Math.max(closeoutKmRodado - (closingContract.km_livres || 0), 0)
@@ -846,8 +928,33 @@ const Contratos: React.FC = () => {
   const closeoutFeeBreakdown = closeoutFeeFields
     .map((field) => ({ ...field, value: Number(closeoutData[field.key] || 0) }))
     .filter((field) => field.value > 0)
+  // Total of all NF periods for empresa contracts
+  const closeoutTotalNfPeriodos = closingContract && String(closingContract.tipo || '').toLowerCase() === 'empresa'
+    ? closeoutNfHistory.reduce((s: number, n: any) => s + (n.valor_total_periodo || (closingContract.valor_diaria || 0) + (n.valor_total_extra || 0)), 0)
+    : 0
+  const closeoutNfPagos = closeoutNfHistory.filter((n: any) => n.pago).reduce(
+    (s: number, n: any) => s + (n.valor_total_periodo || (closingContract?.valor_diaria || 0) + (n.valor_total_extra || 0)), 0
+  )
+  const closeoutNfPendente = closeoutTotalNfPeriodos - closeoutNfPagos
+
+  // Calculate paid fees total
+  const closeoutFeesPagos = closeoutFeeFields.reduce((sum, field) => {
+    const fp = feePayments[field.key]
+    if (fp?.pago) return sum + Number(closeoutData[field.key] || 0)
+    return sum
+  }, 0)
+
+  // Auto-update valor_recebido from NF pagos + fee pagos
+  useEffect(() => {
+    if (!closingContract) return
+    const nfPagos = closingContract.tipo === 'empresa' ? closeoutNfPagos : 0
+    setCloseoutData(prev => ({ ...prev, valor_recebido: nfPagos + closeoutFeesPagos }))
+  }, [closeoutNfPagos, closeoutFeesPagos, closingContract])
+
   const closeoutEstimativa = closingContract
-    ? Math.max(closeoutValorBaseAtualizado + closeoutValorKmExcedente + closeoutTaxasOperacionais - closeoutData.desconto, 0)
+    ? String(closingContract.tipo || '').toLowerCase() === 'empresa'
+      ? Math.max(closeoutTotalNfPeriodos + closeoutTaxasOperacionais - closeoutData.desconto, 0)
+      : Math.max(closeoutValorBaseAtualizado + closeoutValorKmExcedente + closeoutTaxasOperacionais - closeoutData.desconto, 0)
     : 0
 
   const summary = useMemo(() => {
@@ -882,6 +989,14 @@ const Contratos: React.FC = () => {
 
     const payload = {
       ...formData,
+      cliente_id: Number(formData.cliente_id) || undefined,
+      veiculo_id: Number(formData.veiculo_id) || undefined,
+      empresa_uso_id: Number(formData.empresa_uso_id) || undefined,
+      km_atual_veiculo: Number(formData.km_atual_veiculo) || undefined,
+      km_livres: Number(formData.km_livres) || undefined,
+      valor_diaria: Number(formData.valor_diaria) || 0,
+      valor_km_excedente: Number(formData.valor_km_excedente) || undefined,
+      desconto: Number(formData.desconto) || undefined,
       empresa_id: formData.tipo === 'empresa' ? Number(formData.cliente_id) || undefined : undefined,
       data_fim: formData.vigencia_indeterminada ? undefined : formData.data_fim,
       qtd_diarias: diasPreview,
@@ -897,12 +1012,13 @@ const Contratos: React.FC = () => {
       toast.error('Informe o KM atual do veiculo.')
       return
     }
-    if (closeoutData.km_atual_veiculo < (closingContract.quilometragem_inicial || 0)) {
+    if (closeoutData.km_atual_veiculo < (closingContract.km_inicial ?? closingContract.quilometragem_inicial ?? 0)) {
       toast.error('O KM atual nao pode ser menor que o KM de retirada.')
       return
     }
     const payload = {
       ...closeoutData,
+      data_finalizacao: closeoutDataFim || new Date().toISOString().split('T')[0],
       data_pagamento:
         closeoutData.status_pagamento === 'pago'
           ? closeoutData.data_pagamento
@@ -936,7 +1052,7 @@ const Contratos: React.FC = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-5 gap-2 md:gap-4">
           <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center gap-3 mb-3">
               <div className="p-2 bg-slate-100 rounded-lg text-slate-600">
@@ -1028,7 +1144,51 @@ const Contratos: React.FC = () => {
           {isLoading ? (
             <div className="space-y-3">{[...Array(5)].map((_, index) => <div key={index} className="h-12 bg-slate-100 rounded animate-pulse" />)}</div>
           ) : contratosAgrupados.length ? (
-            <div className="overflow-x-auto">
+            <>
+            {/* Mobile Card List */}
+              <div className="md:hidden space-y-2">
+                {contratosAgrupados.map((grupo) => {
+                  const contrato = grupo.contratos?.[0]
+                  if (!contrato) return null
+                  const status = displayStatus(contrato)
+                  const ehEmpresa = grupo.tipo === "empresa"
+                  return (
+                    <div key={`m-${ehEmpresa ? `e${grupo.empresaId}` : `c${contrato.cliente_id}`}`} className="bg-white rounded-xl border border-slate-100 p-3">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${ehEmpresa ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600"}`}>{contrato.numero}</span>
+                          {ehEmpresa && <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1 py-0.5 rounded">PJ</span>}
+                        </div>
+                        <div className="flex gap-1">
+                          <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${status === "ativo" ? "bg-green-100 text-green-700" : status === "finalizado" ? "bg-blue-100 text-blue-700" : status === "cancelado" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>{statusLabel(status)}</span>
+                          <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${contrato.status_pagamento === "pago" ? "bg-emerald-100 text-emerald-700" : contrato.status_pagamento === "pendente" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>{paymentStatusLabel(contrato.status_pagamento)}</span>
+                        </div>
+                      </div>
+                      <p className="text-[13px] font-semibold text-slate-900 truncate">{contrato.cliente?.nome || "-"}</p>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1 text-[11px]">
+                        <div className="text-slate-400">Veiculo: <span className="text-slate-600 font-medium">{contrato.veiculo ? `${contrato.veiculo.marca} ${contrato.veiculo.modelo}` : ehEmpresa ? `${contrato.frota_count || 0} veic.` : "-"}</span></div>
+                        <div className="text-slate-400">Placa: <span className="text-slate-600 font-mono font-medium">{contrato.veiculo?.placa || "-"}</span></div>
+                        <div className="text-slate-400">De: <span className="text-slate-600 font-medium">{formatDate(contrato.data_inicio)}</span></div>
+                        <div className="text-slate-400">Ate: <span className="text-slate-600 font-medium">{formatDate(contrato.data_fim)}</span></div>
+                      </div>
+                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
+                        <div>
+                          <p className="text-[13px] font-bold text-slate-900">{formatCurrency(contrato.valor_total)}</p>
+                          <p className={`text-[10px] font-medium ${(contrato.valor_recebido || 0) >= (contrato.valor_total || 1) - 0.01 ? "text-green-600" : (contrato.valor_recebido || 0) > 0 ? "text-amber-600" : "text-slate-400"}`}>Rec: {formatCurrency(contrato.valor_recebido || 0)}</p>
+                        </div>
+                        <div className="flex gap-0.5">
+                          <button onClick={() => setFleetDocumentsModal({ isOpen: true, contrato, grupo })} className="p-1.5 text-blue-600 active:bg-blue-50 rounded-lg"><List size={16} /></button>
+                          {contrato.status === "ativo" && <button onClick={() => openCloseout(contrato)} className="p-1.5 text-emerald-600 active:bg-emerald-50 rounded-lg"><CheckCircle size={16} /></button>}
+                          <button onClick={() => openEdit(contrato)} className="p-1.5 text-slate-500 active:bg-slate-50 rounded-lg"><Edit size={16} /></button>
+                          <button onClick={() => setDeleteConfirm({ isOpen: true, id: contrato.id })} className="p-1.5 text-red-500 active:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {/* Desktop Table */}
+              <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="bg-slate-50/50">
@@ -1072,16 +1232,16 @@ const Contratos: React.FC = () => {
                                 <button
                                   onClick={() => openCompanyContractDetails(contrato)}
                                   className="flex items-center gap-1.5 px-2 py-1 text-blue-600 hover:bg-blue-50 rounded-md border border-blue-100 transition-all group shadow-sm"
-                                  title="Relatório de Notas Fiscais"
+                                  title="Ver Frota e Notas Fiscais"
                                 >
                                   <Car size={14} className="group-hover:scale-110 transition-transform" />
                                   <span className="text-[10px] font-bold uppercase tracking-tight">
-                                    Relatório de Notas Fiscais
+                                    Ver Frota e NFs
                                   </span>
                                 </button>
                               </div>
                               <span className="text-[10px] text-slate-400 font-medium ml-1 italic">
-                                {contrato.frota_count || 0} veículos na frota
+                                {contrato.frota_count || 0} veiculos | {formatCurrency(contrato.valor_total || 0)}
                               </span>
                             </div>
                           ) : (
@@ -1108,9 +1268,12 @@ const Contratos: React.FC = () => {
                         <td className="px-4 py-4 text-right whitespace-nowrap">
                           <div className="flex flex-col">
                             <span className="text-sm font-bold text-slate-900">{formatCurrency(contrato.valor_total)}</span>
-                            <span className="text-[10px] text-slate-500">
-                              Recebido: <span className="font-semibold text-slate-700">{formatCurrency(contrato.valor_recebido || 0)}</span>
+                            <span className={`text-[10px] font-semibold ${(contrato.valor_recebido || 0) >= (contrato.valor_total || 1) - 0.01 ? 'text-green-600' : (contrato.valor_recebido || 0) > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+                              Recebido: {formatCurrency(contrato.valor_recebido || 0)}
                             </span>
+                            {(contrato.valor_recebido || 0) > 0 && (contrato.valor_recebido || 0) < (contrato.valor_total || 0) - 0.01 && (
+                              <span className="text-[10px] text-red-500">Falta: {formatCurrency((contrato.valor_total || 0) - (contrato.valor_recebido || 0))}</span>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-4 text-center">
@@ -1137,11 +1300,12 @@ const Contratos: React.FC = () => {
                             {/* Botão Frota Completa - disponível para todos os contratos */}
                             <button 
                               onClick={() => setFleetDocumentsModal({ isOpen: true, contrato, grupo })}
-                              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer transition-all flex items-center gap-1 group/btn"
-                              title="Ver Frota Completa"
+                              className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all group/btn shadow-md shadow-blue-200 hover:shadow-blue-300"
+                              title="Gerenciar contrato: ver frota, gerar PDF, imprimir documentos"
                             >
-                              <List size={18} className="group-hover/btn:scale-110 transition-transform" />
-                              <ChevronDown size={14} className="group-hover/btn:translate-y-0.5 transition-transform" />
+                              <List size={16} className="group-hover/btn:scale-110 transition-transform" />
+                              <span className="text-[10px] font-bold uppercase tracking-wide hidden xl:inline">Gerenciar</span>
+                              <ChevronDown size={12} className="group-hover/btn:translate-y-0.5 transition-transform" />
                             </button>
                             
                             {/* PDF e Impressão - removidos conforme solicitado */}
@@ -1166,6 +1330,7 @@ const Contratos: React.FC = () => {
                   })}
                 </tbody>
               </table>
+              </div>
               <div className="flex items-center justify-between pt-4 border-t border-slate-200">
                 <p className="text-sm text-slate-600">Mostrando {contratosAgrupados.length} de {contratos?.total || 0} contratos</p>
                 <div className="flex gap-2">
@@ -1173,7 +1338,7 @@ const Contratos: React.FC = () => {
                   <button onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })} disabled={pagination.page * pagination.limit >= (contratos?.total || 0)} className="btn-secondary btn-sm">Proximo</button>
                 </div>
               </div>
-            </div>
+            </>
           ) : (
             <div className="empty-state">
               <div className="empty-state-icon bg-slate-100"><FileText className="text-slate-400" size={48} /></div>
@@ -1187,13 +1352,13 @@ const Contratos: React.FC = () => {
       {fleetDocumentsModal.isOpen && fleetDocumentsModal.grupo && fleetDocumentsModal.contrato && (
         <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setFleetDocumentsModal({ isOpen: false, contrato: null, grupo: null })}>
           <div className="modal-content max-w-md w-full" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+            <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
                   <FileText size={18} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-display font-bold text-slate-900">Documentos da Frota</h3>
+                  <h3 className="text-base md:text-lg font-display font-bold text-slate-900">Documentos da Frota</h3>
                   <p className="text-xs text-slate-500 font-medium">Selecione o veículo para gerar o PDF ou imprimir</p>
                 </div>
               </div>
@@ -1250,10 +1415,17 @@ const Contratos: React.FC = () => {
                   openPdfVehicleSelector(fleetDocumentsModal.contrato!);
                   setFleetDocumentsModal({ isOpen: false, contrato: null, grupo: null });
                 }}
-                className="w-full flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest py-3.5 text-blue-600 bg-white border border-blue-100 rounded-xl hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-sm active:scale-[0.98]"
+                className="w-full flex flex-col items-center gap-2 py-4 px-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl hover:from-blue-600 hover:to-indigo-600 hover:text-white hover:border-blue-600 text-blue-700 transition-all shadow-sm active:scale-[0.98] group/cta"
               >
-                <Search size={16} />
-                Buscar na Frota Completa
+                <div className="flex items-center gap-2">
+                  <FileText size={18} className="group-hover/cta:scale-110 transition-transform" />
+                  <span className="text-sm font-black uppercase tracking-wide">Painel Completo da Frota</span>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] font-medium opacity-70 group-hover/cta:opacity-100">
+                  <span className="flex items-center gap-1"><CheckCircle size={10} /> Historico de periodos</span>
+                  <span className="flex items-center gap-1"><Download size={10} /> Gerar e reimprimir NFs</span>
+                  <span className="flex items-center gap-1"><DollarSign size={10} /> Pagamentos e comprovantes</span>
+                </div>
               </button>
             </div>
           </div>
@@ -1263,17 +1435,17 @@ const Contratos: React.FC = () => {
       {/* Modal para selecionar veículo ao gerar PDF (Frota Completa) */}
       {pdfVehicleSelector.isOpen && pdfVehicleSelector.contrato && (
         <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setPdfVehicleSelector({ ...pdfVehicleSelector, isOpen: false })}>
-          <div className="modal-content max-w-6xl w-full h-[85vh] flex flex-col" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-white sticky top-0 z-10">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-200">
-                  <Car size={24} />
+          <div className="modal-content max-w-6xl w-full h-[92vh] md:h-[85vh] flex flex-col" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-slate-100 bg-white sticky top-0 z-10">
+              <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
+                <div className="w-8 h-8 md:w-10 md:h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-200 flex-shrink-0">
+                  <Car size={20} />
                 </div>
-                <div>
-                  <h3 className="text-xl font-display font-bold text-slate-900">
-                    Frota Completa - {pdfVehicleSelector.contrato.cliente?.nome}
+                <div className="min-w-0">
+                  <h3 className="text-sm md:text-xl font-display font-bold text-slate-900 truncate">
+                    Frota - {pdfVehicleSelector.contrato.cliente?.nome}
                   </h3>
-                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Gestão de Veículos e Relatórios</p>
+                  <p className="text-[10px] md:text-xs text-slate-500 font-medium uppercase tracking-wider hidden md:block">Gestão de Veículos e Relatórios</p>
                 </div>
               </div>
               <button onClick={() => setPdfVehicleSelector({ ...pdfVehicleSelector, isOpen: false })} className="btn-icon hover:bg-red-50 hover:text-red-500 transition-colors">
@@ -1281,7 +1453,7 @@ const Contratos: React.FC = () => {
               </button>
             </div>
             
-            <div className="flex-1 flex overflow-hidden bg-slate-50">
+            <div className="flex-1 flex flex-col md:flex-row overflow-hidden bg-slate-50">
               {pdfVehicleSelector.loading ? (
                 <div className="flex-1 flex items-center justify-center">
                   <div className="flex flex-col items-center gap-3">
@@ -1292,7 +1464,7 @@ const Contratos: React.FC = () => {
               ) : (
                 <>
                   {/* Left Pane: Vehicle List */}
-                  <div className="w-80 border-r border-slate-200 bg-white flex flex-col">
+                  <div className="w-full md:w-80 border-b md:border-b-0 md:border-r border-slate-200 bg-white flex flex-col max-h-[35vh] md:max-h-none">
                     <div className="p-4 border-b border-slate-100 bg-slate-50/50">
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -1317,11 +1489,10 @@ const Contratos: React.FC = () => {
                                 periodo_fim: uso.data_fim ? uso.data_fim.split('T')[0] : new Date().toISOString().split('T')[0],
                                 km_referencia: uso.km_referencia || 0,
                                 valor_diaria: uso.valor_diaria_empresa || 0,
-                                km_inicial: uso.km_inicial || 0,
-                                km_final: uso.km_final || 0,
-                                km_percorrido: uso.km_percorrido || 0,
+                                km_percorrido: uso.km_percorrido || '',
                                 valor_km_extra: uso.valor_km_extra || 0,
                               });
+                              loadNfHistory(uso.id);
                             }}
                             className={`w-full text-left p-3 rounded-xl transition-all group ${
                               pdfVehicleSelector.selectedUsoId === uso.id 
@@ -1452,46 +1623,50 @@ const Contratos: React.FC = () => {
 
                                 {contractDetailsModal.activeTab === 'veiculo' && (
                                   <div className="space-y-4">
-                                    <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                                      <table className="w-full text-sm text-left">
-                                        <thead className="bg-slate-50 text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                                          <tr>
-                                            <th className="px-6 py-4">Período</th>
-                                            <th className="px-6 py-4">KM Contratada</th>
-                                            <th className="px-6 py-4">KM Percorrida</th>
-                                            <th className="px-6 py-4">KM Excedente</th>
-                                            <th className="px-6 py-4 text-right">Valor Período</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                          <tr className="hover:bg-slate-50 transition-colors">
-                                            <td className="px-6 py-4 font-medium text-slate-900">
-                                              {formatDate(selectedUso.data_inicio)} - {selectedUso.data_fim ? formatDate(selectedUso.data_fim) : 'Atual'}
-                                            </td>
-                                            <td className="px-6 py-4 text-slate-600">{selectedUso.km_referencia?.toLocaleString('pt-BR')} km</td>
-                                            <td className="px-6 py-4 text-slate-600">{selectedUso.km_percorrido?.toLocaleString('pt-BR')} km</td>
-                                            <td className="px-6 py-4">
-                                              <span className={`px-2 py-1 rounded-lg font-bold text-xs ${
-                                                Math.max((selectedUso.km_percorrido || 0) - (selectedUso.km_referencia || 0), 0) > 0 
-                                                  ? 'bg-amber-50 text-amber-600' 
-                                                  : 'bg-green-50 text-green-600'
-                                              }`}>
-                                                {Math.max((selectedUso.km_percorrido || 0) - (selectedUso.km_referencia || 0), 0).toLocaleString('pt-BR')} km
-                                              </span>
-                                            </td>
-                                            <td className="px-6 py-4 text-right font-black text-slate-900">
-                                              {formatCurrency(
-                                                (selectedUso.valor_diaria_empresa || 0) + 
-                                                (Math.max((selectedUso.km_percorrido || 0) - (selectedUso.km_referencia || 0), 0) * (selectedUso.valor_km_extra || 0))
-                                              )}
-                                            </td>
-                                          </tr>
-                                        </tbody>
-                                      </table>
-                                    </div>
+                                    <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest">Historico de Periodos NF</h4>
+                                    {nfHistory.length > 0 ? (
+                                      <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                                        <table className="w-full text-sm text-left">
+                                          <thead className="bg-slate-50 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                                            <tr>
+                                              <th className="px-4 py-3">Periodo</th>
+                                              <th className="px-4 py-3">KM Percorrida</th>
+                                              <th className="px-4 py-3">KM Excedente</th>
+                                              <th className="px-4 py-3 text-right">Valor Extra</th>
+                                              <th className="px-4 py-3">Data Emissao</th>
+                                              <th className="px-4 py-3 text-center">Reimprimir</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-100">
+                                            {nfHistory.map((nf: any, idx: number) => (
+                                              <tr key={idx} className="hover:bg-slate-50">
+                                                <td className="px-4 py-3 font-medium">{nf.periodo_inicio ? new Date(nf.periodo_inicio + 'T12:00:00').toLocaleDateString('pt-BR') : ''} - {nf.periodo_fim ? new Date(nf.periodo_fim + 'T12:00:00').toLocaleDateString('pt-BR') : ''}</td>
+                                                <td className="px-4 py-3">{(nf.km_percorrida || 0).toLocaleString('pt-BR')} km</td>
+                                                <td className="px-4 py-3"><span className={nf.km_excedente > 0 ? 'text-amber-600 font-bold' : 'text-green-600'}>{(nf.km_excedente || 0).toLocaleString('pt-BR')} km</span></td>
+                                                <td className="px-4 py-3 text-right font-bold">{formatCurrency(nf.valor_total_extra || 0)}</td>
+                                                <td className="px-4 py-3 text-slate-500 text-xs">{nf.data_criacao ? new Date(nf.data_criacao).toLocaleDateString('pt-BR') : ''}</td>
+                                                <td className="px-4 py-3 text-center"><button onClick={() => reprintNf(nf.id)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Reimprimir NF">PDF</button></td>
+                                              </tr>
+                                            ))}
+                                            <tr className="bg-slate-50 font-bold">
+                                              <td className="px-4 py-3">TOTAL ({nfHistory.length} periodos)</td>
+                                              <td className="px-4 py-3">{nfHistory.reduce((s: number, n: any) => s + (n.km_percorrida || 0), 0).toLocaleString('pt-BR')} km</td>
+                                              <td className="px-4 py-3">{nfHistory.reduce((s: number, n: any) => s + (n.km_excedente || 0), 0).toLocaleString('pt-BR')} km</td>
+                                              <td className="px-4 py-3 text-right">{formatCurrency(nfHistory.reduce((s: number, n: any) => s + (n.valor_total_extra || 0), 0))}</td>
+                                              <td className="px-4 py-3"></td>
+                                              <td className="px-4 py-3"></td>
+                                            </tr>
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    ) : (
+                                      <div className="bg-slate-50 rounded-xl p-6 text-center text-slate-500">
+                                        <p className="font-medium">Nenhum periodo NF registrado ainda.</p>
+                                        <p className="text-xs mt-1">Gere uma NF na aba "Nota Fiscal" para registrar o primeiro periodo.</p>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
-
                                 {contractDetailsModal.activeTab === 'nf' && (
                                   <div className="space-y-6">
                                     <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6">
@@ -1533,20 +1708,13 @@ const Contratos: React.FC = () => {
                                           />
                                         </div>
                                         <div className="space-y-1">
-                                          <label className="text-[10px] font-black text-blue-900/50 uppercase tracking-widest ml-1">KM Inicial</label>
+                                          <label className="text-[10px] font-black text-blue-900/50 uppercase tracking-widest ml-1">KM Percorrida no Periodo</label>
                                           <input 
                                             type="number" 
-                                            value={nfFormData.km_inicial}
-                                            onChange={e => setNfFormData({...nfFormData, km_inicial: Number(e.target.value)})}
-                                            className="w-full px-4 py-3 bg-white border border-blue-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-700"
-                                          />
-                                        </div>
-                                        <div className="space-y-1">
-                                          <label className="text-[10px] font-black text-blue-900/50 uppercase tracking-widest ml-1">KM Final</label>
-                                          <input 
-                                            type="number" 
-                                            value={nfFormData.km_final}
-                                            onChange={e => setNfFormData({...nfFormData, km_final: Number(e.target.value)})}
+                                            min="0"
+                                            placeholder="KM rodada no periodo"
+                                            value={nfFormData.km_percorrido || ''}
+                                            onChange={e => setNfFormData({...nfFormData, km_percorrido: Number(e.target.value) || ''})}
                                             className="w-full px-4 py-3 bg-white border border-blue-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-700"
                                           />
                                         </div>
@@ -1596,25 +1764,24 @@ const Contratos: React.FC = () => {
                                       <div className="flex justify-end gap-3">
                                         <button 
                                           onClick={async () => {
-                                            if (nfFormData.km_final < nfFormData.km_inicial) {
-                                              toast.error('KM Final não pode ser menor que KM Inicial');
+                                            if ((Number(nfFormData.km_percorrido) || 0) <= 0) {
+                                              toast.error('Informe a KM percorrida no periodo');
                                               return;
                                             }
                                             
                                             const loadingToast = toast.loading('Processando dados...');
                                             try {
                                               await api.put(`/empresas/usos/${selectedUso.id}`, {
-                                                km_inicial: nfFormData.km_inicial,
-                                                km_final: nfFormData.km_final,
-                                                km_referencia: nfFormData.km_referencia,
-                                                valor_km_extra: nfFormData.valor_km_extra,
-                                                valor_diaria_empresa: nfFormData.valor_diaria,
+                                                km_percorrido: Number(nfFormData.km_percorrido) || 0,
+                                                km_referencia: Number(nfFormData.km_referencia) || 0,
+                                                valor_km_extra: Number(nfFormData.valor_km_extra) || 0,
+                                                valor_diaria_empresa: Number(nfFormData.valor_diaria) || 0,
                                                 data_inicio: nfFormData.periodo_inicio,
                                                 data_fim: nfFormData.periodo_fim
                                               });
 
                                               const params = {
-                                                km_percorrido: nfCalculations.kmPercorrido,
+                                                km_percorrido: Number(nfFormData.km_percorrido) || 0,
                                                 km_referencia: nfFormData.km_referencia,
                                                 valor_km_extra: nfFormData.valor_km_extra,
                                                 periodo_inicio: nfFormData.periodo_inicio,
@@ -1639,8 +1806,9 @@ const Contratos: React.FC = () => {
                                               queryClient.invalidateQueries({ queryKey: ['contratos'] });
                                               toast.dismiss(loadingToast);
                                               toast.success('Dados salvos e NF gerada com sucesso!');
+                            if (contractDetailsModal.veiculoUso?.id) loadNfHistory(contractDetailsModal.veiculoUso.id);
+                                              if (selectedUso?.id) loadNfHistory(selectedUso.id);
                                             } catch (error) {
-                                              console.error('Error generating NF:', error);
                                               toast.dismiss(loadingToast);
                                               toast.error('Erro ao processar dados da NF');
                                             }
@@ -1752,40 +1920,50 @@ const Contratos: React.FC = () => {
 
               {contractDetailsModal.activeTab === 'veiculo' && (
                 <div className="space-y-4">
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm text-left">
-                      <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
-                        <tr>
-                          <th className="px-4 py-3">Período</th>
-                          <th className="px-4 py-3">KM Contratada</th>
-                          <th className="px-4 py-3">KM Percorrida</th>
-                          <th className="px-4 py-3">KM Excedente</th>
-                          <th className="px-4 py-3">Valor Período</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        <tr>
-                          <td className="px-4 py-3">
-                            {formatDate(contractDetailsModal.veiculoUso.data_inicio)} - {contractDetailsModal.veiculoUso.data_fim ? formatDate(contractDetailsModal.veiculoUso.data_fim) : 'Atual'}
-                          </td>
-                          <td className="px-4 py-3">{contractDetailsModal.veiculoUso.km_referencia?.toLocaleString('pt-BR')} km</td>
-                          <td className="px-4 py-3">{contractDetailsModal.veiculoUso.km_percorrido?.toLocaleString('pt-BR')} km</td>
-                          <td className="px-4 py-3 text-amber-600 font-medium">
-                            {Math.max((contractDetailsModal.veiculoUso.km_percorrido || 0) - (contractDetailsModal.veiculoUso.km_referencia || 0), 0).toLocaleString('pt-BR')} km
-                          </td>
-                          <td className="px-4 py-3 font-medium">
-                            {formatCurrency(
-                              (contractDetailsModal.veiculoUso.valor_diaria_empresa || 0) + 
-                              (Math.max((contractDetailsModal.veiculoUso.km_percorrido || 0) - (contractDetailsModal.veiculoUso.km_referencia || 0), 0) * (contractDetailsModal.veiculoUso.valor_km_extra || 0))
-                            )}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
+                  <h4 className="text-xs font-bold text-slate-500 uppercase">Historico de Periodos NF</h4>
+                  {nfHistory.length > 0 ? (
+                    <div className="border rounded-lg overflow-hidden">
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
+                          <tr>
+                            <th className="px-4 py-3">Periodo</th>
+                            <th className="px-4 py-3">KM Percorrida</th>
+                            <th className="px-4 py-3">KM Excedente</th>
+                            <th className="px-4 py-3">Valor Extra</th>
+                            <th className="px-4 py-3">Data</th>
+                            <th className="px-4 py-3 text-center">Reimprimir</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {nfHistory.map((nf: any, idx: number) => (
+                            <tr key={idx}>
+                              <td className="px-4 py-3 font-medium">{nf.periodo_inicio ? new Date(nf.periodo_inicio + 'T12:00:00').toLocaleDateString('pt-BR') : ''} - {nf.periodo_fim ? new Date(nf.periodo_fim + 'T12:00:00').toLocaleDateString('pt-BR') : ''}</td>
+                              <td className="px-4 py-3">{(nf.km_percorrida || 0).toLocaleString('pt-BR')} km</td>
+                              <td className="px-4 py-3 text-amber-600 font-medium">{(nf.km_excedente || 0).toLocaleString('pt-BR')} km</td>
+                              <td className="px-4 py-3 font-medium">{formatCurrency(nf.valor_total_extra || 0)}</td>
+                              <td className="px-4 py-3 text-slate-500 text-xs">{nf.data_criacao ? new Date(nf.data_criacao).toLocaleDateString('pt-BR') : ''}</td>
+                              <td className="px-4 py-3 text-center"><button onClick={() => reprintNf(nf.id)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Reimprimir NF">PDF</button></td>
+                            </tr>
+                          ))}
+                          <tr className="bg-slate-50 font-bold">
+                            <td className="px-4 py-3">TOTAL ({nfHistory.length} periodos)</td>
+                            <td className="px-4 py-3">{nfHistory.reduce((s: number, n: any) => s + (n.km_percorrida || 0), 0).toLocaleString('pt-BR')} km</td>
+                            <td className="px-4 py-3">{nfHistory.reduce((s: number, n: any) => s + (n.km_excedente || 0), 0).toLocaleString('pt-BR')} km</td>
+                            <td className="px-4 py-3">{formatCurrency(nfHistory.reduce((s: number, n: any) => s + (n.valor_total_extra || 0), 0))}</td>
+                            <td className="px-4 py-3"></td>
+                            <td className="px-4 py-3"></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="bg-slate-50 rounded-lg p-6 text-center text-slate-500">
+                      <p>Nenhum periodo NF registrado.</p>
+                    </div>
+                  )}
                 </div>
-              )}
 
+              )}
               {contractDetailsModal.activeTab === 'nf' && (
                 <div className="space-y-6">
                   <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
@@ -1822,20 +2000,13 @@ const Contratos: React.FC = () => {
                         />
                       </div>
                       <div>
-                        <label className="input-label">KM Inicial</label>
+                        <label className="input-label">KM Percorrida no Periodo</label>
                         <input 
                           type="number" 
-                          value={nfFormData.km_inicial}
-                          onChange={e => setNfFormData({...nfFormData, km_inicial: Number(e.target.value)})}
-                          className="input-field bg-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="input-label">KM Final</label>
-                        <input 
-                          type="number" 
-                          value={nfFormData.km_final}
-                          onChange={e => setNfFormData({...nfFormData, km_final: Number(e.target.value)})}
+                          min="0"
+                          placeholder="KM rodada no periodo"
+                          value={nfFormData.km_percorrido || ''}
+                          onChange={e => setNfFormData({...nfFormData, km_percorrido: Number(e.target.value) || ''})}
                           className="input-field bg-white"
                         />
                       </div>
@@ -1885,8 +2056,8 @@ const Contratos: React.FC = () => {
                     <div className="flex justify-end gap-3">
                       <button 
                         onClick={async () => {
-                          if (nfFormData.km_final < nfFormData.km_inicial) {
-                            toast.error('KM Final não pode ser menor que KM Inicial');
+                          if ((Number(nfFormData.km_percorrido) || 0) <= 0) {
+                            toast.error('Informe a KM percorrida no periodo');
                             return;
                           }
                           
@@ -1931,7 +2102,6 @@ const Contratos: React.FC = () => {
                             toast.dismiss(loadingToast);
                             toast.success('Dados salvos e NF gerada com sucesso!');
                           } catch (error) {
-                            console.error('Error generating NF:', error);
                             toast.dismiss(loadingToast);
                             toast.error('Erro ao processar dados da NF');
                           }
@@ -1970,35 +2140,39 @@ const Contratos: React.FC = () => {
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Veículos</p>
-                      <p className="text-2xl font-bold text-slate-900">{companyContractDetails.empresaUsos.length}</p>
-                    </div>
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
-                      <p className="text-xs uppercase tracking-wide text-blue-600">Valor Mensal Total</p>
-                      <p className="text-2xl font-bold text-blue-900">
-                        {formatCurrency(companyContractDetails.empresaUsos.reduce((sum, uso) => sum + (uso.valor_diaria_empresa || 0), 0))}
-                      </p>
-                    </div>
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
-                      <p className="text-xs uppercase tracking-wide text-amber-600">Total KM Extra</p>
-                      <p className="text-2xl font-bold text-amber-900">
-                        {formatCurrency(companyContractDetails.empresaUsos.reduce((sum, uso) => {
-                          const kmPercorrido = uso.km_percorrido || 0
-                          const kmReferencia = uso.km_referencia || 0
-                          const kmExtra = Math.max(kmPercorrido - kmReferencia, 0)
-                          return sum + (kmExtra * (uso.valor_km_extra || 0))
-                        }, 0))}
-                      </p>
-                    </div>
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-                      <p className="text-xs uppercase tracking-wide text-green-600">Valor Total Geral</p>
-                      <p className="text-2xl font-bold text-green-900">
-                        {formatCurrency(companyContractDetails.contrato.valor_total || 0)}
-                      </p>
-                    </div>
-                  </div>
+                  {(() => {
+                    const allNfs = Object.values(companyNfHistory).flat() as any[]
+                    const totalPeriodos = allNfs.length
+                    const totalDiarias = allNfs.reduce((s: number, n: any) => s + (n.valor_diaria || 0), 0)
+                    const totalKmExtra = allNfs.reduce((s: number, n: any) => s + (n.valor_total_extra || 0), 0)
+                    const totalGeral = allNfs.reduce((s: number, n: any) => s + (n.valor_total_periodo || (n.valor_diaria || 0) + (n.valor_total_extra || 0)), 0)
+                    const totalPagos = allNfs.filter((n: any) => n.pago).length
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
+                          <p className="text-xs uppercase tracking-wide text-slate-500">Periodos Emitidos</p>
+                          <p className="text-2xl font-bold text-slate-900">{totalPeriodos}</p>
+                          <p className="text-xs text-slate-400 mt-1">{totalPagos} pagos | {totalPeriodos - totalPagos} pendentes</p>
+                        </div>
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+                          <p className="text-xs uppercase tracking-wide text-blue-600">Total Diarias</p>
+                          <p className="text-2xl font-bold text-blue-900">{formatCurrency(totalDiarias)}</p>
+                          <p className="text-xs text-blue-400 mt-1">{totalPeriodos} x diaria</p>
+                        </div>
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
+                          <p className="text-xs uppercase tracking-wide text-amber-600">Total KM Extra</p>
+                          <p className="text-2xl font-bold text-amber-900">{formatCurrency(totalKmExtra)}</p>
+                          <p className="text-xs text-amber-400 mt-1">KM excedente de todos os periodos</p>
+                        </div>
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                          <p className="text-xs uppercase tracking-wide text-green-600">Valor Total Geral</p>
+                          <p className="text-2xl font-bold text-green-900">{formatCurrency(totalGeral)}</p>
+                          <p className="text-xs text-green-400 mt-1">Diarias + KM Extra</p>
+                        </div>
+                      </div>
+                    )
+                  })()}
 
                   <div className="space-y-4">
                     {companyContractDetails.empresaUsos.map((uso) => {
@@ -2057,6 +2231,43 @@ const Contratos: React.FC = () => {
                               </p>
                             </div>
                           </div>
+
+                          {/* NF History for this vehicle */}
+                          {(companyNfHistory[uso.id] || []).length > 0 && (
+                            <div className="mt-4 pt-4 border-t border-slate-200">
+                              <h5 className="text-xs font-bold text-slate-500 uppercase mb-2">Periodos NF ({(companyNfHistory[uso.id] || []).length})</h5>
+                              <div className="border border-slate-100 rounded overflow-hidden">
+                                <table className="w-full text-xs">
+                                  <thead className="bg-slate-50">
+                                    <tr>
+                                      <th className="px-2 py-1 text-left">Periodo</th>
+                                      <th className="px-2 py-1">KM</th>
+                                      <th className="px-2 py-1">Valor</th>
+                                      <th className="px-2 py-1 text-center">Pago</th>
+                                      <th className="px-2 py-1 text-center">PDF</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-50">
+                                    {(companyNfHistory[uso.id] || []).map((nf: any) => (
+                                      <tr key={nf.id} className={nf.pago ? 'bg-green-50' : ''}>
+                                        <td className="px-2 py-1">{nf.periodo_inicio ? new Date(nf.periodo_inicio + 'T12:00:00').toLocaleDateString('pt-BR') : ''} - {nf.periodo_fim ? new Date(nf.periodo_fim + 'T12:00:00').toLocaleDateString('pt-BR') : ''}</td>
+                                        <td className="px-2 py-1 text-center">{(nf.km_percorrida || 0).toLocaleString('pt-BR')}</td>
+                                        <td className="px-2 py-1 text-center font-bold">{formatCurrency(nf.valor_total_periodo || (uso.valor_diaria_empresa || 0) + (nf.valor_total_extra || 0))}</td>
+                                        <td className="px-2 py-1 text-center">{nf.pago ? '\u2705' : '\u23F3'}</td>
+                                        <td className="px-2 py-1 text-center"><button onClick={() => reprintNf(nf.id)} className="text-blue-600 hover:underline font-bold">PDF</button></td>
+                                      </tr>
+                                    ))}
+                                    <tr className="bg-slate-100 font-bold">
+                                      <td className="px-2 py-1">TOTAL</td>
+                                      <td className="px-2 py-1 text-center">{(companyNfHistory[uso.id] || []).reduce((s: number, n: any) => s + (n.km_percorrida || 0), 0).toLocaleString('pt-BR')} km</td>
+                                      <td className="px-2 py-1 text-center">{formatCurrency((companyNfHistory[uso.id] || []).reduce((s: number, n: any) => s + (n.valor_total_periodo || (uso.valor_diaria_empresa || 0) + (n.valor_total_extra || 0)), 0))}</td>
+                                      <td colSpan={2} className="px-2 py-1 text-center text-slate-500">{(companyNfHistory[uso.id] || []).filter((n: any) => n.pago).length}/{(companyNfHistory[uso.id] || []).length} pagos</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )
                     })}
@@ -2101,8 +2312,8 @@ const Contratos: React.FC = () => {
       {isModalOpen && (
         <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setIsModalOpen(false)}>
           <div className="modal-content max-w-2xl w-full" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-              <h3 className="text-lg font-display font-bold text-slate-900">{editingContract ? 'Editar Contrato' : 'Novo Contrato'}</h3>
+            <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-slate-100">
+              <h3 className="text-base md:text-lg font-display font-bold text-slate-900">{editingContract ? 'Editar Contrato' : 'Novo Contrato'}</h3>
               <button onClick={() => setIsModalOpen(false)} className="btn-icon"><X size={20} /></button>
             </div>
             <form onSubmit={handleSubmit} className="flex flex-1 min-h-0 flex-col overflow-hidden">
@@ -2223,9 +2434,18 @@ const Contratos: React.FC = () => {
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <p className="text-xs uppercase tracking-wide text-blue-700">KM Atual do Veiculo</p>
-                    <p className="text-2xl font-bold text-blue-950 mt-2">{formData.km_atual_veiculo.toLocaleString('pt-BR')}</p>
+                  <div>
+                    <label className="input-label">KM de Saida (Inicial)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={formData.km_atual_veiculo || ''}
+                      onChange={(event) => setFormData({ ...formData, km_atual_veiculo: Number(event.target.value) || 0 })}
+                      placeholder="KM ao sair da loja"
+                      className="input-field"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">Preenche automaticamente com o KM do veiculo. Altere se necessario.</p>
                   </div>
                   <div><label className="input-label">Hora de Saida</label><input type="time" value={formData.hora_saida} onChange={(event) => setFormData({ ...formData, hora_saida: event.target.value })} className="input-field" /></div>
                 </div>
@@ -2274,8 +2494,8 @@ const Contratos: React.FC = () => {
       {closingContract && (
         <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !closeMutation.isPending && setClosingContract(null)}>
           <div className="modal-content max-w-6xl w-full" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-              <h3 className="text-lg font-display font-bold text-slate-900">Encerrar Contrato</h3>
+            <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-slate-100">
+              <h3 className="text-base md:text-lg font-display font-bold text-slate-900">Encerrar Contrato</h3>
               <button onClick={() => setClosingContract(null)} className="btn-icon" disabled={closeMutation.isPending}><X size={20} /></button>
             </div>
             <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
@@ -2287,6 +2507,136 @@ const Contratos: React.FC = () => {
                     pneus, acessorios, franquia e outras ocorrencias da devolucao.
                   </p>
                 </div>
+
+                {/* Data de encerramento */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="input-label">Data de Encerramento do Contrato *</label>
+                    <input type="date" value={closeoutDataFim} onChange={(e) => setCloseoutDataFim(e.target.value)} className="input-field" />
+                  </div>
+                </div>
+
+                {/* NF History for empresa contracts */}
+                {closingContract.tipo === 'empresa' && closeoutNfHistory.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-slate-500 uppercase">Notas Fiscais Emitidas ({closeoutNfHistory.length} periodos)</h4>
+                    <div className="border border-slate-200 rounded-lg overflow-x-auto">
+                      <table className="w-full text-sm text-left min-w-[500px]">
+                        <thead className="bg-slate-50 text-[10px] text-slate-500 uppercase">
+                          <tr>
+                            <th className="px-2 py-2">Periodo</th>
+                            <th className="px-2 py-2">Valor</th>
+                            <th className="px-2 py-2 text-center">Pago</th>
+                            <th className="px-2 py-2">Data Pgto</th>
+                            <th className="px-2 py-2">Forma</th>
+                            <th className="px-2 py-2">Comprovante</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {closeoutNfHistory.map((nf: any, idx: number) => {
+                            const valorPeriodo = nf.valor_total_periodo || ((closingContract.valor_diaria || 0) + (nf.valor_total_extra || 0))
+                            return (
+                              <tr key={nf.id} className={nf.pago ? 'bg-green-50' : ''}>
+                                <td className="px-2 py-2 text-xs font-medium">{nf.periodo_inicio ? new Date(nf.periodo_inicio + 'T12:00:00').toLocaleDateString('pt-BR') : ''} - {nf.periodo_fim ? new Date(nf.periodo_fim + 'T12:00:00').toLocaleDateString('pt-BR') : ''}</td>
+                                <td className="px-2 py-2 text-xs font-bold">{formatCurrency(valorPeriodo)}</td>
+                                <td className="px-2 py-2 text-center">
+                                  <input type="checkbox" checked={nf.pago || false} onChange={async (e) => {
+                                    const checked = e.target.checked
+                                    try {
+                                      await api.patch(`/relatorios/nf/${nf.id}/pagamento`, null, { params: { pago: checked, data_pagamento: checked ? new Date().toISOString().split('T')[0] : undefined } })
+                                      setCloseoutNfHistory(prev => prev.map(item => item.id === nf.id ? { ...item, pago: checked, data_pagamento: checked ? new Date().toISOString().split('T')[0] : null } : item))
+                                      toast.success(checked ? 'Marcado como pago' : 'Desmarcado')
+                                    } catch { toast.error('Erro ao atualizar pagamento') }
+                                  }} className="w-4 h-4 accent-green-600 cursor-pointer" />
+                                </td>
+                                <td className="px-2 py-2">
+                                  <input type="date" value={nf.data_pagamento || ''} onChange={async (e) => {
+                                    try {
+                                      await api.patch(`/relatorios/nf/${nf.id}/pagamento`, null, { params: { pago: true, data_pagamento: e.target.value } })
+                                      setCloseoutNfHistory(prev => prev.map(item => item.id === nf.id ? { ...item, pago: true, data_pagamento: e.target.value } : item))
+                                    } catch { toast.error('Erro') }
+                                  }} className="text-xs border rounded px-1 py-1 w-28" />
+                                </td>
+                                <td className="px-2 py-2">
+                                  <select 
+                                    value={nf.forma_pagamento || ''} 
+                                    onChange={async (e) => {
+                                      const val = e.target.value
+                                      try {
+                                        await api.patch(`/relatorios/nf/${nf.id}/pagamento`, null, { params: { pago: true, forma_pagamento: val } })
+                                        setCloseoutNfHistory(prev => prev.map(item => item.id === nf.id ? { ...item, pago: true, forma_pagamento: val } : item))
+                                        toast.success('Forma de pagamento salva')
+                                      } catch { toast.error('Erro ao salvar') }
+                                    }} 
+                                    className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white cursor-pointer min-w-[100px] focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                  >
+                                    <option value="">Selecione...</option>
+                                    <option value="pix">PIX</option>
+                                    <option value="transferencia">Transferencia</option>
+                                    <option value="boleto">Boleto</option>
+                                    <option value="dinheiro">Dinheiro</option>
+                                    <option value="cartao">Cartao</option>
+                                    <option value="cheque">Cheque</option>
+                                  </select>
+                                </td>
+                                <td className="px-2 py-2">
+                                  {nf.forma_pagamento === 'dinheiro' ? (
+                                    <span className="text-[10px] text-slate-400 italic">Sem comprovante</span>
+                                  ) : nf.comprovante_url ? (
+                                    <div className="flex items-center gap-1">
+                                      <button onClick={async () => {
+                                        try {
+                                          const response = await api.get(`/relatorios/nf/${nf.id}/comprovante`, { responseType: 'blob' })
+                                          const blob = new Blob([response.data], { type: response.headers['content-type'] || 'application/octet-stream' })
+                                          const url = window.URL.createObjectURL(blob)
+                                          const link = document.createElement('a')
+                                          link.href = url
+                                          link.download = 'comprovante_nf_' + nf.id + (response.headers['content-type']?.includes('pdf') ? '.pdf' : '.jpg')
+                                          document.body.appendChild(link)
+                                          link.click()
+                                          document.body.removeChild(link)
+                                          window.URL.revokeObjectURL(url)
+                                        } catch { toast.error('Erro ao baixar comprovante') }
+                                      }} className="text-[10px] text-blue-600 underline">Baixar</button>
+                                      <button onClick={async () => {
+                                        try {
+                                          await api.delete(`/relatorios/nf/${nf.id}/comprovante`)
+                                          setCloseoutNfHistory(prev => prev.map(item => item.id === nf.id ? { ...item, comprovante_url: null } : item))
+                                          toast.success('Comprovante removido')
+                                        } catch { toast.error('Erro ao remover') }
+                                      }} className="text-[10px] text-red-500 hover:underline">X</button>
+                                    </div>
+                                  ) : (
+                                    <label className="text-[10px] text-blue-600 cursor-pointer hover:underline">
+                                      Upload
+                                      <input type="file" className="hidden" accept="image/*,.pdf" onChange={async (e) => {
+                                        const file = e.target.files?.[0]
+                                        if (!file) return
+                                        const fd = new FormData()
+                                        fd.append('arquivo', file)
+                                        try {
+                                          const { data } = await api.post(`/relatorios/nf/${nf.id}/comprovante`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+                                          setCloseoutNfHistory(prev => prev.map(item => item.id === nf.id ? { ...item, comprovante_url: data.comprovante_url } : item))
+                                          toast.success('Comprovante enviado!')
+                                        } catch { toast.error('Erro no upload') }
+                                      }} />
+                                    </label>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                          <tr className="bg-blue-50 font-bold text-blue-900">
+                            <td className="px-2 py-2">TOTAL</td>
+                            <td className="px-2 py-2 text-base">{formatCurrency(closeoutNfHistory.reduce((s: number, n: any) => s + (n.valor_total_periodo || (closingContract.valor_diaria || 0) + (n.valor_total_extra || 0)), 0))}</td>
+                            <td className="px-2 py-2 text-center text-xs">{closeoutNfHistory.filter((n: any) => n.pago).length}/{closeoutNfHistory.length} pagos</td>
+                            <td colSpan={3} className="px-2 py-2"></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.9fr)_minmax(320px,0.95fr)]">
                   <div className="space-y-6">
@@ -2303,10 +2653,10 @@ const Contratos: React.FC = () => {
                         </p>
                       </div>
                       <div>
-                        <label className="input-label">KM Atual do Veiculo *</label>
+                        <label className="input-label">KM de Devolucao (Final) *</label>
                         <input
                           type="number"
-                          min={closingContract.quilometragem_inicial || 0}
+                          min={closingContract.km_inicial ?? closingContract.quilometragem_inicial ?? 0}
                           value={closeoutData.km_atual_veiculo}
                           onChange={(event) => setCloseoutData({ ...closeoutData, km_atual_veiculo: Number(event.target.value) || 0 })}
                           className="input-field"
@@ -2387,17 +2737,59 @@ const Contratos: React.FC = () => {
                         <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Campos adicionais de cobranca</p>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {closeoutFeeFields.map((field) => (
-                          <div key={field.key} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-                            <label className="input-label">{field.label}</label>
-                            <p className="mb-3 text-xs text-slate-500">{field.hint}</p>
-                            <CurrencyInput
-                              value={closeoutData[field.key]}
-                              onChange={(nextValue) => setCloseoutData({ ...closeoutData, [field.key]: nextValue })}
-                              className="bg-white"
-                            />
-                          </div>
-                        ))}
+                        {closeoutFeeFields.map((field) => {
+                          const fp = feePayments[field.key] || { pago: false, forma: '', comprovante: null, comprovanteUrl: '' }
+                          const hasValue = Number(closeoutData[field.key] || 0) > 0
+                          return (
+                            <div key={field.key} className={`rounded-xl border p-4 ${fp.pago ? 'border-green-200 bg-green-50/70' : 'border-slate-200 bg-slate-50/70'}`}>
+                              <label className="input-label">{field.label}</label>
+                              <p className="mb-2 text-xs text-slate-500">{field.hint}</p>
+                              <CurrencyInput
+                                value={closeoutData[field.key]}
+                                onChange={(nextValue) => setCloseoutData({ ...closeoutData, [field.key]: nextValue })}
+                                className="bg-white"
+                              />
+                              {hasValue && (
+                                <div className="mt-2 pt-2 border-t border-slate-200 space-y-2">
+                                  <div className="flex items-center gap-3">
+                                    <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+                                      <input type="checkbox" checked={fp.pago} onChange={(e) => setFeePayments(prev => ({ ...prev, [field.key]: { ...fp, pago: e.target.checked } }))} className="w-3.5 h-3.5 accent-green-600" />
+                                      <span className={fp.pago ? 'text-green-700 font-bold' : 'text-slate-600'}>Pago</span>
+                                    </label>
+                                    {fp.pago && (
+                                      <select value={fp.forma} onChange={(e) => setFeePayments(prev => ({ ...prev, [field.key]: { ...fp, forma: e.target.value } }))} className="text-xs border rounded px-1 py-0.5">
+                                        <option value="">Forma</option>
+                                        <option value="pix">PIX</option>
+                                        <option value="transferencia">Transferencia</option>
+                                        <option value="boleto">Boleto</option>
+                                        <option value="dinheiro">Dinheiro</option>
+                                        <option value="cartao">Cartao</option>
+                                      </select>
+                                    )}
+                                    {fp.pago && fp.forma && fp.forma !== 'dinheiro' && !fp.comprovanteUrl && (
+                                      <label className="text-[10px] text-blue-600 cursor-pointer hover:underline">
+                                        Comprovante
+                                        <input type="file" className="hidden" accept="image/*,.pdf" onChange={(e) => {
+                                          const file = e.target.files?.[0]
+                                          if (file) setFeePayments(prev => ({ ...prev, [field.key]: { ...fp, comprovante: file, comprovanteUrl: file.name } }))
+                                        }} />
+                                      </label>
+                                    )}
+                                    {fp.pago && fp.comprovanteUrl && (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] text-green-600">{fp.comprovanteUrl.length > 20 ? fp.comprovanteUrl.slice(0, 20) + '...' : fp.comprovanteUrl}</span>
+                                        <button onClick={() => setFeePayments(prev => ({ ...prev, [field.key]: { ...fp, comprovante: null, comprovanteUrl: '' } }))} className="text-[10px] text-red-500">X</button>
+                                      </div>
+                                    )}
+                                    {fp.pago && fp.forma === 'dinheiro' && (
+                                      <span className="text-[10px] text-slate-400 italic">Sem comprovante</span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
 
@@ -2420,7 +2812,7 @@ const Contratos: React.FC = () => {
                                 status_pagamento: event.target.value as PaymentStatus,
                                 valor_recebido:
                                   event.target.value === 'pago' && closeoutData.valor_recebido <= 0
-                                    ? closeoutEstimativa
+                                    ? (closingContract?.tipo === 'empresa' ? closeoutNfPagos : closeoutEstimativa)
                                     : event.target.value === 'cancelado'
                                       ? 0
                                       : closeoutData.valor_recebido,
@@ -2481,7 +2873,7 @@ const Contratos: React.FC = () => {
                         </span>
                         <button
                           type="button"
-                          onClick={() => setCloseoutData({ ...closeoutData, valor_recebido: closeoutEstimativa, status_pagamento: 'pago' })}
+                          onClick={() => setCloseoutData({ ...closeoutData, valor_recebido: closingContract?.tipo === 'empresa' ? closeoutNfPagos : closeoutEstimativa, status_pagamento: 'pago' })}
                           className="btn-secondary btn-sm"
                         >
                           Usar total como recebido
@@ -2507,12 +2899,22 @@ const Contratos: React.FC = () => {
                             {closeoutChecklistPendencias.length} pendencia(s)
                           </div>
                         </div>
-                        <div className="flex justify-between"><span>Valor base contratado</span><strong>{formatCurrency(closeoutValorBaseContratado)}</strong></div>
-                        <div className="flex justify-between"><span>Valor base atualizado</span><strong>{formatCurrency(closeoutValorBaseAtualizado)}</strong></div>
-                        {closeoutValorAtraso > 0 && <div className="flex justify-between text-amber-700"><span>Acrescimo por atraso</span><strong>{formatCurrency(closeoutValorAtraso)}</strong></div>}
-                        <div className="flex justify-between"><span>KM rodado</span><strong>{closeoutKmRodado.toLocaleString('pt-BR')}</strong></div>
-                        <div className="flex justify-between"><span>KM excedente</span><strong>{closeoutKmExcedente.toLocaleString('pt-BR')}</strong></div>
-                        <div className="flex justify-between"><span>Cobranca KM excedente</span><strong>{formatCurrency(closeoutValorKmExcedente)}</strong></div>
+                        {closingContract.tipo === 'empresa' && closeoutNfHistory.length > 0 ? (
+                          <>
+                            <div className="flex justify-between"><span>Total NF ({closeoutNfHistory.length} periodos)</span><strong>{formatCurrency(closeoutTotalNfPeriodos)}</strong></div>
+                            <div className="flex justify-between text-green-700"><span>Periodos pagos</span><strong>{formatCurrency(closeoutNfPagos)}</strong></div>
+                            {closeoutNfPendente > 0 && <div className="flex justify-between text-amber-700"><span>Periodos pendentes</span><strong>{formatCurrency(closeoutNfPendente)}</strong></div>}
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex justify-between"><span>Valor base contratado</span><strong>{formatCurrency(closeoutValorBaseContratado)}</strong></div>
+                            <div className="flex justify-between"><span>Valor base atualizado</span><strong>{formatCurrency(closeoutValorBaseAtualizado)}</strong></div>
+                            {closeoutValorAtraso > 0 && <div className="flex justify-between text-amber-700"><span>Acrescimo por atraso</span><strong>{formatCurrency(closeoutValorAtraso)}</strong></div>}
+                            <div className="flex justify-between"><span>KM rodado</span><strong>{closeoutKmRodado.toLocaleString('pt-BR')}</strong></div>
+                            <div className="flex justify-between"><span>KM excedente</span><strong>{closeoutKmExcedente.toLocaleString('pt-BR')}</strong></div>
+                            <div className="flex justify-between"><span>Cobranca KM excedente</span><strong>{formatCurrency(closeoutValorKmExcedente)}</strong></div>
+                          </>
+                        )}
                         <div className="flex justify-between"><span>Itens pendentes no checklist</span><strong>{closeoutChecklistPendencias.length}</strong></div>
                         <div className="flex justify-between"><span>Taxas operacionais</span><strong>{formatCurrency(closeoutTaxasOperacionais)}</strong></div>
                         {closeoutFeeBreakdown.length > 0 && (

@@ -32,7 +32,7 @@ const Ipva: React.FC = () => {
   const [formData, setFormData] = useState({
     veiculo_id: '',
     ano: new Date().getFullYear(),
-    valor: 0,
+    valor: '' as any,
     data_vencimento: '',
     data_pagamento: '',
     status: 'pendente' as 'pendente' | 'pago' | 'vencido',
@@ -148,7 +148,14 @@ const Ipva: React.FC = () => {
   const handleOpenModal = (ipva?: IPVA) => {
     if (ipva) {
       setEditingIPVA(ipva)
-      setFormData(ipva)
+      setFormData({
+        veiculo_id: String(ipva.veiculo_id || ""),
+        ano: ipva.ano || new Date().getFullYear(),
+        valor: ipva.valor || 0,
+        data_vencimento: ipva.data_vencimento ? ipva.data_vencimento.split("T")[0] : "",
+        data_pagamento: ipva.data_pagamento ? ipva.data_pagamento.split("T")[0] : "",
+        status: ipva.status || "pendente",
+      })
       setParcelar(false)
     } else {
       resetForm()
@@ -359,7 +366,7 @@ const Ipva: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)] space-y-4">
+            <form id="ipva-form" onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)] space-y-4">
               <div>
                 <label className="input-label">Veículo *</label>
                 <select
@@ -518,9 +525,9 @@ const Ipva: React.FC = () => {
               </button>
               <button
                 type="submit"
+                form="ipva-form"
                 className="btn-primary"
                 disabled={createMutation.isPending || updateMutation.isPending}
-                onClick={handleSubmit}
               >
                 {createMutation.isPending || updateMutation.isPending ? 'Processando...' : editingIPVA ? 'Atualizar' : 'Criar'}
               </button>

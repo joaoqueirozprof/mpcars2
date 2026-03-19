@@ -11,6 +11,7 @@ import CurrencyInput from '@/components/shared/CurrencyInput'
 import StatusBadge from '@/components/shared/StatusBadge'
 import { Seguro, Veiculo, PaginatedResponse, PaginationParams } from '@/types'
 import { formatCurrency, formatDate, isExpiringSoon, isExpired } from '@/lib/utils'
+import { useDebounce } from '../hooks/useDebounce'
 
 interface ParcelaForm {
   valor: number
@@ -26,6 +27,7 @@ const Seguros: React.FC = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string }>({ isOpen: false })
   const [statusFilter, setStatusFilter] = useState<string>('todos')
   const [searchTerm, setSearchTerm] = useState('')
+  const debouncedSearch = useDebounce(searchTerm, 300)
   const [parcelar, setParcelar] = useState(false)
   const [qtdParcelas, setQtdParcelas] = useState(1)
   const [parcelas, setParcelas] = useState<ParcelaForm[]>([])
@@ -36,8 +38,8 @@ const Seguros: React.FC = () => {
     tipo_seguro: 'completo',
     data_inicio: '',
     data_fim: '',
-    valor: 0,
-    valor_franquia: 0,
+    valor: '' as any,
+    valor_franquia: '' as any,
   })
 
   // Auto-generate parcelas when toggling or changing qtd/valor
@@ -61,14 +63,14 @@ const Seguros: React.FC = () => {
   }, [parcelar, qtdParcelas, formData.valor, formData.data_inicio])
 
   const { data, isLoading } = useQuery({
-    queryKey: ['seguros', pagination, statusFilter, searchTerm],
+    queryKey: ['seguros', pagination, statusFilter, debouncedSearch],
     queryFn: async () => {
       const { data } = await api.get<PaginatedResponse<any>>('/seguros', {
         params: {
           page: pagination.page,
           limit: pagination.limit,
           status: statusFilter !== 'todos' ? statusFilter : undefined,
-          search: searchTerm || undefined,
+          search: debouncedSearch || undefined,
         },
       })
       return data
@@ -362,7 +364,7 @@ const Seguros: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)] space-y-4">
+            <form id="seguro-form" onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)] space-y-4">
               <div>
                 <label className="input-label">Veículo *</label>
                 <select
@@ -538,9 +540,9 @@ const Seguros: React.FC = () => {
               </button>
               <button
                 type="submit"
+                form="seguro-form"
                 className="btn-primary"
                 disabled={createMutation.isPending || updateMutation.isPending}
-                onClick={handleSubmit}
               >
                 {createMutation.isPending || updateMutation.isPending ? 'Processando...' : editingInsurance ? 'Atualizar' : 'Criar'} Seguro
               </button>

@@ -25,6 +25,7 @@ import CurrencyInput from '@/components/shared/CurrencyInput'
 import { Veiculo } from '@/types'
 import toast from 'react-hot-toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { useDebounce } from '../hooks/useDebounce'
 
 const API_BASE = (() => {
   const hostname = window.location.hostname
@@ -55,6 +56,7 @@ const normalizeDateInput = (value: unknown): string => {
 const Veiculos: React.FC = () => {
   const queryClient = useQueryClient()
   const [searchTerm, setSearchTerm] = useState('')
+  const debouncedSearch = useDebounce(searchTerm, 300)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingVehicle, setEditingVehicle] = useState<Veiculo | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id?: string; placa?: string }>({
@@ -78,9 +80,9 @@ const Veiculos: React.FC = () => {
     modelo: '',
     ano: new Date().getFullYear(),
     cor: '',
-    quilometragem: 0,
+    quilometragem: '' as any,
     status: 'disponivel' as const,
-    valor_aquisicao: 0,
+    valor_aquisicao: '' as any,
     data_compra: '',
     observacoes: '',
   })
@@ -115,8 +117,8 @@ const Veiculos: React.FC = () => {
       filtered = filtered.filter((v) => v.status === statusFilter)
     }
 
-    if (searchTerm.trim()) {
-      const search = searchTerm.toLowerCase()
+    if (debouncedSearch.trim()) {
+      const search = debouncedSearch.toLowerCase()
       filtered = filtered.filter(
         (v) =>
           (v.placa || '').toLowerCase().includes(search) ||
@@ -127,7 +129,7 @@ const Veiculos: React.FC = () => {
     }
 
     return filtered
-  }, [vehiclesData, statusFilter, searchTerm])
+  }, [vehiclesData, statusFilter, debouncedSearch])
 
   // Create vehicle mutation
   const createMutation = useMutation({
@@ -276,9 +278,9 @@ const Veiculos: React.FC = () => {
       modelo: '',
       ano: currentYear,
       cor: '',
-      quilometragem: 0,
+      quilometragem: '' as any,
       status: 'disponivel',
-      valor_aquisicao: 0,
+      valor_aquisicao: '' as any,
       data_compra: '',
       observacoes: '',
     })
@@ -517,7 +519,60 @@ const Veiculos: React.FC = () => {
           </div>
         ) : (
           <div className="card overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* Mobile Card List */}
+              <div className="md:hidden space-y-2">
+                {filteredVehicles.map((v) => {
+                  const statusColors: Record<string, string> = {
+                    disponivel: "bg-green-100 text-green-700",
+                    alugado: "bg-blue-100 text-blue-700",
+                    manutencao: "bg-amber-100 text-amber-700",
+                    inativo: "bg-red-100 text-red-700",
+                    reservado: "bg-purple-100 text-purple-700",
+                  }
+                  const statusLabels: Record<string, string> = {
+                    disponivel: "Disponivel",
+                    alugado: "Alugado",
+                    manutencao: "Manutencao",
+                    inativo: "Inativo",
+                    reservado: "Reservado",
+                  }
+                  const photoUrl = v.foto_url ? (v.foto_url.startsWith("http") ? v.foto_url : `${API_BASE.replace("/api/v1", "")}${v.foto_url}`) : null
+                  return (
+                    <div key={`m-${v.id}`} className="bg-white rounded-xl border border-slate-100 p-3">
+                      <div className="flex gap-3">
+                        {photoUrl ? (
+                          <img src={photoUrl} alt={`${v.marca} ${v.modelo}`} className="w-16 h-12 rounded-lg object-cover flex-shrink-0 bg-slate-100" />
+                        ) : (
+                          <div className="w-16 h-12 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
+                            <Car size={20} className="text-slate-300" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[13px] font-mono font-bold text-slate-900">{v.placa}</span>
+                            <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase ${statusColors[v.status] || "bg-slate-100 text-slate-600"}`}>
+                              {statusLabels[v.status] || v.status}
+                            </span>
+                          </div>
+                          <p className="text-[12px] font-medium text-slate-700 truncate">{v.marca} {v.modelo}</p>
+                          <div className="flex items-center gap-3 mt-1 text-[11px] text-slate-400">
+                            <span>{v.ano_fabricacao || v.ano || "-"}</span>
+                            {v.cor && <span>{v.cor}</span>}
+                            <span>{(v.quilometragem || 0).toLocaleString("pt-BR")} km</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-0.5 mt-2 pt-2 border-t border-slate-100">
+                        <button onClick={() => openFinancialHistory(v)} className="p-1.5 text-emerald-600 active:bg-emerald-50 rounded-lg" title="Financeiro"><CircleDollarSign size={16} /></button>
+                        <button onClick={() => handleOpenModal(v)} className="p-1.5 text-blue-600 active:bg-blue-50 rounded-lg" title="Editar"><Edit2 size={16} /></button>
+                        <button onClick={() => setDeleteConfirm({ isOpen: true, id: v.id })} className="p-1.5 text-red-500 active:bg-red-50 rounded-lg" title="Excluir"><Trash2 size={16} /></button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {/* Desktop Table */}
+              <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50">
@@ -625,7 +680,7 @@ const Veiculos: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+            <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-slate-100">
               <h3 className="text-lg font-display font-bold text-slate-900">
                 {editingVehicle ? 'Editar Veiculo' : 'Novo Veiculo'}
               </h3>
@@ -640,7 +695,7 @@ const Veiculos: React.FC = () => {
 
             {/* Modal Body */}
             <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
-            <div className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)]">
+            <div className="px-4 md:px-6 py-4 md:py-5 overflow-y-auto max-h-[calc(90vh-130px)] md:max-h-[calc(85vh-130px)]">
 
               {/* Photo Upload Section */}
               <div className="mb-6">
@@ -648,7 +703,7 @@ const Veiculos: React.FC = () => {
                   <Camera size={16} />
                   Foto do Veiculo
                 </label>
-                <div className="flex items-center gap-4 mt-2">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 mt-2">
                   {/* Photo Preview */}
                   <div className="relative">
                     {photoPreview ? (
@@ -913,10 +968,10 @@ const Veiculos: React.FC = () => {
 
       {historyVehicle && (
         <div className="modal-overlay" onClick={() => setHistoryVehicle(null)}>
-          <div className="modal-content max-w-5xl w-full flex flex-col max-h-[92vh]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-              <div>
-                <h3 className="text-lg font-display font-bold text-slate-900">Historico financeiro do veiculo</h3>
+          <div className="modal-content max-w-5xl w-full flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-slate-100">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-base md:text-lg font-display font-bold text-slate-900 truncate">Historico financeiro</h3>
                 <p className="text-sm text-slate-500">{historyVehicle.placa} - {historyVehicle.marca} {historyVehicle.modelo}</p>
               </div>
               <button onClick={() => setHistoryVehicle(null)} className="btn-icon">
@@ -924,7 +979,7 @@ const Veiculos: React.FC = () => {
               </button>
             </div>
 
-            <div className="px-6 py-5 overflow-y-auto space-y-5">
+            <div className="flex-1 min-h-0 px-4 md:px-6 py-4 md:py-5 overflow-y-auto space-y-4 md:space-y-5">
               {isLoadingFinancialHistory ? (
                 <div className="flex items-center justify-center py-16 text-slate-500">
                   <Loader2 size={22} className="animate-spin mr-2" />
@@ -940,15 +995,15 @@ const Veiculos: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                       <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Receita acumulada</p>
-                      <p className="mt-2 text-2xl font-display font-bold text-emerald-600">{formatCurrency(Number(financialHistory?.total_receita || 0))}</p>
+                      <p className="mt-2 text-xl md:text-2xl font-display font-bold text-emerald-600">{formatCurrency(Number(financialHistory?.total_receita || 0))}</p>
                     </div>
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                       <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Despesa acumulada</p>
-                      <p className="mt-2 text-2xl font-display font-bold text-rose-600">{formatCurrency(Number(financialHistory?.total_despesa || 0))}</p>
+                      <p className="mt-2 text-xl md:text-2xl font-display font-bold text-rose-600">{formatCurrency(Number(financialHistory?.total_despesa || 0))}</p>
                     </div>
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                       <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Saldo do veiculo</p>
-                      <p className="mt-2 text-2xl font-display font-bold text-blue-700">{formatCurrency(Number(financialHistory?.saldo || 0))}</p>
+                      <p className="mt-2 text-xl md:text-2xl font-display font-bold text-blue-700">{formatCurrency(Number(financialHistory?.saldo || 0))}</p>
                     </div>
                   </div>
 
@@ -969,7 +1024,7 @@ const Veiculos: React.FC = () => {
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                    <div className="grid grid-cols-[140px_120px_1fr_140px] gap-4 border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    <div className="hidden md:grid grid-cols-[140px_120px_1fr_140px] gap-4 border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                       <span>Data</span>
                       <span>Tipo</span>
                       <span>Descricao</span>
@@ -980,7 +1035,7 @@ const Veiculos: React.FC = () => {
                         <div className="px-5 py-10 text-center text-slate-500">Nenhum lancamento encontrado para este veiculo.</div>
                       ) : (
                         (financialHistory?.records || []).map((record: any) => (
-                          <div key={record.id} className="grid grid-cols-[140px_120px_1fr_140px] gap-4 px-5 py-4 text-sm">
+                          <div key={record.id} className="hidden md:grid grid-cols-[140px_120px_1fr_140px] gap-4 px-5 py-4 text-sm">
                             <span className="text-slate-600">{formatDate(record.data)}</span>
                             <span className={`font-medium ${record.tipo === 'receita' ? 'text-emerald-600' : 'text-rose-600'}`}>
                               {record.tipo === 'receita' ? 'Receita' : 'Despesa'}
@@ -993,7 +1048,19 @@ const Veiculos: React.FC = () => {
                               {record.tipo === 'receita' ? '+' : '-'} {formatCurrency(Number(record.valor || 0))}
                             </span>
                           </div>
-                        ))
+                        )).concat((financialHistory?.records || []).map((record: any) => (
+                          <div key={`m-${record.id}`} className="md:hidden px-4 py-3 flex items-center justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <span className="text-[11px] text-slate-400">{formatDate(record.data)}</span>
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${record.tipo === 'receita' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{record.tipo === 'receita' ? 'Receita' : 'Despesa'}</span>
+                              </div>
+                              <p className="text-[13px] font-medium text-slate-900 truncate">{record.descricao}</p>
+                              <p className="text-[10px] text-slate-400 uppercase">{record.categoria || 'Outros'}</p>
+                            </div>
+                            <span className={`text-[13px] font-bold flex-shrink-0 ${record.tipo === 'receita' ? 'text-emerald-600' : 'text-rose-600'}`}>{record.tipo === 'receita' ? '+' : '-'} {formatCurrency(Number(record.valor || 0))}</span>
+                          </div>
+                        )))
                       )}
                     </div>
                   </div>
@@ -1027,7 +1094,7 @@ const Veiculos: React.FC = () => {
             </div>
 
             {/* Modal Body */}
-            <div className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)]">
+            <div className="px-4 md:px-6 py-4 md:py-5 overflow-y-auto max-h-[calc(90vh-130px)] md:max-h-[calc(85vh-130px)]">
               <div className="flex flex-col items-center text-center">
                 <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
                   <AlertCircle size={24} className="text-red-600" />

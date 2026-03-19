@@ -119,8 +119,47 @@ const Relatorios: React.FC = () => {
   const [veiculosUso, setVeiculosUso] = useState<VeiculoUso[]>([])
   const [loadingUsos, setLoadingUsos] = useState(false)
   const [nfPeriod, setNfPeriod] = useState({ start: '', end: '' })
+  const [nfHistorico, setNfHistorico] = useState<any[]>([])
+  const [nfHistoryByVeiculo, setNfHistoryByVeiculo] = useState<Record<number, any[]>>({})
+  const [loadingNfHistorico, setLoadingNfHistorico] = useState(false)
   const [exportDates, setExportDates] = useState({ start: '', end: '' })
   const [exportStatus, setExportStatus] = useState('')
+
+
+  const loadNfHistorico = async (empresaId?: string) => {
+    setLoadingNfHistorico(true)
+    try {
+      let url = '/relatorios/nf/historico'
+      if (empresaId) url += '?empresa_id=' + empresaId
+      const { data } = await api.get(url)
+      setNfHistorico(data || [])
+    } catch {
+      setNfHistorico([])
+    } finally {
+      setLoadingNfHistorico(false)
+    }
+  }
+
+  const reprintNfFromRelatorios = async (nfId: number) => {
+    const loading = toast.loading('Gerando PDF...')
+    try {
+      const response = await api.get('/relatorios/nf/reprint/' + nfId, { responseType: 'blob' })
+      const blob = new Blob([response.data], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'nf_reprint_' + nfId + '.pdf'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+      toast.dismiss(loading)
+      toast.success('PDF gerado!')
+    } catch {
+      toast.dismiss(loading)
+      toast.error('Erro ao gerar PDF')
+    }
+  }
 
   useEffect(() => {
     loadContratos()
@@ -165,6 +204,16 @@ const Relatorios: React.FC = () => {
         valor_km_extra_input: uso.valor_km_extra ? String(uso.valor_km_extra) : '',
       }))
       setVeiculosUso(data)
+      // Load NF history per vehicle
+      loadNfHistorico(selectedEmpresa || undefined)
+      const histMap: Record<number, any[]> = {}
+      for (const uso of data) {
+        try {
+          const { data: hist } = await api.get('/relatorios/nf/' + uso.id + '/historico')
+          histMap[uso.id] = hist || []
+        } catch { histMap[uso.id] = [] }
+      }
+      setNfHistoryByVeiculo(histMap)
     } catch {
       setVeiculosUso([])
     } finally {
@@ -252,6 +301,12 @@ const Relatorios: React.FC = () => {
       await downloadFile(url, `nf_${uso.placa}.pdf`)
       toast.dismiss(tid)
       toast.success(`NF gerada para ${uso.placa}!`)
+      // Reload NF history for this vehicle
+      try {
+        const { data: hist } = await api.get('/relatorios/nf/' + uso.id + '/historico')
+        setNfHistoryByVeiculo(prev => ({ ...prev, [uso.id]: hist || [] }))
+      } catch {}
+      loadNfHistorico(selectedEmpresa || undefined)
     } catch (error: any) {
       toast.dismiss(tid)
       toast.error(await extractErrorMessage(error, 'Erro ao gerar NF'))
@@ -843,6 +898,52 @@ const Relatorios: React.FC = () => {
                           </p>
                         </div>
                       </div>
+
+                      {/* NF Period History */}
+                      {(nfHistoryByVeiculo[veiculo.id] || []).length > 0 && (
+                        <div className="mt-4 pt-4 border-t border-slate-200">
+                          <h5 className="text-xs font-bold text-slate-500 uppercase mb-2">Historico de Periodos NF ({(nfHistoryByVeiculo[veiculo.id] || []).length})</h5>
+                          <div className="border border-slate-100 rounded-xl overflow-hidden">
+                            <table className="w-full text-xs">
+                              <thead className="bg-slate-50 text-[10px] uppercase text-slate-500">
+                                <tr>
+                                  <th className="px-3 py-2 text-left">Periodo</th>
+                                  <th className="px-3 py-2">KM Percorrida</th>
+                                  <th className="px-3 py-2">KM Excedente</th>
+                                  <th className="px-3 py-2">Valor Extra</th>
+                                  <th className="px-3 py-2">Valor Total</th>
+                                  <th className="px-3 py-2 text-center">Pago</th>
+                                  <th className="px-3 py-2 text-center">PDF</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50">
+                                {(nfHistoryByVeiculo[veiculo.id] || []).map((nf: any) => (
+                                  <tr key={nf.id} className={nf.pago ? 'bg-green-50' : ''}>
+                                    <td className="px-3 py-2 font-medium">{nf.periodo_inicio ? new Date(nf.periodo_inicio + 'T12:00:00').toLocaleDateString('pt-BR') : ''} - {nf.periodo_fim ? new Date(nf.periodo_fim + 'T12:00:00').toLocaleDateString('pt-BR') : ''}</td>
+                                    <td className="px-3 py-2 text-center">{(nf.km_percorrida || 0).toLocaleString('pt-BR')} km</td>
+                                    <td className="px-3 py-2 text-center"><span className={nf.km_excedente > 0 ? 'text-amber-600 font-bold' : 'text-green-600'}>{(nf.km_excedente || 0).toLocaleString('pt-BR')} km</span></td>
+                                    <td className="px-3 py-2 text-center">{formatCurrency(nf.valor_total_extra || 0)}</td>
+                                    <td className="px-3 py-2 text-center font-bold">{formatCurrency(nf.valor_total_periodo || 0)}</td>
+                                    <td className="px-3 py-2 text-center">{nf.pago ? '\u2705' : '\u23F3'}</td>
+                                    <td className="px-3 py-2 text-center">
+                                      <button onClick={() => reprintNfFromRelatorios(nf.id)} className="px-2 py-0.5 bg-blue-600 text-white rounded text-[10px] font-bold hover:bg-blue-700">PDF</button>
+                                    </td>
+                                  </tr>
+                                ))}
+                                <tr className="bg-slate-100 font-bold text-xs">
+                                  <td className="px-3 py-2">TOTAL</td>
+                                  <td className="px-3 py-2 text-center">{(nfHistoryByVeiculo[veiculo.id] || []).reduce((s: number, n: any) => s + (n.km_percorrida || 0), 0).toLocaleString('pt-BR')} km</td>
+                                  <td className="px-3 py-2 text-center">{(nfHistoryByVeiculo[veiculo.id] || []).reduce((s: number, n: any) => s + (n.km_excedente || 0), 0).toLocaleString('pt-BR')} km</td>
+                                  <td className="px-3 py-2 text-center">{formatCurrency((nfHistoryByVeiculo[veiculo.id] || []).reduce((s: number, n: any) => s + (n.valor_total_extra || 0), 0))}</td>
+                                  <td className="px-3 py-2 text-center">{formatCurrency((nfHistoryByVeiculo[veiculo.id] || []).reduce((s: number, n: any) => s + (n.valor_total_periodo || 0), 0))}</td>
+                                  <td className="px-3 py-2 text-center text-slate-500">{(nfHistoryByVeiculo[veiculo.id] || []).filter((n: any) => n.pago).length}/{(nfHistoryByVeiculo[veiculo.id] || []).length}</td>
+                                  <td className="px-3 py-2"></td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )
                 })}

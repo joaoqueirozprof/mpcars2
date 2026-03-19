@@ -20,6 +20,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import { formatDate, formatPhone, formatCPF, validateEmail } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import { Cliente } from '@/types'
+import { useDebounce } from '../hooks/useDebounce'
 
 type ClientType = 'todos' | 'pessoa_fisica' | 'pessoa_juridica'
 
@@ -34,6 +35,7 @@ const Clientes: React.FC = () => {
   })
   const [activeTab, setActiveTab] = useState<ClientType>('todos')
   const [searchQuery, setSearchQuery] = useState('')
+  const debouncedSearch = useDebounce(searchQuery, 300)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [searchParams, setSearchParams] = useSearchParams()
   const [formData, setFormData] = useState({
@@ -49,7 +51,7 @@ const Clientes: React.FC = () => {
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['clientes', currentPage, pageSize, activeTab, searchQuery],
+    queryKey: ['clientes', currentPage, pageSize, activeTab, debouncedSearch],
     queryFn: async () => {
       const params: any = {
         page: currentPage,
@@ -58,8 +60,8 @@ const Clientes: React.FC = () => {
       if (activeTab !== 'todos') {
         params.tipo = activeTab
       }
-      if (searchQuery) {
-        params.search = searchQuery
+      if (debouncedSearch) {
+        params.search = debouncedSearch
       }
       const response = await api.get('/clientes', { params })
       return response.data
@@ -75,7 +77,7 @@ const Clientes: React.FC = () => {
       toast.success('Cliente criado com sucesso!')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao criar cliente')
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao criar cliente')
     },
   })
 
@@ -88,7 +90,7 @@ const Clientes: React.FC = () => {
       toast.success('Cliente atualizado com sucesso!')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao atualizar cliente')
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao atualizar cliente')
     },
   })
 
@@ -100,7 +102,7 @@ const Clientes: React.FC = () => {
       toast.success('Cliente deletado com sucesso!')
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Erro ao deletar cliente')
+      toast.error(error.response?.data?.detail || error.response?.data?.message || 'Erro ao deletar cliente')
     },
   })
 
@@ -274,8 +276,8 @@ const Clientes: React.FC = () => {
       <div className="min-h-screen bg-slate-50">
         {/* Page Header */}
         <div className="bg-white border-b border-slate-200">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 md:gap-6">
               <div>
                 <h1 className="page-title">Clientes</h1>
                 <p className="page-subtitle">
@@ -293,8 +295,8 @@ const Clientes: React.FC = () => {
           </div>
         </div>
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="space-y-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8">
+          <div className="space-y-4 md:space-y-6">
             {/* Filter Tabs */}
             <div className="flex flex-wrap gap-2">
               {['todos', 'pessoa_fisica', 'pessoa_juridica'].map((tab) => (
@@ -368,7 +370,61 @@ const Clientes: React.FC = () => {
                   )}
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                <>
+                {/* Mobile Card List */}
+                <div className="md:hidden space-y-2">
+                  {(Array.isArray(data?.data) ? data.data : []).map((client: Cliente) => {
+                    const clientName = client?.nome || "Sem nome"
+                    const clientPhone = String(client?.telefone || "")
+                    const clientDocument = String((client as any)?.cpf_cnpj || (client as any)?.cpf || "-")
+                    const clientCidade = (client as any)?.cidade || "-"
+                    const clientEstado = (client as any)?.estado || ""
+
+                    return (
+                      <div key={`mobile-${client.id}`} className="bg-white rounded-xl border border-slate-100 p-3 active:bg-slate-50 transition-colors">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div className={`w-9 h-9 ${getAvatarColor(clientName)} rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0`}>
+                              {getInitials(clientName)}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-[14px] font-semibold text-slate-900 truncate">{clientName}</p>
+                              <p className="text-[11px] text-slate-400">{client.tipo === "pessoa_fisica" ? "Pessoa Fisica" : "Pessoa Juridica"}</p>
+                            </div>
+                          </div>
+                          <span className={`flex-shrink-0 ${client.ativo ? "badge-info" : "badge-neutral"} text-[10px] px-1.5 py-0.5`}>
+                            {client.ativo ? "Ativo" : "Inativo"}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[12px] mb-2.5 pl-[46px]">
+                          <div className="flex items-center gap-1.5 text-slate-500">
+                            <Phone size={12} className="text-slate-300 flex-shrink-0" />
+                            <span className="truncate">{formatPhone(clientPhone) || "-"}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-slate-500">
+                            <MapPin size={12} className="text-slate-300 flex-shrink-0" />
+                            <span className="truncate">{clientCidade}{clientEstado && `/${clientEstado}`}</span>
+                          </div>
+                          <div className="col-span-2 flex items-center gap-1.5 text-slate-500">
+                            <Mail size={12} className="text-slate-300 flex-shrink-0" />
+                            <span className="truncate">{client?.email || "-"}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-end gap-1 border-t border-slate-100 pt-2">
+                          <button onClick={() => handleOpenModal(client)} className="flex items-center gap-1 px-2.5 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg text-[12px] font-medium transition-colors">
+                            <Edit size={14} /> Editar
+                          </button>
+                          <button onClick={() => setDeleteConfirm({ isOpen: true, id: client.id })} className="flex items-center gap-1 px-2.5 py-1.5 text-red-500 hover:bg-red-50 rounded-lg text-[12px] font-medium transition-colors">
+                            <Trash2 size={14} /> Excluir
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Desktop Table */}
+                <div className="hidden md:block overflow-x-auto">
                   <table className="w-full">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
@@ -467,11 +523,11 @@ const Clientes: React.FC = () => {
                     </tbody>
                   </table>
                 </div>
-              )}
+              </>)}
 
               {/* Pagination */}
               {!isEmpty && data && (
-                <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 bg-slate-50">
+                <div className="flex items-center justify-between px-3 md:px-6 py-3 md:py-4 border-t border-slate-200 bg-slate-50">
                   <p className="text-sm text-slate-600">
                     Mostrando {(currentPage - 1) * pageSize + 1} a{' '}
                     {Math.min(currentPage * pageSize, data.total)} de {data.total} clientes
@@ -526,7 +582,7 @@ const Clientes: React.FC = () => {
             </div>
 
             {/* Modal Body */}
-            <form onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)] space-y-6">
+            <form id="cliente-form" onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)] space-y-6">
               {/* Type Selection */}
               <div>
                 <label className="input-label">Tipo de Cliente</label>
@@ -723,9 +779,9 @@ const Clientes: React.FC = () => {
               </button>
               <button
                 type="submit"
+                form="cliente-form"
                 className="btn-primary flex items-center gap-2"
                 disabled={isLoadingState}
-                onClick={handleSubmit}
               >
                 {isLoadingState && <Loader size={16} className="animate-spin" />}
                 {editingClient ? 'Atualizar' : 'Criar'} Cliente
