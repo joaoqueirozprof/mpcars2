@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react'
-import Sidebar from './Sidebar'
-import Header from './Header'
-import CommandPalette from './CommandPalette'
-import { SidebarProvider, useSidebar } from '@/contexts/SidebarContext'
-import { useAuth } from '@/contexts/AuthContext'
-import FirstUseGuide from '@/components/onboarding/FirstUseGuide'
-import ContextualTipsBanner from '@/components/onboarding/ContextualTipsBanner'
+import React, { useEffect, useState } from "react"
+import Sidebar from "./Sidebar"
+import Header from "./Header"
+import BottomNav from "./BottomNav"
+import CommandPalette from "./CommandPalette"
+import { SidebarProvider, useSidebar } from "@/contexts/SidebarContext"
+import { useAuth } from "@/contexts/AuthContext"
+import FirstUseGuide from "@/components/onboarding/FirstUseGuide"
+import ContextualTipsBanner from "@/components/onboarding/ContextualTipsBanner"
 
 interface AppLayoutProps {
   children: React.ReactNode
@@ -17,47 +18,51 @@ const LayoutContent: React.FC<AppLayoutProps> = ({ children }) => {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
   const [isGuideOpen, setIsGuideOpen] = useState(false)
 
-  const guideStorageKey = user ? `mpcars2_guide_hidden_${user.id}` : 'mpcars2_guide_hidden'
-  const guideSessionKey = user ? `mpcars2_guide_seen_${user.id}` : 'mpcars2_guide_seen'
+  const guideStorageKey = user
+    ? `mpcars2_guide_hidden_${user.id}`
+    : "mpcars2_guide_hidden"
+  const guideSessionKey = user
+    ? `mpcars2_guide_seen_${user.id}`
+    : "mpcars2_guide_seen"
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault()
         setIsCommandPaletteOpen(true)
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
   }, [])
 
   useEffect(() => {
     if (!user) return
-    if (user.perfil === 'owner') return
-    if (typeof window === 'undefined') return
-    if (window.localStorage.getItem(guideStorageKey) === '1') return
-    if (window.sessionStorage.getItem(guideSessionKey) === '1') return
+    if (user.perfil === "owner") return
+    if (typeof window === "undefined") return
+    if (window.localStorage.getItem(guideStorageKey) === "1") return
+    if (window.sessionStorage.getItem(guideSessionKey) === "1") return
 
     const timer = window.setTimeout(() => {
       setIsGuideOpen(true)
-      window.sessionStorage.setItem(guideSessionKey, '1')
+      window.sessionStorage.setItem(guideSessionKey, "1")
     }, 900)
 
     return () => window.clearTimeout(timer)
   }, [guideSessionKey, guideStorageKey, user])
 
   const handleCloseGuide = () => {
-    if (typeof window !== 'undefined') {
-      window.sessionStorage.setItem(guideSessionKey, '1')
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem(guideSessionKey, "1")
     }
     setIsGuideOpen(false)
   }
 
   const handleDismissGuidePermanently = () => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(guideStorageKey, '1')
-      window.sessionStorage.setItem(guideSessionKey, '1')
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(guideStorageKey, "1")
+      window.sessionStorage.setItem(guideSessionKey, "1")
     }
     setIsGuideOpen(false)
   }
@@ -67,10 +72,10 @@ const LayoutContent: React.FC<AppLayoutProps> = ({ children }) => {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.12),transparent_24%),radial-gradient(circle_at_top_right,rgba(125,211,252,0.12),transparent_26%),linear-gradient(180deg,#f7fbff_0%,#eef6ff_100%)]" />
       <Sidebar onOpenCommandPalette={() => setIsCommandPaletteOpen(true)} />
 
-      {/* Main content area - shifts based on sidebar */}
+      {/* Main content area */}
       <div
         className={`relative flex flex-1 flex-col overflow-hidden transition-all duration-300 ease-in-out ${
-          isCollapsed ? 'md:ml-24' : 'md:ml-[292px]'
+          isCollapsed ? "md:ml-24" : "md:ml-[292px]"
         }`}
       >
         <Header
@@ -79,12 +84,18 @@ const LayoutContent: React.FC<AppLayoutProps> = ({ children }) => {
         />
         <main className="relative flex-1 overflow-y-auto">
           <div className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.14),transparent_55%)]" />
-          <div className="relative p-4 md:p-6 lg:p-8">
-            <ContextualTipsBanner onOpenGuide={() => setIsGuideOpen(true)} />
+          <div className="relative px-3 py-4 md:p-6 lg:p-8">
+            <ContextualTipsBanner
+              onOpenGuide={() => setIsGuideOpen(true)}
+            />
             {children}
           </div>
         </main>
+
+        {/* Bottom Navigation - mobile only */}
+        <BottomNav />
       </div>
+
       <CommandPalette
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
