@@ -1,13 +1,19 @@
 import axios, { AxiosInstance, AxiosError } from 'axios'
 
+const getApiBaseUrl = (): string => {
+  const hostname = window.location.hostname
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return '/api/v1'
+  }
+  // In production, connect directly to API port
+  return `http://${hostname}:8002/api/v1`
+}
+
 const api: AxiosInstance = axios.create({
-  baseURL: '/api/v1',
+  baseURL: getApiBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
-  // CRITICAL: prevent axios from following redirects that break CORS
-  maxRedirects: 0,
-  validateStatus: (status) => status < 400 || status === 307,
 })
 
 api.interceptors.request.use(
@@ -23,33 +29,15 @@ api.interceptors.request.use(
   }
 )
 
-// Handle 307 redirects manually - fix the URL to stay on the same origin
+let _isRedirecting = false
+
 api.interceptors.response.use(
-  (response) => {
-    if (response.status === 307 && response.headers.location) {
-      const location = response.headers.location as string
-      // Convert absolute redirect URL to relative path
-      let redirectPath = location
-      try {
-        const url = new URL(location)
-        redirectPath = url.pathname + url.search
-      } catch {
-        // already relative
-      }
-      // Retry the request with the corrected URL
-      return api.request({
-        ...response.config,
-        url: redirectPath,
-        baseURL: '',
-        maxRedirects: 0,
-      })
-    }
-    return response
-  },
+  (response) => response,
   (error: AxiosError) => {
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 && !_isRedirecting) {
       const currentPath = window.location.pathname
       if (currentPath !== '/login') {
+        _isRedirecting = true
         localStorage.removeItem('access_token')
         localStorage.removeItem('user')
         setTimeout(() => { window.location.href = '/login' }, 100)
