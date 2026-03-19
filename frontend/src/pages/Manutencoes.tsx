@@ -360,7 +360,7 @@ const Manutencoes: React.FC = () => {
       descricao: '',
       valor: '' as any,
       oficina: '',
-      quilometragem: 0,
+      quilometragem: '' as any,
       status: 'pendente',
     })
     setEditingMaintenance(null)
@@ -499,7 +499,7 @@ const Manutencoes: React.FC = () => {
       data_proxima: formData.data_proxima || undefined,
       tipo: formData.tipo,
       descricao: formData.descricao.trim(),
-      custo: formData.custo || 0,
+      custo: formData.custo || '',
       oficina: formData.oficina.trim() || undefined,
       km_realizada: formData.km_realizada > 0 ? formData.km_realizada : Number(selectedVehicle?.km_atual || 0) || undefined,
       km_proxima: formData.km_proxima > 0 ? formData.km_proxima : undefined,

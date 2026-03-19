@@ -134,7 +134,7 @@ const Ipva: React.FC = () => {
     setFormData({
       veiculo_id: '',
       ano: new Date().getFullYear(),
-      valor: 0,
+      valor: '' as any,
       data_vencimento: '',
       data_pagamento: '',
       status: 'pendente',
@@ -151,7 +151,7 @@ const Ipva: React.FC = () => {
       setFormData({
         veiculo_id: String(ipva.veiculo_id || ""),
         ano: ipva.ano || new Date().getFullYear(),
-        valor: ipva.valor || 0,
+        valor: ipva.valor || '',
         data_vencimento: ipva.data_vencimento ? ipva.data_vencimento.split("T")[0] : "",
         data_pagamento: ipva.data_pagamento ? ipva.data_pagamento.split("T")[0] : "",
         status: ipva.status || "pendente",

@@ -135,8 +135,8 @@ const Seguros: React.FC = () => {
       tipo_seguro: 'completo',
       data_inicio: '',
       data_fim: '',
-      valor: 0,
-      valor_franquia: 0,
+      valor: '' as any,
+      valor_franquia: '' as any,
     })
     setEditingInsurance(null)
     setParcelar(false)
@@ -154,8 +154,8 @@ const Seguros: React.FC = () => {
         tipo_seguro: insurance.tipo_seguro || 'completo',
         data_inicio: insurance.data_inicio || '',
         data_fim: insurance.data_fim || '',
-        valor: insurance.valor || 0,
-        valor_franquia: insurance.valor_franquia || 0,
+        valor: insurance.valor || '',
+        valor_franquia: insurance.valor_franquia || '',
       })
       setParcelar(false)
     } else {

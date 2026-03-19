@@ -360,23 +360,23 @@ const Contratos: React.FC = () => {
   }>({ isOpen: false, contrato: null, grupo: null })
   
   const [closeoutData, setCloseoutData] = useState<CloseoutForm>({
-    km_atual_veiculo: 0,
+    km_atual_veiculo: '' as any,
     combustivel_retorno: '',
     itens_checklist: buildCloseoutChecklist(),
-    valor_avarias: 0,
-    taxa_combustivel: 0,
-    taxa_limpeza: 0,
-    taxa_higienizacao: 0,
-    taxa_pneus: 0,
-    taxa_acessorios: 0,
-    valor_franquia_seguro: 0,
-    taxa_administrativa: 0,
-    desconto: 0,
+    valor_avarias: '' as any,
+    taxa_combustivel: '' as any,
+    taxa_limpeza: '' as any,
+    taxa_higienizacao: '' as any,
+    taxa_pneus: '' as any,
+    taxa_acessorios: '' as any,
+    valor_franquia_seguro: '' as any,
+    taxa_administrativa: '' as any,
+    desconto: '' as any,
     status_pagamento: 'pago',
     forma_pagamento: '',
     data_vencimento_pagamento: '',
     data_pagamento: new Date().toISOString().split('T')[0],
-    valor_recebido: 0,
+    valor_recebido: '' as any,
     observacoes: '',
   })
 
@@ -814,23 +814,23 @@ const Contratos: React.FC = () => {
       setCloseoutNfHistory([])
     }
     setCloseoutData({
-      km_atual_veiculo: contrato.veiculo?.km_atual ?? contrato.km_inicial ?? contrato.quilometragem_inicial ?? 0,
+      km_atual_veiculo: contrato.veiculo?.km_atual ?? contrato.km_inicial ?? contrato.quilometragem_inicial ?? '',
       combustivel_retorno: contrato.combustivel_retorno || '',
       itens_checklist: buildCloseoutChecklist(contrato.veiculo),
-      valor_avarias: contrato.valor_avarias || 0,
-      taxa_combustivel: contrato.taxa_combustivel || 0,
-      taxa_limpeza: contrato.taxa_limpeza || 0,
-      taxa_higienizacao: contrato.taxa_higienizacao || 0,
-      taxa_pneus: contrato.taxa_pneus || 0,
-      taxa_acessorios: contrato.taxa_acessorios || 0,
-      valor_franquia_seguro: contrato.valor_franquia_seguro || 0,
-      taxa_administrativa: contrato.taxa_administrativa || 0,
-      desconto: contrato.desconto || 0,
+      valor_avarias: contrato.valor_avarias || '',
+      taxa_combustivel: contrato.taxa_combustivel || '',
+      taxa_limpeza: contrato.taxa_limpeza || '',
+      taxa_higienizacao: contrato.taxa_higienizacao || '',
+      taxa_pneus: contrato.taxa_pneus || '',
+      taxa_acessorios: contrato.taxa_acessorios || '',
+      valor_franquia_seguro: contrato.valor_franquia_seguro || '',
+      taxa_administrativa: contrato.taxa_administrativa || '',
+      desconto: contrato.desconto || '',
       status_pagamento: contrato.status_pagamento || 'pago',
       forma_pagamento: contrato.forma_pagamento || '',
       data_vencimento_pagamento: contrato.data_vencimento_pagamento ? contrato.data_vencimento_pagamento.slice(0, 10) : new Date().toISOString().split('T')[0],
       data_pagamento: contrato.data_pagamento ? contrato.data_pagamento.slice(0, 10) : new Date().toISOString().split('T')[0],
-      valor_recebido: contrato.valor_recebido || contrato.valor_total || 0,
+      valor_recebido: contrato.valor_recebido || contrato.valor_total || '',
       observacoes: '',
     })
   }
@@ -2441,7 +2441,7 @@ const Contratos: React.FC = () => {
                       min="0"
                       step="1"
                       value={formData.km_atual_veiculo || ''}
-                      onChange={(event) => setFormData({ ...formData, km_atual_veiculo: Number(event.target.value) || 0 })}
+                      onChange={(event) => setFormData({ ...formData, km_atual_veiculo: event.target.value })}
                       placeholder="KM ao sair da loja"
                       className="input-field"
                     />
@@ -2457,7 +2457,7 @@ const Contratos: React.FC = () => {
                       {fuelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
                     </select>
                   </div>
-                  <div><label className="input-label">KM Livres</label><input type="number" value={formData.km_livres} onChange={(event) => setFormData({ ...formData, km_livres: Number(event.target.value) || 0 })} className="input-field" /></div>
+                  <div><label className="input-label">KM Livres</label><input type="number" value={formData.km_livres} onChange={(event) => setFormData({ ...formData, km_livres: event.target.value })} className="input-field" /></div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <CurrencyInput
@@ -2658,7 +2658,7 @@ const Contratos: React.FC = () => {
                           type="number"
                           min={closingContract.km_inicial ?? closingContract.quilometragem_inicial ?? 0}
                           value={closeoutData.km_atual_veiculo}
-                          onChange={(event) => setCloseoutData({ ...closeoutData, km_atual_veiculo: Number(event.target.value) || 0 })}
+                          onChange={(event) => setCloseoutData({ ...closeoutData, km_atual_veiculo: event.target.value })}
                           className="input-field"
                         />
                       </div>

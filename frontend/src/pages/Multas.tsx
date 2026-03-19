@@ -98,7 +98,7 @@ const Multas: React.FC = () => {
       veiculo_id: '',
       numero_infracao: '',
       data_infracao: '',
-      valor: 0,
+      valor: '' as any,
       data_vencimento: '',
       data_pagamento: '',
       status: 'pendente',

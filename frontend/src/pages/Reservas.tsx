@@ -71,18 +71,18 @@ const Reservas: React.FC = () => {
     veiculo_id: '',
     data_inicio: '',
     data_fim: '',
-    valor_estimado: 0,
+    valor_estimado: '' as any,
     status: 'pendente',
   })
 
   const buildConvertForm = (): ConvertReservationForm => ({
-    valor_diaria: config.valor_diaria_padrao || 0,
+    valor_diaria: config.valor_diaria_padrao || '',
     tipo: 'cliente',
     hora_saida: '',
     combustivel_saida: '',
-    km_livres: 0,
-    valor_km_excedente: 0,
-    desconto: 0,
+    km_livres: '' as any,
+    valor_km_excedente: '' as any,
+    desconto: '' as any,
     observacoes: '',
   })
 
@@ -232,7 +232,7 @@ const Reservas: React.FC = () => {
         veiculo_id: reservation.veiculo_id,
         data_inicio: reservation.data_inicio.slice(0, 10),
         data_fim: reservation.data_fim.slice(0, 10),
-        valor_estimado: reservation.valor_estimado || 0,
+        valor_estimado: reservation.valor_estimado || '',
         status: (getRawStatus(reservation) as ReservationForm['status']) || 'pendente',
       })
     } else {
@@ -256,7 +256,7 @@ const Reservas: React.FC = () => {
     setConvertReservation(reservation)
     setConvertForm({
       ...buildConvertForm(),
-      valor_diaria: veiculo?.valor_diaria || config.valor_diaria_padrao || 0,
+      valor_diaria: veiculo?.valor_diaria || config.valor_diaria_padrao || '',
     })
   }
 

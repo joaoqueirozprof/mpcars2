@@ -82,10 +82,10 @@ const Empresas: React.FC = () => {
     veiculo_id: '',
     data_inicio: new Date().toISOString().split('T')[0],
     data_fim: '',
-    km_inicial: 0,
-    km_referencia: 0,
-    valor_km_extra: 0,
-    valor_diaria_empresa: 0,
+    km_inicial: '' as any,
+    km_referencia: '' as any,
+    valor_km_extra: '' as any,
+    valor_diaria_empresa: '' as any,
   })
 
   const { data, isLoading } = useQuery({
@@ -245,10 +245,10 @@ const Empresas: React.FC = () => {
       veiculo_id: '',
       data_inicio: new Date().toISOString().split('T')[0],
       data_fim: '',
-      km_inicial: 0,
-      km_referencia: 0,
-      valor_km_extra: 0,
-      valor_diaria_empresa: 0,
+      km_inicial: '' as any,
+      km_referencia: '' as any,
+      valor_km_extra: '' as any,
+      valor_diaria_empresa: '' as any,
     })
   }
 
@@ -331,10 +331,10 @@ const Empresas: React.FC = () => {
     const payload = {
       ...usageForm,
       data_fim: usageForm.data_fim || undefined,
-      km_inicial: usageForm.km_inicial || 0,
-      km_referencia: usageForm.km_referencia || 0,
-      valor_km_extra: usageForm.valor_km_extra || 0,
-      valor_diaria_empresa: usageForm.valor_diaria_empresa || 0,
+      km_inicial: usageForm.km_inicial || '',
+      km_referencia: usageForm.km_referencia || '',
+      valor_km_extra: usageForm.valor_km_extra || '',
+      valor_diaria_empresa: usageForm.valor_diaria_empresa || '',
     }
 
     if (editingUsage) {

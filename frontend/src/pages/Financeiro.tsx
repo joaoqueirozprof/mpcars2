@@ -89,7 +89,7 @@ const FinanceiroPage: React.FC = () => {
     tipo: 'receita' as 'receita' | 'despesa',
     categoria: '',
     descricao: '',
-    valor: 0,
+    valor: '' as any,
     data: new Date().toISOString().split('T')[0],
     status: 'pendente' as 'pendente' | 'pago' | 'cancelado',
   })
@@ -98,7 +98,7 @@ const FinanceiroPage: React.FC = () => {
     forma_pagamento: '',
     data_vencimento_pagamento: new Date().toISOString().split('T')[0],
     data_pagamento: new Date().toISOString().split('T')[0],
-    valor_recebido: 0,
+    valor_recebido: '' as any,
   })
 
   const { data, isLoading } = useQuery({
@@ -200,7 +200,7 @@ const FinanceiroPage: React.FC = () => {
       tipo: 'receita',
       categoria: '',
       descricao: '',
-      valor: 0,
+      valor: '' as any,
       data: new Date().toISOString().split('T')[0],
       status: 'pendente',
     })
@@ -213,7 +213,7 @@ const FinanceiroPage: React.FC = () => {
       forma_pagamento: '',
       data_vencimento_pagamento: new Date().toISOString().split('T')[0],
       data_pagamento: new Date().toISOString().split('T')[0],
-      valor_recebido: 0,
+      valor_recebido: '' as any,
     })
     setEditingPaymentRecord(null)
   }
