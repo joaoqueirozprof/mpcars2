@@ -167,6 +167,7 @@ class Veiculo(Base):
     categoria = Column(String)
     valor_diaria = Column(Numeric(10, 2))
     foto_url = Column(String, nullable=True)
+    observacoes = Column(Text, nullable=True)
     data_cadastro = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     ativo = Column(Boolean, default=True)

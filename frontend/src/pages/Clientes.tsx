@@ -238,15 +238,18 @@ const Clientes: React.FC = () => {
   }
 
   const getInitials = (name: string): string => {
-    return name
+    const safeName = (name || '').trim()
+    if (!safeName) return 'CL'
+    return safeName
       .split(' ')
-      .map((n) => n[0])
+      .map((n) => n?.[0] || '')
       .join('')
       .toUpperCase()
-      .slice(0, 2)
+      .slice(0, 2) || 'CL'
   }
 
   const getAvatarColor = (name: string): string => {
+    const safeName = (name || '').trim()
     const colors = [
       'bg-blue-500',
       'bg-emerald-500',
@@ -257,7 +260,8 @@ const Clientes: React.FC = () => {
       'bg-red-500',
       'bg-green-500',
     ]
-    const hash = name.charCodeAt(0) + name.charCodeAt(Math.floor(name.length / 2))
+    if (!safeName) return colors[0]
+    const hash = safeName.charCodeAt(0) + safeName.charCodeAt(Math.floor(safeName.length / 2))
     return colors[hash % colors.length]
   }
 
@@ -380,17 +384,25 @@ const Clientes: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {data?.data?.map((client: Cliente) => (
+                      {(Array.isArray(data?.data) ? data.data : []).map((client: Cliente) => {
+                        const clientName = client?.nome || 'Sem nome'
+                        const clientEmail = client?.email || '-'
+                        const clientPhone = String(client?.telefone || '')
+                        const clientDocument = String((client as any)?.cpf_cnpj || (client as any)?.cpf || '-')
+                        const clientCidade = (client as any)?.cidade || (client as any)?.cidade_residencial || '-'
+                        const clientEstado = (client as any)?.estado || (client as any)?.estado_residencial || ''
+
+                        return (
                         <tr key={client.id} className="table-row hover:bg-slate-50 transition-colors">
                           <td className="table-cell px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div
-                                className={`w-10 h-10 ${getAvatarColor(client.nome)} rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0`}
+                                className={`w-10 h-10 ${getAvatarColor(clientName)} rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0`}
                               >
-                                {getInitials(client.nome)}
+                                {getInitials(clientName)}
                               </div>
                               <div className="min-w-0">
-                                <p className="font-medium text-slate-900 truncate">{client.nome}</p>
+                                <p className="font-medium text-slate-900 truncate">{clientName}</p>
                                 <p className="text-xs text-slate-500">
                                   {client.tipo === 'pessoa_fisica' ? 'PF' : 'PJ'}
                                 </p>
@@ -400,28 +412,28 @@ const Clientes: React.FC = () => {
                           <td className="table-cell px-6 py-4">
                             <div className="flex items-center gap-2 min-w-0">
                               <Mail size={16} className="text-slate-400 flex-shrink-0" />
-                              <span className="text-slate-700 truncate text-sm">{client.email}</span>
+                              <span className="text-slate-700 truncate text-sm">{clientEmail}</span>
                             </div>
                           </td>
                           <td className="table-cell px-6 py-4">
                             <div className="flex items-center gap-2">
                               <Phone size={16} className="text-slate-400" />
-                              <span className="text-slate-700 text-sm">{formatPhone(client.telefone)}</span>
+                              <span className="text-slate-700 text-sm">{formatPhone(clientPhone)}</span>
                             </div>
                           </td>
                           <td className="table-cell px-6 py-4">
                             <span className="text-slate-700 text-sm font-mono">
                               {client.tipo === 'pessoa_fisica'
-                                ? formatCPF(client.cpf_cnpj)
-                                : client.cpf_cnpj}
+                                ? formatCPF(clientDocument)
+                                : clientDocument}
                             </span>
                           </td>
                           <td className="table-cell px-6 py-4">
                             <div className="flex items-center gap-1">
                               <MapPin size={16} className="text-slate-400" />
                               <span className="text-slate-700 text-sm">
-                                {client.cidade}
-                                {client.estado && `/${client.estado}`}
+                                {clientCidade}
+                                {clientEstado && `/${clientEstado}`}
                               </span>
                             </div>
                           </td>
@@ -451,7 +463,7 @@ const Clientes: React.FC = () => {
                             </div>
                           </td>
                         </tr>
-                      ))}
+                      )})}
                     </tbody>
                   </table>
                 </div>
@@ -517,7 +529,7 @@ const Clientes: React.FC = () => {
             <form onSubmit={handleSubmit} className="px-6 py-5 overflow-y-auto max-h-[calc(85vh-130px)] space-y-6">
               {/* Type Selection */}
               <div>
-                <input-label>Tipo de Cliente</input-label>
+                <label className="input-label">Tipo de Cliente</label>
                 <div className="flex gap-4">
                   <label className="flex items-center gap-3 cursor-pointer">
                     <input
@@ -546,9 +558,9 @@ const Clientes: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Nome */}
                 <div>
-                  <input-label>
+                  <label className="input-label">
                     Nome <span className="text-red-500">*</span>
-                  </input-label>
+                  </label>
                   <input
                     type="text"
                     value={formData.nome}
@@ -565,12 +577,12 @@ const Clientes: React.FC = () => {
 
                 {/* Document Field */}
                 <div>
-                  <input-label>
+                  <label className="input-label">
                     {formData.tipo === 'pessoa_fisica' ? 'CPF' : 'CNPJ'}{' '}
                     <span className="text-slate-500 text-xs font-normal">
                       {formData.tipo === 'pessoa_fisica' ? '(11 dígitos)' : '(14 dígitos)'}
                     </span>
-                  </input-label>
+                  </label>
                   <input
                     type="text"
                     value={formData.cpf_cnpj}
@@ -589,9 +601,9 @@ const Clientes: React.FC = () => {
 
                 {/* Email */}
                 <div>
-                  <input-label>
+                  <label className="input-label">
                     Email <span className="text-red-500">*</span>
-                  </input-label>
+                  </label>
                   <input
                     type="email"
                     value={formData.email}
@@ -608,9 +620,9 @@ const Clientes: React.FC = () => {
 
                 {/* Telefone */}
                 <div>
-                  <input-label>
+                  <label className="input-label">
                     Telefone <span className="text-red-500">*</span>
-                  </input-label>
+                  </label>
                   <input
                     type="tel"
                     value={formData.telefone}
@@ -635,7 +647,7 @@ const Clientes: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* CEP */}
                   <div>
-                    <input-label>CEP</input-label>
+                    <label className="input-label">CEP</label>
                     <input
                       type="text"
                       value={formData.cep}
@@ -655,7 +667,7 @@ const Clientes: React.FC = () => {
 
                   {/* Endereco */}
                   <div className="md:col-span-2">
-                    <input-label>Endereço</input-label>
+                    <label className="input-label">Endereço</label>
                     <input
                       type="text"
                       value={formData.endereco}
@@ -668,7 +680,7 @@ const Clientes: React.FC = () => {
 
                   {/* Cidade */}
                   <div>
-                    <input-label>Cidade</input-label>
+                    <label className="input-label">Cidade</label>
                     <input
                       type="text"
                       value={formData.cidade}
@@ -681,7 +693,7 @@ const Clientes: React.FC = () => {
 
                   {/* Estado */}
                   <div>
-                    <input-label>Estado</input-label>
+                    <label className="input-label">Estado</label>
                     <input
                       type="text"
                       value={formData.estado}

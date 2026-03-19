@@ -404,9 +404,17 @@ class PDFService:
         c.drawCentredString(rx + rw / 2, ry_sec - 12, "DISCRIMINACAO")
         ry_sec -= 16
 
+        # Check if it's a company contract
+        eh_empresa = getattr(contrato, 'tipo', 'cliente') == 'empresa'
+
         # Table header
-        cols = [rw * 0.35, rw * 0.15, rw * 0.25, rw * 0.25]
-        headers = ["DISCRIMINACAO", "QUANT.", "PRECO UNIT.", "PRECO TOTAL"]
+        if eh_empresa:
+            cols = [rw * 0.25, rw * 0.35, rw * 0.20, rw * 0.20]
+            headers = ["DISCRIMINACAO", "PERIODO DO CONTRATO", "PRECO UNIT.", "PRECO TOTAL"]
+        else:
+            cols = [rw * 0.35, rw * 0.15, rw * 0.25, rw * 0.25]
+            headers = ["DISCRIMINACAO", "QUANT.", "PRECO UNIT.", "PRECO TOTAL"]
+
         c.setFont("Helvetica-Bold", 5.5)
         cx = rx
         for i, hd in enumerate(headers):
@@ -418,14 +426,21 @@ class PDFService:
         # Table rows
         valor_diaria = "R$ {:,.2f}".format(float(contrato.valor_diaria)) if contrato.valor_diaria else ""
         valor_total = "R$ {:,.2f}".format(float(contrato.valor_total)) if contrato.valor_total else ""
-        dias = ""
+        
+        quant_value = ""
         if contrato.data_inicio and contrato.data_fim:
             delta = contrato.data_fim - contrato.data_inicio
             dias_num = delta.days if delta.days >= 1 else 1
-            dias = str(dias_num)
+            if eh_empresa:
+                quant_value = "{} a {}".format(
+                    contrato.data_inicio.strftime("%d/%m/%Y"),
+                    contrato.data_fim.strftime("%d/%m/%Y")
+                )
+            else:
+                quant_value = str(dias_num)
 
         rows = [
-            ("DIARIA", dias, valor_diaria, valor_total),
+            ("DIARIA", quant_value, valor_diaria, valor_total),
             ("HORA EXTRA", "", "", ""),
             ("KM EXCEDENTE", "", "", ""),
             ("SUB-TOTAL", "", "", valor_total),
@@ -875,7 +890,7 @@ class PDFService:
         # Detail by contract
         if contratos:
             story.append(Paragraph("<b>DETALHAMENTO POR CONTRATO</b>", sec_style))
-            rev_rows = [["Contrato", "Cliente", "Veiculo", "Diarias", "Valor Diaria", "Valor Total", "Status"]]
+            rev_rows = [["Contrato", "Cliente", "Veiculo", "Período Utilizado/Faturado", "Valor Diaria", "Valor Total", "Status"]]
             for c in contratos:
                 cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
                 veiculo = db.query(Veiculo).filter(Veiculo.id == c.veiculo_id).first()

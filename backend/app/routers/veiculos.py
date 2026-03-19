@@ -37,6 +37,15 @@ def _nf_total_for_uso(uso: Optional[UsoVeiculoEmpresa], relatorio: RelatorioNF) 
     return round(valor_base + valor_extra, 2)
 
 
+def _sanitize_veiculo_payload(payload: dict) -> dict:
+    sanitized: dict = {}
+    for key, value in payload.items():
+        if not hasattr(Veiculo, key):
+            continue
+        sanitized[key] = None if value == "" else value
+    return sanitized
+
+
 class VeiculoBase(BaseModel):
     placa: str
     marca: str
@@ -546,13 +555,21 @@ def create_veiculo(
     request: Request = None,
 ):
     """Create a new vehicle."""
-    existing = db.query(Veiculo).filter(Veiculo.placa == veiculo.placa).first()
+    veiculo_data = _sanitize_veiculo_payload(veiculo.model_dump(exclude_unset=True))
+    placa = veiculo_data.get("placa")
+    if not placa:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Placa e obrigatoria",
+        )
+
+    existing = db.query(Veiculo).filter(Veiculo.placa == placa).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Placa ja cadastrada"
         )
 
-    db_veiculo = Veiculo(**veiculo.model_dump())
+    db_veiculo = Veiculo(**veiculo_data)
     db.add(db_veiculo)
     db.commit()
     db.refresh(db_veiculo)
@@ -590,7 +607,7 @@ def update_veiculo(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veiculo nao encontrado"
         )
 
-    update_data = veiculo_data.model_dump(exclude_unset=True)
+    update_data = _sanitize_veiculo_payload(veiculo_data.model_dump(exclude_unset=True))
     for key, value in update_data.items():
         setattr(veiculo, key, value)
 
@@ -615,7 +632,7 @@ def patch_veiculo(
             status_code=status.HTTP_404_NOT_FOUND, detail="Veiculo nao encontrado"
         )
 
-    update_data = veiculo_data.model_dump(exclude_unset=True)
+    update_data = _sanitize_veiculo_payload(veiculo_data.model_dump(exclude_unset=True))
     for key, value in update_data.items():
         setattr(veiculo, key, value)
 

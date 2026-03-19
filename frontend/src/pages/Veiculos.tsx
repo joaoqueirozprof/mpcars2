@@ -34,6 +34,24 @@ const API_BASE = (() => {
   return '/api/v1'
 })()
 
+const normalizeDateInput = (value: unknown): string => {
+  if (typeof value !== 'string') return ''
+  const input = value.trim()
+  if (!input) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input
+
+  const isoPrefix = input.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (isoPrefix) return isoPrefix[1]
+
+  const brPattern = input.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  if (brPattern) {
+    const [, day, month, year] = brPattern
+    return `${year}-${month}-${day}`
+  }
+
+  return ''
+}
+
 const Veiculos: React.FC = () => {
   const queryClient = useQueryClient()
   const [searchTerm, setSearchTerm] = useState('')
@@ -78,10 +96,12 @@ const Veiculos: React.FC = () => {
       })
       return (data.data || []).map((v: any) => ({
         ...v,
-        quilometragem: v.km_atual || 0,
-        data_compra: v.data_aquisicao || '',
-        observacoes: v.observacoes || '',
+        quilometragem: Number(v.km_atual ?? v.quilometragem ?? 0),
+        data_compra: normalizeDateInput(v.data_aquisicao ?? v.data_compra),
+        observacoes: typeof v.observacoes === 'string' ? v.observacoes : '',
         cor: v.cor || '',
+        status: v.status || 'disponivel',
+        valor_aquisicao: Number(v.valor_aquisicao ?? 0),
         foto_url: v.foto_url || null,
       }))
     },
@@ -273,15 +293,15 @@ const Veiculos: React.FC = () => {
     if (vehicle) {
       setEditingVehicle(vehicle)
       setFormData({
-        placa: vehicle.placa,
-        marca: vehicle.marca,
-        modelo: vehicle.modelo,
-        ano: vehicle.ano,
-        cor: vehicle.cor,
-        quilometragem: vehicle.quilometragem,
-        status: vehicle.status,
-        valor_aquisicao: vehicle.valor_aquisicao,
-        data_compra: vehicle.data_compra,
+        placa: vehicle.placa || '',
+        marca: vehicle.marca || '',
+        modelo: vehicle.modelo || '',
+        ano: Number(vehicle.ano || currentYear),
+        cor: vehicle.cor || '',
+        quilometragem: Number(vehicle.quilometragem || 0),
+        status: (vehicle.status as any) || 'disponivel',
+        valor_aquisicao: Number(vehicle.valor_aquisicao || 0),
+        data_compra: normalizeDateInput((vehicle as any).data_compra || (vehicle as any).data_aquisicao),
         observacoes: vehicle.observacoes || '',
       })
       // Set photo preview if vehicle has a photo
@@ -400,6 +420,17 @@ const Veiculos: React.FC = () => {
     { key: 'manutencao', label: 'Manutencao' },
     { key: 'inativo', label: 'Inativo' },
   ]
+
+  const expenseCategorySummary = useMemo<Record<string, number>>(() => {
+    return (financialHistory?.records || []).reduce((acc: Record<string, number>, record: any) => {
+      if (record?.tipo !== 'despesa') return acc
+
+      const categoriaBruta = typeof record?.categoria === 'string' ? record.categoria : 'Outros'
+      const categoria = categoriaBruta.split('/')[0].split('-')[0].trim() || 'Outros'
+      acc[categoria] = (acc[categoria] || 0) + (Number(record?.valor) || 0)
+      return acc
+    }, {})
+  }, [financialHistory])
 
   const isLoading = isLoadingVehicles
   const isMutating = createMutation.isPending || updateMutation.isPending || uploadingPhoto
@@ -728,7 +759,10 @@ const Veiculos: React.FC = () => {
                   <input
                     type="number"
                     value={formData.ano}
-                    onChange={(e) => setFormData({ ...formData, ano: parseInt(e.target.value) })}
+                    onChange={(e) => {
+                      const parsed = Number(e.target.value)
+                      setFormData({ ...formData, ano: Number.isFinite(parsed) ? parsed : currentYear })
+                    }}
                     min="1990"
                     max={currentYear + 1}
                     className={`input-field ${formErrors.ano ? 'border-red-500 focus:ring-red-500' : ''}`}
@@ -755,8 +789,11 @@ const Veiculos: React.FC = () => {
                   <label className="input-label">Quilometragem</label>
                   <input
                     type="number"
-                    value={formData.quilometragem === 0 ? '' : formData.quilometragem}
-                    onChange={(e) => setFormData({ ...formData, quilometragem: e.target.value === '' ? 0 : parseInt(e.target.value) || 0 })}
+                    value={formData.quilometragem}
+                    onChange={(e) => {
+                      const parsed = Number(e.target.value)
+                      setFormData({ ...formData, quilometragem: Number.isFinite(parsed) ? parsed : 0 })
+                    }}
                     min="0"
                     placeholder="0"
                     className={`input-field ${formErrors.quilometragem ? 'border-red-500 focus:ring-red-500' : ''}`}
@@ -919,29 +956,13 @@ const Veiculos: React.FC = () => {
                   <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5 mt-4">
                     <p className="text-sm font-semibold text-slate-800 mb-4">Detalhamento Estratégico de Despesas</p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                      {Object.entries(
-                        (financialHistory?.records || []).reduce((acc: any, record: any) => {
-                          if (record.tipo === 'despesa') {
-                            const cat = record.categoria.split('/')[0].split('-')[0].trim()
-                            acc[cat] = (acc[cat] || 0) + (Number(record.valor) || 0)
-                          }
-                          return acc
-                        }, {} as Record<string, number>)
-                      ).map(([cat, val]: any) => (
+                      {Object.entries(expenseCategorySummary).map(([cat, val]: any) => (
                         <div key={cat} className="bg-white border border-slate-100 rounded-xl px-4 py-3 shadow-sm">
                           <p className="text-xs uppercase tracking-[0.12em] text-slate-400 font-medium mb-1 truncate" title={cat}>{cat}</p>
                           <p className="text-lg font-display font-bold text-rose-600">{formatCurrency(val)}</p>
                         </div>
                       ))}
-                      {Object.keys(
-                        (financialHistory?.records || []).reduce((acc: any, record: any) => {
-                          if (record.tipo === 'despesa') {
-                            const cat = record.categoria.split('/')[0].split('-')[0].trim()
-                            acc[cat] = (acc[cat] || 0) + (Number(record.valor) || 0)
-                          }
-                          return acc
-                        }, {} as Record<string, number>)
-                      ).length === 0 && (
+                      {Object.keys(expenseCategorySummary).length === 0 && (
                         <p className="text-sm text-slate-400 italic col-span-full">Nenhuma despesa para detalhar.</p>
                       )}
                     </div>
@@ -966,7 +987,7 @@ const Veiculos: React.FC = () => {
                             </span>
                             <div>
                               <p className="font-medium text-slate-900">{record.descricao}</p>
-                              <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-400">{record.categoria}</p>
+                              <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-400">{record.categoria || 'Outros'}</p>
                             </div>
                             <span className={`text-right font-semibold ${record.tipo === 'receita' ? 'text-emerald-600' : 'text-rose-600'}`}>
                               {record.tipo === 'receita' ? '+' : '-'} {formatCurrency(Number(record.valor || 0))}

@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { ConfigProvider } from '@/contexts/ConfigContext'
+import ErrorBoundary from '@/components/shared/ErrorBoundary'
 import RouteLoader from '@/components/shared/RouteLoader'
 
 const Login = lazy(() => import('@/pages/Login'))
@@ -119,11 +120,13 @@ const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <Router>
-        <AuthProvider>
-          <ConfigProvider>
-            <AppRoutes />
-          </ConfigProvider>
-        </AuthProvider>
+        <ErrorBoundary>
+          <AuthProvider>
+            <ConfigProvider>
+              <AppRoutes />
+            </ConfigProvider>
+          </AuthProvider>
+        </ErrorBoundary>
       </Router>
     </QueryClientProvider>
   )

@@ -5,7 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import or_
+from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
@@ -41,8 +41,8 @@ class ContratoBase(BaseModel):
     numero: Optional[str] = None
     cliente_id: int
     veiculo_id: int
-    data_inicio: datetime
-    data_fim: Optional[datetime] = None
+    data_inicio: datetime | date
+    data_fim: Optional[datetime | date] = None
     km_inicial: Optional[float] = None
     quilometragem_inicial: Optional[float] = None
     km_atual_veiculo: Optional[float] = None
@@ -89,8 +89,8 @@ class ContratoUpdate(BaseModel):
     numero: Optional[str] = None
     cliente_id: Optional[int] = None
     veiculo_id: Optional[int] = None
-    data_inicio: Optional[datetime] = None
-    data_fim: Optional[datetime] = None
+    data_inicio: Optional[datetime | date] = None
+    data_fim: Optional[datetime | date] = None
     km_inicial: Optional[float] = None
     quilometragem_inicial: Optional[float] = None
     km_atual_veiculo: Optional[float] = None
@@ -150,7 +150,7 @@ class ContratoFinalizeRequest(BaseModel):
     data_pagamento: Optional[date] = None
     valor_recebido: Optional[float] = None
     observacoes: Optional[str] = None
-    data_finalizacao: Optional[datetime] = None
+    data_finalizacao: Optional[datetime | date] = None
 
 
 class ContratoPaymentUpdate(BaseModel):
@@ -167,6 +167,7 @@ class ContratoResponse(ContratoBase):
     id: int
     data_criacao: datetime
     data_finalizacao: Optional[datetime] = None
+    frota_count: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -303,6 +304,14 @@ def _normalize_contrato_payload(payload: dict, is_create: bool = False) -> dict:
         else:
             normalized[key] = value
 
+    data_inicio = normalized.get("data_inicio")
+    if isinstance(data_inicio, date) and not isinstance(data_inicio, datetime):
+        normalized["data_inicio"] = datetime.combine(data_inicio, datetime.min.time())
+
+    data_fim = normalized.get("data_fim")
+    if isinstance(data_fim, date) and not isinstance(data_fim, datetime):
+        normalized["data_fim"] = datetime.combine(data_fim, datetime.max.time().replace(microsecond=0))
+
     return normalized
 
 
@@ -327,6 +336,13 @@ def _normalize_finalizacao_payload(payload: dict) -> dict:
             normalized[key] = value.lower()
         else:
             normalized[key] = value
+
+    data_finalizacao = normalized.get("data_finalizacao")
+    if isinstance(data_finalizacao, date) and not isinstance(data_finalizacao, datetime):
+        normalized["data_finalizacao"] = datetime.combine(
+            data_finalizacao,
+            datetime.max.time().replace(microsecond=0),
+        )
 
     return normalized
 
@@ -606,6 +622,15 @@ def list_contratos(
     """List all contracts with pagination."""
     del current_user
 
+    # Subquery for frota_count (distinct vehicles for the client's company)
+    frota_count_subquery = (
+        db.query(func.count(distinct(UsoVeiculoEmpresa.veiculo_id)))
+        .join(Cliente, Cliente.empresa_id == UsoVeiculoEmpresa.empresa_id)
+        .filter(Cliente.id == Contrato.cliente_id)
+        .correlate(Contrato)
+        .as_scalar()
+    )
+
     query = (
         db.query(Contrato)
         .options(joinedload(Contrato.cliente), joinedload(Contrato.veiculo))
@@ -635,7 +660,23 @@ def list_contratos(
         else:
             query = query.filter(Contrato.status == status_filter)
 
-    return paginate(query=query, page=page, limit=limit)
+    result = paginate(query=query, page=page, limit=limit)
+    
+    # Add frota_count to serialized items
+    for item_dict in result["data"]:
+        cliente_id = item_dict.get("cliente_id")
+        if cliente_id:
+            # Get the company_id for this client
+            cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+            if cliente and cliente.empresa_id:
+                count = db.query(func.count(distinct(UsoVeiculoEmpresa.veiculo_id)))\
+                    .filter(UsoVeiculoEmpresa.empresa_id == cliente.empresa_id)\
+                    .scalar()
+                item_dict["frota_count"] = count or 0
+            else:
+                item_dict["frota_count"] = 0
+    
+    return result
 
 
 @router.get("/atrasados", response_model=List[ContratoResponse])

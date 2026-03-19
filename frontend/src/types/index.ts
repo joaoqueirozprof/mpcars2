@@ -98,6 +98,7 @@ export interface Contrato {
   taxa_pneus?: number;
   taxa_acessorios?: number;
   valor_franquia_seguro?: number;
+  frota_count?: number;
   taxa_administrativa?: number;
   desconto?: number;
   status_pagamento?: 'pendente' | 'pago' | 'cancelado';

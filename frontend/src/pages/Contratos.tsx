@@ -8,6 +8,7 @@ import {
   Download,
   Edit,
   FileText,
+  List,
   Loader2,
   MoreHorizontal,
   Plus,
@@ -128,10 +129,16 @@ const getErrorMessage = (error: any, fallback: string) =>
   error?.response?.data?.detail || error?.response?.data?.message || fallback
 
 const displayStatus = (contrato: Contrato) => {
-  if (contrato.status === 'ativo' && new Date(contrato.data_fim) < new Date()) {
+  const dataFim = contrato?.data_fim ? new Date(contrato.data_fim) : null
+  if (
+    contrato?.status === 'ativo' &&
+    dataFim &&
+    !Number.isNaN(dataFim.getTime()) &&
+    dataFim < new Date()
+  ) {
     return 'atraso'
   }
-  return contrato.status
+  return contrato?.status || 'ativo'
 }
 
 const statusLabel = (status: string) =>
@@ -252,7 +259,8 @@ const Contratos: React.FC = () => {
     contrato: Contrato | null;
     empresaUsos: EmpresaUso[];
     loading: boolean;
-  }>({ isOpen: false, contrato: null, empresaUsos: [], loading: false })
+    selectedUsoId: string | null;
+  }>({ isOpen: false, contrato: null, empresaUsos: [], loading: false, selectedUsoId: null })
   
   // Modal para detalhes do contrato (3 abas)
   const [contractDetailsModal, setContractDetailsModal] = useState<{
@@ -267,9 +275,25 @@ const Contratos: React.FC = () => {
     periodo_fim: '',
     km_referencia: 0,
     valor_diaria: 0,
+    km_inicial: 0,
+    km_final: 0,
     km_percorrido: 0,
     valor_km_extra: 0,
   })
+
+  const nfCalculations = useMemo(() => {
+    const kmPercorrido = Math.max((nfFormData.km_final || 0) - (nfFormData.km_inicial || 0), 0)
+    const kmExtra = Math.max(kmPercorrido - (nfFormData.km_referencia || 0), 0)
+    const valorKmExtra = kmExtra * (nfFormData.valor_km_extra || 0)
+    const valorTotal = (nfFormData.valor_diaria || 0) + valorKmExtra
+
+    return {
+      kmPercorrido,
+      kmExtra,
+      valorKmExtra,
+      valorTotal
+    }
+  }, [nfFormData])
 
   // Modal para documentos da frota
   const [fleetDocumentsModal, setFleetDocumentsModal] = useState<{
@@ -316,11 +340,13 @@ const Contratos: React.FC = () => {
 
   // Agrupar contratos de empresa por cliente (uma linha por empresa)
   const contratosAgrupados = useMemo(() => {
-    if (!contratos?.data) return []
+    if (!Array.isArray(contratos?.data)) return []
     
     const grouped = new Map<string, ContratoAgrupado>()
     
-    contratos.data.forEach(contrato => {
+    contratos.data.forEach((contrato) => {
+      if (!contrato) return
+
       const key = contrato.tipo === 'empresa' 
         ? `empresa_${contrato.cliente?.empresa_id || contrato.cliente_id}`
         : `cliente_${contrato.cliente_id}`
@@ -442,7 +468,7 @@ const Contratos: React.FC = () => {
         modelo: uso.modelo || veiculoRelacionado?.modelo || '',
         km_atual: veiculoRelacionado?.km_atual ?? uso.km_inicial ?? 0,
       }
-    })
+    }).filter((veiculo: any) => veiculo?.id)
   }, [veiculos, formData.veiculo_id, editingContract, formData.tipo, empresaUsos])
 
   const invalidateCoreQueries = () => {
@@ -546,26 +572,54 @@ const Contratos: React.FC = () => {
     }
   }
 
+  const [fleetSearchTerm, setFleetSearchTerm] = useState('')
+
+  // Filtrar veículos na frota localmente
+  const filteredFleet = useMemo(() => {
+    if (!pdfVehicleSelector.empresaUsos) return []
+    return pdfVehicleSelector.empresaUsos.filter(uso => 
+      uso.placa?.toLowerCase().includes(fleetSearchTerm.toLowerCase()) ||
+      uso.marca?.toLowerCase().includes(fleetSearchTerm.toLowerCase()) ||
+      uso.modelo?.toLowerCase().includes(fleetSearchTerm.toLowerCase())
+    )
+  }, [pdfVehicleSelector.empresaUsos, fleetSearchTerm])
+
   // Abrir seletor de veículo para gerar PDF de contrato de empresa
   const openPdfVehicleSelector = async (contrato: Contrato) => {
-    setPdfVehicleSelector({ isOpen: true, contrato, empresaUsos: [], loading: true })
+    setPdfVehicleSelector({ isOpen: true, contrato, empresaUsos: [], loading: true, selectedUsoId: null })
     try {
       const { data } = await api.get(`/contratos/${contrato.id}`)
+      const usos = data.empresa_usos || []
       setPdfVehicleSelector(prev => ({
         ...prev,
-        empresaUsos: data.empresa_usos || [],
+        empresaUsos: usos,
         loading: false,
+        selectedUsoId: usos.length > 0 ? usos[0].id : null
       }))
+      
+      if (usos.length > 0) {
+        const uso = usos[0]
+        setNfFormData({
+          periodo_inicio: uso.data_inicio ? uso.data_inicio.split('T')[0] : '',
+          periodo_fim: uso.data_fim ? uso.data_fim.split('T')[0] : new Date().toISOString().split('T')[0],
+          km_referencia: uso.km_referencia || 0,
+          valor_diaria: uso.valor_diaria_empresa || 0,
+          km_inicial: uso.km_inicial || 0,
+          km_final: uso.km_final || 0,
+          km_percorrido: uso.km_percorrido || 0,
+          valor_km_extra: uso.valor_km_extra || 0,
+        })
+      }
     } catch {
       toast.error('Erro ao carregar veículos')
-      setPdfVehicleSelector({ isOpen: false, contrato: null, empresaUsos: [], loading: false })
+      setPdfVehicleSelector({ isOpen: false, contrato: null, empresaUsos: [], loading: false, selectedUsoId: null })
     }
   }
 
   // Gerar PDF para veículo específico selecionado
   const handlePdfForVehicle = async (uso: any) => {
     if (!pdfVehicleSelector.contrato) return
-    setPdfVehicleSelector({ isOpen: false, contrato: null, empresaUsos: [], loading: false })
+    setPdfVehicleSelector({ isOpen: false, contrato: null, empresaUsos: [], loading: false, selectedUsoId: null })
     await handlePdf(pdfVehicleSelector.contrato.id, pdfVehicleSelector.contrato.numero, uso.veiculo_id)
   }
   
@@ -868,7 +922,12 @@ const Contratos: React.FC = () => {
       <div className="space-y-6">
         <div className="page-header">
           <div>
-            <h1 className="page-title">Contratos (V2)</h1>
+            <h1 className="page-title flex items-center gap-2">
+              Contratos
+              <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold border border-blue-200">
+                V3.2
+              </span>
+            </h1>
             <p className="page-subtitle">Locacao com retirada, acompanhamento e encerramento.</p>
           </div>
           <button onClick={openCreate} className="btn-primary flex items-center gap-2">
@@ -984,7 +1043,8 @@ const Contratos: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {contratosAgrupados.map((grupo) => {
-                    const contrato = grupo.contratos[0]
+                    const contrato = grupo.contratos?.[0]
+                    if (!contrato) return null
                     const status = displayStatus(contrato)
                     const ehEmpresa = grupo.tipo === 'empresa'
                     
@@ -1008,18 +1068,21 @@ const Contratos: React.FC = () => {
                         <td className="px-4 py-4">
                           {ehEmpresa ? (
                             <div className="flex flex-col gap-1.5">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm text-slate-600 font-medium">
-                                  {grupo.contratos.length} veículos na frota
-                                </span>
+                              <div className="flex items-center">
                                 <button
                                   onClick={() => openCompanyContractDetails(contrato)}
-                                  className="p-1 text-blue-600 hover:bg-blue-100 rounded-full transition-colors"
-                                  title="Ver todos os veículos da empresa"
+                                  className="flex items-center gap-1.5 px-2 py-1 text-blue-600 hover:bg-blue-50 rounded-md border border-blue-100 transition-all group shadow-sm"
+                                  title="Relatório de Notas Fiscais"
                                 >
-                                  <Car size={14} />
+                                  <Car size={14} className="group-hover:scale-110 transition-transform" />
+                                  <span className="text-[10px] font-bold uppercase tracking-tight">
+                                    Relatório de Notas Fiscais
+                                  </span>
                                 </button>
                               </div>
+                              <span className="text-[10px] text-slate-400 font-medium ml-1 italic">
+                                {contrato.frota_count || 0} veículos na frota
+                              </span>
                             </div>
                           ) : (
                             <div className="flex flex-col">
@@ -1071,26 +1134,17 @@ const Contratos: React.FC = () => {
                         </td>
                         <td className="px-4 py-4 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-0.5 opacity-60 group-hover:opacity-100 transition-opacity">
-                            {/* PDF e Impressão agrupados em um dropdown para Empresas */}
-                            {ehEmpresa ? (
-                              <button 
-                                onClick={() => setFleetDocumentsModal({ isOpen: true, contrato, grupo })}
-                                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer transition-all flex items-center gap-1 group/btn"
-                                title="Documentos da Frota"
-                              >
-                                <FileText size={18} className="group-hover/btn:scale-110 transition-transform" />
-                                <ChevronDown size={14} className="group-hover/btn:translate-y-0.5 transition-transform" />
-                              </button>
-                            ) : (
-                              <>
-                                <button onClick={() => handlePdf(contrato.id, contrato.numero)} className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Download PDF">
-                                  {downloadingPdf === contrato.id ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-                                </button>
-                                <button onClick={() => handlePdf(contrato.id, contrato.numero, undefined, true)} className="p-2 text-slate-600 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Imprimir">
-                                  <Printer size={18} />
-                                </button>
-                              </>
-                            )}
+                            {/* Botão Frota Completa - disponível para todos os contratos */}
+                            <button 
+                              onClick={() => setFleetDocumentsModal({ isOpen: true, contrato, grupo })}
+                              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer transition-all flex items-center gap-1 group/btn"
+                              title="Ver Frota Completa"
+                            >
+                              <List size={18} className="group-hover/btn:scale-110 transition-transform" />
+                              <ChevronDown size={14} className="group-hover/btn:translate-y-0.5 transition-transform" />
+                            </button>
+                            
+                            {/* PDF e Impressão - removidos conforme solicitado */}
                             
                             <div className="w-px h-4 bg-slate-200 mx-1"></div>
 
@@ -1149,9 +1203,9 @@ const Contratos: React.FC = () => {
             </div>
             
             <div className="p-0 max-h-[60vh] overflow-y-auto custom-scrollbar">
-              {fleetDocumentsModal.grupo.contratos.map((c, idx) => (
+              {Array.from(new Map(fleetDocumentsModal.grupo.contratos.map(c => [c.veiculo_id, c])).values()).map((c, idx) => (
                 <div 
-                  key={c.id} 
+                  key={c.veiculo_id || c.id} 
                   className={`p-4 hover:bg-blue-50/30 transition-colors border-b border-slate-50 last:border-0 group/item ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/20'}`}
                 >
                   <div className="flex items-center justify-between mb-3">
@@ -1208,92 +1262,416 @@ const Contratos: React.FC = () => {
 
       {/* Modal para selecionar veículo ao gerar PDF (Frota Completa) */}
       {pdfVehicleSelector.isOpen && pdfVehicleSelector.contrato && (
-        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setPdfVehicleSelector({ isOpen: false, contrato: null, empresaUsos: [], loading: false })}>
-          <div className="modal-content max-w-5xl w-full" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-              <h3 className="text-lg font-display font-bold text-slate-900">
-                Frota Completa - {pdfVehicleSelector.contrato.cliente?.nome}
-              </h3>
-              <button onClick={() => setPdfVehicleSelector({ isOpen: false, contrato: null, empresaUsos: [], loading: false })} className="btn-icon">
-                <X size={20} />
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setPdfVehicleSelector({ ...pdfVehicleSelector, isOpen: false })}>
+          <div className="modal-content max-w-6xl w-full h-[85vh] flex flex-col" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-white sticky top-0 z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-200">
+                  <Car size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-display font-bold text-slate-900">
+                    Frota Completa - {pdfVehicleSelector.contrato.cliente?.nome}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Gestão de Veículos e Relatórios</p>
+                </div>
+              </div>
+              <button onClick={() => setPdfVehicleSelector({ ...pdfVehicleSelector, isOpen: false })} className="btn-icon hover:bg-red-50 hover:text-red-500 transition-colors">
+                <X size={24} />
               </button>
             </div>
             
-            <div className="p-0 max-h-[70vh] overflow-y-auto">
+            <div className="flex-1 flex overflow-hidden bg-slate-50">
               {pdfVehicleSelector.loading ? (
-                <div className="flex justify-center p-8">
-                  <Loader2 className="animate-spin text-blue-600" size={32} />
+                <div className="flex-1 flex items-center justify-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="animate-spin text-blue-600" size={40} />
+                    <p className="text-slate-500 font-medium animate-pulse">Carregando frota...</p>
+                  </div>
                 </div>
-              ) : pdfVehicleSelector.empresaUsos.length > 0 ? (
-                <table className="w-full text-sm text-left">
-                  <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
-                    <tr>
-                      <th className="px-6 py-3">Placa / Modelo</th>
-                      <th className="px-6 py-3">Status</th>
-                      <th className="px-6 py-3">Data Inclusão</th>
-                      <th className="px-6 py-3">Grupo Faturamento</th>
-                      <th className="px-6 py-3 text-right">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {pdfVehicleSelector.empresaUsos.map((uso: any) => (
-                      <tr key={uso.id} className="bg-white hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="font-medium text-slate-900">{uso.placa || 'Sem placa'}</div>
-                          <div className="text-slate-500">{uso.marca} {uso.modelo}</div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            uso.status === 'ativo' ? 'bg-green-100 text-green-800' : 
-                            uso.status === 'finalizado' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-800'
-                          }`}>
-                            {uso.status}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-slate-600">
-                          {uso.data_criacao ? formatDate(uso.data_criacao) : '-'}
-                        </td>
-                        <td className="px-6 py-4 text-slate-600">
-                          {uso.grupo_faturamento || '-'}
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => {
-                                setContractDetailsModal({
-                                  isOpen: true,
-                                  contrato: pdfVehicleSelector.contrato,
-                                  veiculoUso: uso,
-                                  activeTab: 'geral'
-                                })
-                                setNfFormData({
-                                  periodo_inicio: uso.data_inicio ? uso.data_inicio.split('T')[0] : '',
-                                  periodo_fim: uso.data_fim ? uso.data_fim.split('T')[0] : new Date().toISOString().split('T')[0],
-                                  km_referencia: uso.km_referencia || 0,
-                                  valor_diaria: uso.valor_diaria_empresa || 0,
-                                  km_percorrido: uso.km_percorrido || 0,
-                                  valor_km_extra: uso.valor_km_extra || 0,
-                                })
-                              }}
-                              className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors border border-blue-200"
-                            >
-                              Ver Detalhes
-                            </button>
-                            <button
-                              onClick={() => handlePdfForVehicle(uso)}
-                              className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-2 rounded-lg transition-colors"
-                              title="Baixar Contrato PDF"
-                            >
-                              <Download size={16} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               ) : (
-                <p className="text-center text-slate-500 p-8">Nenhum veículo encontrado.</p>
+                <>
+                  {/* Left Pane: Vehicle List */}
+                  <div className="w-80 border-r border-slate-200 bg-white flex flex-col">
+                    <div className="p-4 border-b border-slate-100 bg-slate-50/50">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                        <input 
+                          type="text" 
+                          placeholder="Buscar veículo..." 
+                          value={fleetSearchTerm}
+                          onChange={(e) => setFleetSearchTerm(e.target.value)}
+                          className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+                      {filteredFleet.length > 0 ? (
+                        filteredFleet.map((uso: any) => (
+                          <button
+                            key={uso.id}
+                            onClick={() => {
+                              setPdfVehicleSelector({ ...pdfVehicleSelector, selectedUsoId: uso.id });
+                              setNfFormData({
+                                periodo_inicio: uso.data_inicio ? uso.data_inicio.split('T')[0] : '',
+                                periodo_fim: uso.data_fim ? uso.data_fim.split('T')[0] : new Date().toISOString().split('T')[0],
+                                km_referencia: uso.km_referencia || 0,
+                                valor_diaria: uso.valor_diaria_empresa || 0,
+                                km_inicial: uso.km_inicial || 0,
+                                km_final: uso.km_final || 0,
+                                km_percorrido: uso.km_percorrido || 0,
+                                valor_km_extra: uso.valor_km_extra || 0,
+                              });
+                            }}
+                            className={`w-full text-left p-3 rounded-xl transition-all group ${
+                              pdfVehicleSelector.selectedUsoId === uso.id 
+                                ? 'bg-blue-600 text-white shadow-md shadow-blue-200' 
+                                : 'hover:bg-blue-50 text-slate-700'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-full ${
+                                pdfVehicleSelector.selectedUsoId === uso.id ? 'bg-blue-500 text-white' : 'bg-blue-50 text-blue-600'
+                              }`}>
+                                {uso.placa}
+                              </span>
+                              <span className={`w-2 h-2 rounded-full ${uso.status === 'ativo' ? 'bg-green-400' : 'bg-slate-300'}`}></span>
+                            </div>
+                            <div className={`font-bold text-sm ${pdfVehicleSelector.selectedUsoId === uso.id ? 'text-white' : 'text-slate-900'}`}>
+                              {uso.marca} {uso.modelo}
+                            </div>
+                            <div className={`text-[10px] mt-1 ${pdfVehicleSelector.selectedUsoId === uso.id ? 'text-blue-100' : 'text-slate-500'}`}>
+                              Incluído em {formatDate(uso.data_criacao)}
+                            </div>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="p-8 text-center">
+                          <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Nenhum veículo encontrado</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Pane: Details & Tabs */}
+                  <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50">
+                    {pdfVehicleSelector.selectedUsoId ? (
+                      (() => {
+                        const selectedUso = pdfVehicleSelector.empresaUsos.find(u => u.id === pdfVehicleSelector.selectedUsoId);
+                        if (!selectedUso) return null;
+                        
+                        return (
+                          <div className="p-6">
+                            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+                              <div className="p-6 border-b border-slate-100 bg-gradient-to-r from-white to-slate-50/50">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <h4 className="text-2xl font-display font-bold text-slate-900">{selectedUso.marca} {selectedUso.modelo}</h4>
+                                    <div className="flex items-center gap-3 mt-2">
+                                      <span className="text-sm font-mono font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-lg border border-blue-100">{selectedUso.placa}</span>
+                                      <span className={`px-3 py-1 text-xs font-bold uppercase rounded-lg ${
+                                        selectedUso.status === 'ativo' ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                      }`}>
+                                        {selectedUso.status}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => handlePdfForVehicle(selectedUso)}
+                                      className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 active:scale-95"
+                                    >
+                                      <Download size={18} />
+                                      Baixar Contrato PDF
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex border-b border-slate-100 px-6 bg-white">
+                                {[
+                                  { id: 'geral', label: 'Dados Gerais' },
+                                  { id: 'veiculo', label: 'Histórico Veículo' },
+                                  { id: 'nf', label: 'Relatório de Notas Fiscais' }
+                                ].map((tab) => (
+                                  <button
+                                    key={tab.id}
+                                    onClick={() => setContractDetailsModal({ ...contractDetailsModal, activeTab: tab.id as any })}
+                                    className={`px-6 py-4 text-sm font-bold transition-all border-b-2 ${
+                                      contractDetailsModal.activeTab === tab.id
+                                        ? 'border-blue-600 text-blue-600'
+                                        : 'border-transparent text-slate-400 hover:text-slate-600'
+                                    }`}
+                                  >
+                                    {tab.label}
+                                  </button>
+                                ))}
+                              </div>
+
+                              <div className="p-6">
+                                {contractDetailsModal.activeTab === 'geral' && (
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <div className="space-y-6">
+                                      <div>
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Informações do Veículo</label>
+                                        <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                                          <p className="text-sm text-slate-600 font-medium">Marca/Modelo: <span className="text-slate-900 font-bold">{selectedUso.marca} {selectedUso.modelo}</span></p>
+                                          <p className="text-sm text-slate-600 font-medium mt-1">Ano/Cor: <span className="text-slate-900 font-bold">{selectedUso.ano || '-'} / {selectedUso.cor || '-'}</span></p>
+                                          <p className="text-sm text-slate-600 font-medium mt-1">KM Inicial no Contrato: <span className="text-slate-900 font-bold">{selectedUso.km_inicial?.toLocaleString('pt-BR')} km</span></p>
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Contrato Vinculado</label>
+                                        <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                                          <p className="text-sm text-slate-600 font-medium">Número: <span className="text-blue-600 font-bold">{pdfVehicleSelector.contrato.numero}</span></p>
+                                          <p className="text-sm text-slate-600 font-medium mt-1">Vigência: <span className="text-slate-900 font-bold">{formatDate(pdfVehicleSelector.contrato.data_inicio)} até {formatDate(pdfVehicleSelector.contrato.data_fim)}</span></p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="space-y-6">
+                                      <div>
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Parâmetros Financeiros</label>
+                                        <div className="bg-blue-50/50 rounded-xl p-4 border border-blue-100">
+                                          <div className="flex justify-between items-center py-2 border-b border-blue-100/50">
+                                            <span className="text-sm text-blue-900/70 font-medium">Valor Mensal</span>
+                                            <span className="text-base font-black text-blue-900">{formatCurrency(selectedUso.valor_diaria_empresa || 0)}</span>
+                                          </div>
+                                          <div className="flex justify-between items-center py-2 border-b border-blue-100/50">
+                                            <span className="text-sm text-blue-900/70 font-medium">KM Referência (Mensal)</span>
+                                            <span className="text-base font-black text-blue-900">{selectedUso.km_referencia?.toLocaleString('pt-BR')} km</span>
+                                          </div>
+                                          <div className="flex justify-between items-center py-2">
+                                            <span className="text-sm text-blue-900/70 font-medium">Valor KM Extra</span>
+                                            <span className="text-base font-black text-blue-900">{formatCurrency(selectedUso.valor_km_extra || 0)}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {contractDetailsModal.activeTab === 'veiculo' && (
+                                  <div className="space-y-4">
+                                    <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                                      <table className="w-full text-sm text-left">
+                                        <thead className="bg-slate-50 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                                          <tr>
+                                            <th className="px-6 py-4">Período</th>
+                                            <th className="px-6 py-4">KM Contratada</th>
+                                            <th className="px-6 py-4">KM Percorrida</th>
+                                            <th className="px-6 py-4">KM Excedente</th>
+                                            <th className="px-6 py-4 text-right">Valor Período</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                          <tr className="hover:bg-slate-50 transition-colors">
+                                            <td className="px-6 py-4 font-medium text-slate-900">
+                                              {formatDate(selectedUso.data_inicio)} - {selectedUso.data_fim ? formatDate(selectedUso.data_fim) : 'Atual'}
+                                            </td>
+                                            <td className="px-6 py-4 text-slate-600">{selectedUso.km_referencia?.toLocaleString('pt-BR')} km</td>
+                                            <td className="px-6 py-4 text-slate-600">{selectedUso.km_percorrido?.toLocaleString('pt-BR')} km</td>
+                                            <td className="px-6 py-4">
+                                              <span className={`px-2 py-1 rounded-lg font-bold text-xs ${
+                                                Math.max((selectedUso.km_percorrido || 0) - (selectedUso.km_referencia || 0), 0) > 0 
+                                                  ? 'bg-amber-50 text-amber-600' 
+                                                  : 'bg-green-50 text-green-600'
+                                              }`}>
+                                                {Math.max((selectedUso.km_percorrido || 0) - (selectedUso.km_referencia || 0), 0).toLocaleString('pt-BR')} km
+                                              </span>
+                                            </td>
+                                            <td className="px-6 py-4 text-right font-black text-slate-900">
+                                              {formatCurrency(
+                                                (selectedUso.valor_diaria_empresa || 0) + 
+                                                (Math.max((selectedUso.km_percorrido || 0) - (selectedUso.km_referencia || 0), 0) * (selectedUso.valor_km_extra || 0))
+                                              )}
+                                            </td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {contractDetailsModal.activeTab === 'nf' && (
+                                  <div className="space-y-6">
+                                    <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6">
+                                      <div className="flex items-center gap-3 mb-4">
+                                        <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-100">
+                                          <FileText size={20} />
+                                        </div>
+                                        <div>
+                                          <h4 className="font-bold text-blue-900">Novo Período e Relatório de NF</h4>
+                                          <p className="text-xs text-blue-700/70 font-medium uppercase tracking-wider">Cálculo automático de faturamento</p>
+                                        </div>
+                                      </div>
+                                      
+                                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                        <div className="space-y-1">
+                                          <label className="text-[10px] font-black text-blue-900/50 uppercase tracking-widest ml-1">Data Início</label>
+                                          <input 
+                                            type="date" 
+                                            value={nfFormData.periodo_inicio}
+                                            onChange={e => setNfFormData({...nfFormData, periodo_inicio: e.target.value})}
+                                            className="w-full px-4 py-3 bg-white border border-blue-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-700"
+                                          />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <label className="text-[10px] font-black text-blue-900/50 uppercase tracking-widest ml-1">Data Fim</label>
+                                          <input 
+                                            type="date" 
+                                            value={nfFormData.periodo_fim}
+                                            onChange={e => setNfFormData({...nfFormData, periodo_fim: e.target.value})}
+                                            className="w-full px-4 py-3 bg-white border border-blue-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-700"
+                                          />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <label className="text-[10px] font-black text-blue-900/50 uppercase tracking-widest ml-1">Valor Base (Período)</label>
+                                          <CurrencyInput
+                                            value={nfFormData.valor_diaria}
+                                            onChange={v => setNfFormData({...nfFormData, valor_diaria: v})}
+                                            className="w-full px-4 py-3 bg-white border border-blue-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-700"
+                                          />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <label className="text-[10px] font-black text-blue-900/50 uppercase tracking-widest ml-1">KM Inicial</label>
+                                          <input 
+                                            type="number" 
+                                            value={nfFormData.km_inicial}
+                                            onChange={e => setNfFormData({...nfFormData, km_inicial: Number(e.target.value)})}
+                                            className="w-full px-4 py-3 bg-white border border-blue-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-700"
+                                          />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <label className="text-[10px] font-black text-blue-900/50 uppercase tracking-widest ml-1">KM Final</label>
+                                          <input 
+                                            type="number" 
+                                            value={nfFormData.km_final}
+                                            onChange={e => setNfFormData({...nfFormData, km_final: Number(e.target.value)})}
+                                            className="w-full px-4 py-3 bg-white border border-blue-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-700"
+                                          />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <label className="text-[10px] font-black text-blue-900/50 uppercase tracking-widest ml-1">KM Permitida (Franquia)</label>
+                                          <input 
+                                            type="number" 
+                                            value={nfFormData.km_referencia}
+                                            onChange={e => setNfFormData({...nfFormData, km_referencia: Number(e.target.value)})}
+                                            className="w-full px-4 py-3 bg-white border border-blue-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-700"
+                                          />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <label className="text-[10px] font-black text-blue-900/50 uppercase tracking-widest ml-1">Valor KM Extra</label>
+                                          <CurrencyInput
+                                            value={nfFormData.valor_km_extra}
+                                            onChange={v => setNfFormData({...nfFormData, valor_km_extra: v})}
+                                            className="w-full px-4 py-3 bg-white border border-blue-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-700"
+                                          />
+                                        </div>
+                                      </div>
+
+                                      <div className="bg-white border border-blue-200 rounded-2xl p-6 shadow-xl shadow-blue-100/50 mb-6">
+                                        <h5 className="text-[10px] font-black text-blue-900/40 uppercase tracking-[0.2em] mb-4">Preview do Faturamento</h5>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+                                          <div className="space-y-1">
+                                            <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">KM Percorrida</p>
+                                            <p className="text-xl font-black text-slate-900">{nfCalculations.kmPercorrido.toLocaleString('pt-BR')} km</p>
+                                          </div>
+                                          <div className="space-y-1">
+                                            <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">KM Excedente</p>
+                                            <p className={`text-xl font-black ${nfCalculations.kmExtra > 0 ? 'text-amber-500' : 'text-green-500'}`}>
+                                              {nfCalculations.kmExtra.toLocaleString('pt-BR')} km
+                                            </p>
+                                          </div>
+                                          <div className="space-y-1">
+                                            <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Valor KM Extra</p>
+                                            <p className="text-xl font-black text-slate-900">{formatCurrency(nfCalculations.valorKmExtra)}</p>
+                                          </div>
+                                          <div className="space-y-1 p-3 bg-blue-600 rounded-2xl shadow-lg shadow-blue-200 ring-4 ring-blue-50">
+                                            <p className="text-[10px] text-blue-100 uppercase font-black tracking-widest">Total Final</p>
+                                            <p className="text-xl font-black text-white">{formatCurrency(nfCalculations.valorTotal)}</p>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex justify-end gap-3">
+                                        <button 
+                                          onClick={async () => {
+                                            if (nfFormData.km_final < nfFormData.km_inicial) {
+                                              toast.error('KM Final não pode ser menor que KM Inicial');
+                                              return;
+                                            }
+                                            
+                                            const loadingToast = toast.loading('Processando dados...');
+                                            try {
+                                              await api.put(`/empresas/usos/${selectedUso.id}`, {
+                                                km_inicial: nfFormData.km_inicial,
+                                                km_final: nfFormData.km_final,
+                                                km_referencia: nfFormData.km_referencia,
+                                                valor_km_extra: nfFormData.valor_km_extra,
+                                                valor_diaria_empresa: nfFormData.valor_diaria,
+                                                data_inicio: nfFormData.periodo_inicio,
+                                                data_fim: nfFormData.periodo_fim
+                                              });
+
+                                              const params = {
+                                                km_percorrido: nfCalculations.kmPercorrido,
+                                                km_referencia: nfFormData.km_referencia,
+                                                valor_km_extra: nfFormData.valor_km_extra,
+                                                periodo_inicio: nfFormData.periodo_inicio,
+                                                periodo_fim: nfFormData.periodo_fim
+                                              };
+                                              
+                                              const response = await api.get(`/relatorios/nf/${selectedUso.id}/pdf`, {
+                                                params,
+                                                responseType: 'blob'
+                                              });
+                                              
+                                              const blob = new Blob([response.data], { type: 'application/pdf' });
+                                              const url = window.URL.createObjectURL(blob);
+                                              const link = document.createElement('a');
+                                              link.href = url;
+                                              link.download = `nf_${selectedUso.placa}.pdf`;
+                                              document.body.appendChild(link);
+                                              link.click();
+                                              document.body.removeChild(link);
+                                              window.URL.revokeObjectURL(url);
+                                              
+                                              queryClient.invalidateQueries({ queryKey: ['contratos'] });
+                                              toast.dismiss(loadingToast);
+                                              toast.success('Dados salvos e NF gerada com sucesso!');
+                                            } catch (error) {
+                                              console.error('Error generating NF:', error);
+                                              toast.dismiss(loadingToast);
+                                              toast.error('Erro ao processar dados da NF');
+                                            }
+                                          }}
+                                          className="bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-widest py-4 px-8 rounded-2xl shadow-xl shadow-blue-200 transition-all flex items-center gap-3 active:scale-[0.98]"
+                                        >
+                                          <FileText size={20} />
+                                          Salvar e Gerar NF
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })()
+                    ) : (
+                      <div className="h-full flex items-center justify-center p-12">
+                        <div className="max-w-md text-center">
+                          <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-400 mx-auto mb-6">
+                            <Car size={40} />
+                          </div>
+                          <h4 className="text-xl font-bold text-slate-900 mb-2">Selecione um veículo</h4>
+                          <p className="text-slate-500">Escolha um veículo na lista lateral para visualizar os detalhes, histórico e gerar relatórios de faturamento.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -1411,9 +1789,9 @@ const Contratos: React.FC = () => {
               {contractDetailsModal.activeTab === 'nf' && (
                 <div className="space-y-6">
                   <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
-                    <h4 className="font-bold text-blue-900 mb-2">Gerar Relatório de NF</h4>
+                    <h4 className="font-bold text-blue-900 mb-2">Novo Período e Relatório de NF</h4>
                     <p className="text-sm text-blue-700 mb-4">
-                      Preencha os dados do período para atualizar o histórico e gerar o PDF da Nota Fiscal.
+                      Preencha os dados da quilometragem para calcular automaticamente os valores excedentes e gerar a NF.
                     </p>
                     
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
@@ -1444,7 +1822,25 @@ const Contratos: React.FC = () => {
                         />
                       </div>
                       <div>
-                        <label className="input-label">KM Contratada</label>
+                        <label className="input-label">KM Inicial</label>
+                        <input 
+                          type="number" 
+                          value={nfFormData.km_inicial}
+                          onChange={e => setNfFormData({...nfFormData, km_inicial: Number(e.target.value)})}
+                          className="input-field bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="input-label">KM Final</label>
+                        <input 
+                          type="number" 
+                          value={nfFormData.km_final}
+                          onChange={e => setNfFormData({...nfFormData, km_final: Number(e.target.value)})}
+                          className="input-field bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="input-label">KM Permitida (Franquia)</label>
                         <input 
                           type="number" 
                           value={nfFormData.km_referencia}
@@ -1453,16 +1849,7 @@ const Contratos: React.FC = () => {
                         />
                       </div>
                       <div>
-                        <label className="input-label">KM Percorrida</label>
-                        <input 
-                          type="number" 
-                          value={nfFormData.km_percorrido}
-                          onChange={e => setNfFormData({...nfFormData, km_percorrido: Number(e.target.value)})}
-                          className="input-field bg-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="input-label">Valor KM Excedente</label>
+                        <label className="input-label">Valor KM Extra</label>
                         <CurrencyInput
                           value={nfFormData.valor_km_extra}
                           onChange={v => setNfFormData({...nfFormData, valor_km_extra: v})}
@@ -1471,50 +1858,90 @@ const Contratos: React.FC = () => {
                       </div>
                     </div>
 
-                    <button 
-                      onClick={async () => {
-                        const loadingToast = toast.loading('Gerando NF...');
-                        try {
-                          // Prepare params
-                          const params = {
-                            km_percorrido: nfFormData.km_percorrido,
-                            km_referencia: nfFormData.km_referencia,
-                            valor_km_extra: nfFormData.valor_km_extra,
-                            periodo_inicio: nfFormData.periodo_inicio,
-                            periodo_fim: nfFormData.periodo_fim
-                          };
+                    <div className="bg-white border border-blue-200 rounded-xl p-4 shadow-sm mb-4">
+                      <h5 className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-3">Preview de Cálculo</h5>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        <div className="p-2 bg-slate-50 rounded-lg">
+                          <p className="text-[10px] text-slate-500 uppercase font-bold">KM Percorrida</p>
+                          <p className="text-lg font-bold text-slate-900">{nfCalculations.kmPercorrido.toLocaleString('pt-BR')} km</p>
+                        </div>
+                        <div className="p-2 bg-slate-50 rounded-lg">
+                          <p className="text-[10px] text-slate-500 uppercase font-bold">KM Excedente</p>
+                          <p className={`text-lg font-bold ${nfCalculations.kmExtra > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                            {nfCalculations.kmExtra.toLocaleString('pt-BR')} km
+                          </p>
+                        </div>
+                        <div className="p-2 bg-slate-50 rounded-lg">
+                          <p className="text-[10px] text-slate-500 uppercase font-bold">Valor KM Extra</p>
+                          <p className="text-lg font-bold text-slate-900">{formatCurrency(nfCalculations.valorKmExtra)}</p>
+                        </div>
+                        <div className="p-2 bg-blue-600 rounded-lg">
+                          <p className="text-[10px] text-blue-100 uppercase font-bold">Valor Total Final</p>
+                          <p className="text-lg font-bold text-white">{formatCurrency(nfCalculations.valorTotal)}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3">
+                      <button 
+                        onClick={async () => {
+                          if (nfFormData.km_final < nfFormData.km_inicial) {
+                            toast.error('KM Final não pode ser menor que KM Inicial');
+                            return;
+                          }
                           
-                          const response = await api.get(`/relatorios/nf/${contractDetailsModal.veiculoUso.id}/pdf`, {
-                            params,
-                            responseType: 'blob'
-                          });
-                          
-                          const blob = new Blob([response.data], { type: 'application/pdf' });
-                          const url = window.URL.createObjectURL(blob);
-                          const link = document.createElement('a');
-                          link.href = url;
-                          link.download = `nf_${contractDetailsModal.veiculoUso.placa}.pdf`;
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                          window.URL.revokeObjectURL(url);
-                          
-                          toast.dismiss(loadingToast);
-                          toast.success('NF Gerada e dados atualizados!');
-                          invalidateCoreQueries(); // Refresh data instantly
-                          
-                          // Close modal? Or keep open? User might want to see result.
-                        } catch (error) {
-                          toast.dismiss(loadingToast);
-                          toast.error('Erro ao gerar NF');
-                          console.error(error);
-                        }
-                      }}
-                      className="btn-primary w-full flex items-center justify-center gap-2"
-                    >
-                      <Download size={18} />
-                      Salvar Dados e Gerar NF
-                    </button>
+                          const loadingToast = toast.loading('Processando dados...');
+                          try {
+                            // 1. Atualizar o Uso do Veículo no backend
+                            await api.put(`/empresas/usos/${contractDetailsModal.veiculoUso.id}`, {
+                              km_inicial: nfFormData.km_inicial,
+                              km_final: nfFormData.km_final,
+                              km_referencia: nfFormData.km_referencia,
+                              valor_km_extra: nfFormData.valor_km_extra,
+                              valor_diaria_empresa: nfFormData.valor_diaria,
+                              data_inicio: nfFormData.periodo_inicio,
+                              data_fim: nfFormData.periodo_fim
+                            });
+
+                            // 2. Gerar o PDF
+                            const params = {
+                              km_percorrido: nfCalculations.kmPercorrido,
+                              km_referencia: nfFormData.km_referencia,
+                              valor_km_extra: nfFormData.valor_km_extra,
+                              periodo_inicio: nfFormData.periodo_inicio,
+                              periodo_fim: nfFormData.periodo_fim
+                            };
+                            
+                            const response = await api.get(`/relatorios/nf/${contractDetailsModal.veiculoUso.id}/pdf`, {
+                              params,
+                              responseType: 'blob'
+                            });
+                            
+                            const blob = new Blob([response.data], { type: 'application/pdf' });
+                            const url = window.URL.createObjectURL(blob);
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = `nf_${contractDetailsModal.veiculoUso.placa}.pdf`;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            window.URL.revokeObjectURL(url);
+                            
+                            queryClient.invalidateQueries({ queryKey: ['contratos'] });
+                            toast.dismiss(loadingToast);
+                            toast.success('Dados salvos e NF gerada com sucesso!');
+                          } catch (error) {
+                            console.error('Error generating NF:', error);
+                            toast.dismiss(loadingToast);
+                            toast.error('Erro ao processar dados da NF');
+                          }
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg shadow-lg shadow-blue-200 transition-all flex items-center gap-2"
+                      >
+                        <FileText size={18} />
+                        Salvar e Gerar NF
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

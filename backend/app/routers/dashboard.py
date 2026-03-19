@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_page_access
+from app.core.cache import cache_service
 from app.models import (
     AlertaHistorico,
     Cliente,
@@ -386,6 +387,11 @@ def get_dashboard(
 ):
     del current_user
 
+    cache_key = "dashboard:main"
+    cached_data = cache_service.get(cache_key)
+    if cached_data is not None:
+        return cached_data
+
     now = datetime.now()
     inicio_mes = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     inicio_mes_anterior = _month_start(inicio_mes, 1)
@@ -631,6 +637,9 @@ def get_dashboard(
         "proximos_vencimentos": proximos_vencimentos,
         "agenda_hoje": agenda_hoje,
     }
+
+    cache_service.set(cache_key, result, ttl=300)
+    return result
 
 
 @router.get("/consolidado")

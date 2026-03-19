@@ -46,41 +46,41 @@ export function formatDateTime(date: string | Date | null | undefined): string {
   })
 }
 
-export function formatPhone(value: string): string {
+export function formatPhone(value: string | number | null | undefined): string {
   if (!value) return ''
-  const cleaned = value.replace(/\D/g, '')
+  const cleaned = String(value).replace(/\D/g, '')
   if (cleaned.length <= 10) {
     return cleaned.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3')
   }
   return cleaned.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3')
 }
 
-export function formatCPF(value: string): string {
+export function formatCPF(value: string | number | null | undefined): string {
   if (!value) return ''
-  const cleaned = value.replace(/\D/g, '')
+  const cleaned = String(value).replace(/\D/g, '')
   return cleaned.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
 }
 
-export function formatCNPJ(value: string): string {
+export function formatCNPJ(value: string | number | null | undefined): string {
   if (!value) return ''
-  const cleaned = value.replace(/\D/g, '')
+  const cleaned = String(value).replace(/\D/g, '')
   return cleaned.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5')
 }
 
-export function formatCEP(value: string): string {
+export function formatCEP(value: string | number | null | undefined): string {
   if (!value) return ''
-  const cleaned = value.replace(/\D/g, '')
+  const cleaned = String(value).replace(/\D/g, '')
   return cleaned.replace(/(\d{5})(\d{3})/, '$1-$2')
 }
 
-export function formatPlaca(value: string): string {
+export function formatPlaca(value: string | null | undefined): string {
   if (!value) return ''
-  const cleaned = value.replace(/\D/g, '').toUpperCase()
+  const cleaned = String(value).replace(/\D/g, '').toUpperCase()
   return cleaned.replace(/([A-Z]{3})(\d{4})/, '$1-$2')
 }
 
-export function getStatusColor(status: string): string {
-  const statusLower = status.toLowerCase()
+export function getStatusColor(status: string | null | undefined): string {
+  const statusLower = String(status || '').toLowerCase()
   if (['disponivel', 'pago', 'ativo', 'concluida'].includes(statusLower))
     return 'bg-green-100 text-green-800'
   if (['alugado', 'em_progresso'].includes(statusLower))
@@ -92,7 +92,7 @@ export function getStatusColor(status: string): string {
   return 'bg-slate-100 text-slate-800'
 }
 
-export function getStatusLabel(status: string): string {
+export function getStatusLabel(status: string | null | undefined): string {
   const labels: Record<string, string> = {
     disponivel: 'Disponível',
     alugado: 'Alugado',
@@ -113,7 +113,8 @@ export function getStatusLabel(status: string): string {
     atencao: 'Atenção',
     info: 'Informação',
   }
-  return labels[status.toLowerCase()] || status
+  const key = String(status || '').toLowerCase()
+  return labels[key] || String(status || '-')
 }
 
 export function calculateDays(startDate: string | Date, endDate: string | Date): number {
@@ -199,18 +200,23 @@ export function validateCNPJ(cnpj: string): boolean {
   return result === parseInt(digits.charAt(1))
 }
 
-export function getInitials(name: string): string {
-  return name
+export function getInitials(name: string | null | undefined): string {
+  const normalized = String(name || '').trim()
+  if (!normalized) return 'NA'
+  return normalized
     .split(' ')
-    .map(word => word[0])
+    .map(word => word?.[0] || '')
+    .filter(Boolean)
     .join('')
     .toUpperCase()
     .substring(0, 2)
 }
 
-export function truncate(text: string, length: number): string {
-  if (text.length <= length) return text
-  return text.substring(0, length) + '...'
+export function truncate(text: string | null | undefined, length: number): string {
+  const value = String(text || '')
+  if (!value) return ''
+  if (value.length <= length) return value
+  return value.substring(0, length) + '...'
 }
 
 export function sleep(ms: number): Promise<void> {
