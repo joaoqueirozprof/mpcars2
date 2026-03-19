@@ -931,68 +931,205 @@ class PDFService:
         tipo: str = None, status_filter: str = None, categoria: str = None,
         veiculo_id: int = None, search: str = None,
     ) -> BytesIO:
-        """Generate financial report PDF with filters."""
+        """Generate financial report PDF using ALL financial data sources."""
+        from app.models import (
+            Contrato, Cliente, Veiculo, DespesaContrato, DespesaVeiculo,
+            DespesaLoja, Manutencao, Seguro, IpvaRegistro, Multa,
+            LancamentoFinanceiro, Empresa, UsoVeiculoEmpresa,
+        )
+        from app.models import RelatorioNF
+
         di = datetime.strptime(data_inicio, "%Y-%m-%d")
         df = datetime.strptime(data_fim, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
         empresa_info = _get_empresa_info(db)
 
-        # Apply filters
-        contratos_query = db.query(Contrato).filter(Contrato.data_criacao >= di, Contrato.data_criacao <= df)
-        if veiculo_id:
-            contratos_query = contratos_query.filter(Contrato.veiculo_id == veiculo_id)
+        # ── Collect ALL records (same logic as list_financeiro) ──
+        all_records = []
+
+        # 1. Contratos PF (receita)
+        contratos = db.query(Contrato).all()
+        for c in contratos:
+            if str(c.tipo or "").lower() == "empresa":
+                continue
+            cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
+            all_records.append({
+                "data": c.data_criacao.isoformat() if c.data_criacao else None,
+                "tipo": "receita",
+                "categoria": "Locacao",
+                "descricao": "Contrato #{} - {}".format(c.numero, cliente.nome if cliente else "N/A"),
+                "valor": float(c.valor_total or 0),
+                "status": "pago" if c.status == "finalizado" else "pendente",
+                "veiculo_id": c.veiculo_id,
+            })
+
+        # 2. NF empresa (receita)
+        for nf in db.query(RelatorioNF).all():
+            veiculo = db.query(Veiculo).filter(Veiculo.id == nf.veiculo_id).first()
+            empresa = db.query(Empresa).filter(Empresa.id == nf.empresa_id).first() if nf.empresa_id else None
+            periodo = ""
+            if nf.periodo_inicio:
+                periodo = nf.periodo_inicio.strftime("%d/%m/%y")
+                if nf.periodo_fim:
+                    periodo += " a " + nf.periodo_fim.strftime("%d/%m/%y")
+            all_records.append({
+                "data": nf.data_criacao.isoformat() if nf.data_criacao else None,
+                "tipo": "receita",
+                "categoria": "Faturamento empresa",
+                "descricao": "NF {} {} | {}".format(
+                    veiculo.placa if veiculo else "",
+                    periodo,
+                    empresa.nome if empresa else "",
+                ).strip(),
+                "valor": float(nf.valor_total_periodo or 0),
+                "status": "pago" if nf.pago else "pendente",
+                "veiculo_id": nf.veiculo_id,
+            })
+
+        # 3. Despesas de Contrato
+        for d in db.query(DespesaContrato).all():
+            all_records.append({
+                "data": d.data_registro.isoformat() if d.data_registro else None,
+                "tipo": "despesa",
+                "categoria": d.tipo or "Contrato",
+                "descricao": d.descricao or "",
+                "valor": float(d.valor or 0),
+                "status": "pago",
+                "veiculo_id": None,
+            })
+
+        # 4. Despesas de Veiculo
+        for d in db.query(DespesaVeiculo).all():
+            veiculo = db.query(Veiculo).filter(Veiculo.id == d.veiculo_id).first() if d.veiculo_id else None
+            all_records.append({
+                "data": d.data.isoformat() if d.data else None,
+                "tipo": "despesa",
+                "categoria": d.tipo or "Veiculo",
+                "descricao": "{} | {}".format(d.descricao or "", veiculo.placa if veiculo else "").strip(" |"),
+                "valor": float(d.valor or 0),
+                "status": "pago",
+                "veiculo_id": d.veiculo_id,
+            })
+
+        # 5. Despesas de Loja
+        for d in db.query(DespesaLoja).all():
+            all_records.append({
+                "data": d.data.isoformat() if d.data else None,
+                "tipo": "despesa",
+                "categoria": d.categoria or "Loja",
+                "descricao": d.descricao or "",
+                "valor": float(d.valor or 0),
+                "status": "pago",
+                "veiculo_id": None,
+            })
+
+        # 6. Manutencoes
+        for m in db.query(Manutencao).all():
+            veiculo = db.query(Veiculo).filter(Veiculo.id == m.veiculo_id).first() if m.veiculo_id else None
+            data = m.data_realizada or m.updated_at or m.data_criacao
+            all_records.append({
+                "data": data.isoformat() if data else None,
+                "tipo": "despesa",
+                "categoria": "Manutencao",
+                "descricao": "{} | {}".format(m.descricao or "", veiculo.placa if veiculo else "").strip(" |"),
+                "valor": float(m.custo or 0),
+                "status": "pago" if m.status == "concluida" else "pendente",
+                "veiculo_id": m.veiculo_id,
+            })
+
+        # 7. Seguros
+        for s in db.query(Seguro).all():
+            veiculo = db.query(Veiculo).filter(Veiculo.id == s.veiculo_id).first() if s.veiculo_id else None
+            all_records.append({
+                "data": s.data_inicio.isoformat() if s.data_inicio else None,
+                "tipo": "despesa",
+                "categoria": "Seguro",
+                "descricao": "{} | {}".format(s.seguradora or "Seguro", veiculo.placa if veiculo else "").strip(" |"),
+                "valor": float(s.valor or 0),
+                "status": "pago" if s.status == "ativo" else "pendente",
+                "veiculo_id": s.veiculo_id,
+            })
+
+        # 8. IPVA
+        for ip in db.query(IpvaRegistro).all():
+            veiculo = db.query(Veiculo).filter(Veiculo.id == ip.veiculo_id).first() if ip.veiculo_id else None
+            data = ip.data_pagamento or ip.data_vencimento
+            all_records.append({
+                "data": data.isoformat() if data else None,
+                "tipo": "despesa",
+                "categoria": "IPVA",
+                "descricao": "IPVA {} | {}".format(ip.ano_referencia or "", veiculo.placa if veiculo else "").strip(" |"),
+                "valor": float(ip.valor_ipva or ip.valor_pago or 0),
+                "status": "pago" if ip.status == "pago" else "pendente",
+                "veiculo_id": ip.veiculo_id,
+            })
+
+        # 9. Multas
+        for ml in db.query(Multa).all():
+            veiculo = db.query(Veiculo).filter(Veiculo.id == ml.veiculo_id).first() if ml.veiculo_id else None
+            data = ml.data_pagamento or ml.data_infracao
+            all_records.append({
+                "data": data.isoformat() if data else None,
+                "tipo": "despesa",
+                "categoria": "Multa",
+                "descricao": "{} | {}".format(ml.descricao or "Multa", veiculo.placa if veiculo else "").strip(" |"),
+                "valor": float(ml.valor or 0),
+                "status": "pago" if ml.status == "pago" else "pendente",
+                "veiculo_id": ml.veiculo_id,
+            })
+
+        # 10. Lancamentos manuais
+        for lf in db.query(LancamentoFinanceiro).all():
+            all_records.append({
+                "data": lf.data.isoformat() if lf.data else None,
+                "tipo": lf.tipo or "despesa",
+                "categoria": lf.categoria or "Outros",
+                "descricao": lf.descricao or "",
+                "valor": float(lf.valor or 0),
+                "status": lf.status or "pendente",
+                "veiculo_id": None,
+            })
+
+        # ── Apply filters ──
+        def in_period(date_str):
+            if not date_str:
+                return True
+            try:
+                d = datetime.fromisoformat(date_str.replace("Z", "+00:00")).replace(tzinfo=None)
+                return di <= d <= df
+            except Exception:
+                return True
+
+        records = [r for r in all_records if in_period(r["data"])]
+
+        if tipo and tipo != "todos":
+            records = [r for r in records if r["tipo"] == tipo]
         if status_filter and status_filter != "todos":
-            contratos_query = contratos_query.filter(Contrato.status == status_filter)
-        contratos = contratos_query.all()
-
-        # Filter receita/despesa by tipo
-        show_receita = tipo in (None, "todos", "receita")
-        show_despesa = tipo in (None, "todos", "despesa")
-
-        receita_total = sum(float(c.valor_total or 0) for c in contratos) if show_receita else 0
-
-        desp_contrato_query = db.query(DespesaContrato).filter(DespesaContrato.data_registro >= di, DespesaContrato.data_registro <= df)
-        desp_veiculo_query = db.query(DespesaVeiculo).filter(DespesaVeiculo.data >= di, DespesaVeiculo.data <= df)
-        if veiculo_id:
-            desp_veiculo_query = desp_veiculo_query.filter(DespesaVeiculo.veiculo_id == veiculo_id)
-        desp_contrato = desp_contrato_query.all() if show_despesa else []
-        desp_veiculo = desp_veiculo_query.all() if show_despesa else []
-        # Filter DespesaLoja by month/year within the date range
-        all_desp_loja = db.query(DespesaLoja).all()
-        desp_loja = [d for d in all_desp_loja if di.year <= d.ano <= df.year and (
-            (d.ano == di.year and d.ano == df.year and di.month <= d.mes <= df.month) or
-            (d.ano == di.year and d.ano < df.year and d.mes >= di.month) or
-            (d.ano > di.year and d.ano < df.year) or
-            (d.ano == df.year and d.ano > di.year and d.mes <= df.month)
-        )]
-
-        # Apply categoria filter
+            records = [r for r in records if r["status"] == status_filter]
         if categoria:
             cat_lower = categoria.lower()
-            if show_receita and cat_lower not in ("locacao", "locação", "faturamento empresa"):
-                contratos = []
-                receita_total = 0
-            if show_despesa:
-                if "manutencao" in cat_lower or "manutenção" in cat_lower:
-                    desp_contrato = []
-                    desp_loja = []
-                elif "loja" in cat_lower:
-                    desp_contrato = []
-                    desp_veiculo = []
-                elif "veiculo" in cat_lower or "veículo" in cat_lower:
-                    desp_contrato = []
-                    desp_loja = []
-
-        # Apply search filter
+            records = [r for r in records if cat_lower in (r.get("categoria") or "").lower()]
+        if veiculo_id:
+            records = [r for r in records if str(r.get("veiculo_id") or "") == str(veiculo_id)]
         if search:
             s = search.lower()
-            contratos = [ct for ct in contratos if s in (ct.numero or "").lower() or s in str(ct.valor_total or "")]
+            records = [r for r in records if s in (r.get("descricao") or "").lower() or s in (r.get("categoria") or "").lower()]
 
-        total_desp_contrato = sum(float(d.valor or 0) for d in desp_contrato)
-        total_desp_veiculo = sum(float(d.valor or 0) for d in desp_veiculo)
-        total_desp_loja = sum(float(d.valor or 0) for d in desp_loja)
-        despesa_total = total_desp_contrato + total_desp_veiculo + total_desp_loja
+        records.sort(key=lambda x: x.get("data") or "", reverse=True)
+
+        # ── Calculate totals ──
+        receitas = [r for r in records if r["tipo"] == "receita"]
+        despesas = [r for r in records if r["tipo"] == "despesa"]
+        receita_total = sum(r["valor"] for r in receitas)
+        despesa_total = sum(r["valor"] for r in despesas)
         lucro = receita_total - despesa_total
 
+        # Group despesas by category
+        desp_por_cat = {}
+        for r in despesas:
+            cat = r.get("categoria") or "Outros"
+            desp_por_cat[cat] = desp_por_cat.get(cat, 0) + r["valor"]
+
+        # ── Build PDF ──
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*cm, bottomMargin=1*cm)
         story = []
@@ -1012,79 +1149,82 @@ class PDFService:
                 filtros_extras.append("Veiculo: {} {}".format(v.placa, v.modelo))
         if filtros_extras:
             filtros_desc += " | " + " | ".join(filtros_extras)
-        _add_header(story, styles, "RELATORIO FINANCEIRO", filtros_desc, empresa_info)
+        _add_header(story, styles, "RELATORIO FINANCEIRO COMPLETO", filtros_desc, empresa_info)
 
+        # Summary table
         summary_data = [
             ["Metrica", "Valor"],
-            ["Total de Receitas (Contratos)", "R$ {:,.2f}".format(receita_total)],
-            ["Despesas de Contratos", "R$ {:,.2f}".format(total_desp_contrato)],
-            ["Despesas de Veiculos", "R$ {:,.2f}".format(total_desp_veiculo)],
-            ["Despesas de Loja", "R$ {:,.2f}".format(total_desp_loja)],
+            ["Total de Receitas", "R$ {:,.2f}".format(receita_total)],
             ["Total de Despesas", "R$ {:,.2f}".format(despesa_total)],
             ["Lucro Liquido", "R$ {:,.2f}".format(lucro)],
             ["Margem de Lucro", "{:.1f}%".format((lucro / receita_total * 100) if receita_total > 0 else 0)],
+            ["Total de Registros", str(len(records))],
         ]
         story.append(_styled_table(summary_data, col_widths=[4*inch, 3*inch]))
-        story.append(Spacer(1, 20))
+        story.append(Spacer(1, 12))
 
-        if contratos and show_receita:
-            sec_style = ParagraphStyle("S", parent=styles["Heading2"], fontSize=13, textColor=PRIMARY, spaceAfter=8)
-            story.append(Paragraph("<b>DETALHAMENTO DE RECEITAS</b>", sec_style))
-            rev_rows = [["Contrato", "Cliente", "Veiculo", "Periodo", "Valor", "Status"]]
-            for ct in contratos:
-                cliente = db.query(Cliente).filter(Cliente.id == ct.cliente_id).first()
-                veiculo = db.query(Veiculo).filter(Veiculo.id == ct.veiculo_id).first()
-                numero_curto = ct.numero[-8:] if ct.numero and len(ct.numero) > 8 else (ct.numero or "")
-                cliente_nome = (cliente.nome[:15] + "..") if cliente and len(cliente.nome) > 17 else (cliente.nome if cliente else "N/A")
-                placa = veiculo.placa if veiculo else "-"
-                periodo = ""
-                if ct.data_inicio:
-                    periodo = ct.data_inicio.strftime("%d/%m/%y")
-                    if ct.data_fim:
-                        periodo += " a " + ct.data_fim.strftime("%d/%m/%y")
-                    else:
-                        periodo += " - Indet."
+        # Despesas por categoria
+        if desp_por_cat:
+            sec_cat = ParagraphStyle("SC", parent=styles["Heading2"], fontSize=12, textColor=colors.HexColor("#dc2626"), spaceAfter=6)
+            story.append(Paragraph("<b>DESPESAS POR CATEGORIA</b>", sec_cat))
+            cat_rows = [["Categoria", "Valor", "% do Total"]]
+            for cat, val in sorted(desp_por_cat.items(), key=lambda x: -x[1]):
+                pct = (val / despesa_total * 100) if despesa_total > 0 else 0
+                cat_rows.append([cat, "R$ {:,.2f}".format(val), "{:.1f}%".format(pct)])
+            cat_rows.append(["TOTAL", "R$ {:,.2f}".format(despesa_total), "100%"])
+            story.append(_styled_table(cat_rows, col_widths=[5*cm, 5*cm, 3*cm]))
+            story.append(Spacer(1, 12))
+
+        # Receitas detail
+        if receitas:
+            sec_rec = ParagraphStyle("SR", parent=styles["Heading2"], fontSize=12, textColor=PRIMARY, spaceAfter=6)
+            story.append(Paragraph("<b>DETALHAMENTO DE RECEITAS ({} registros)</b>".format(len(receitas)), sec_rec))
+            rev_rows = [["Data", "Categoria", "Descricao", "Valor", "Status"]]
+            for r in receitas:
+                data_fmt = ""
+                if r["data"]:
+                    try:
+                        data_fmt = datetime.fromisoformat(r["data"].replace("Z", "+00:00")).strftime("%d/%m/%y")
+                    except Exception:
+                        data_fmt = str(r["data"])[:10]
+                desc = (r["descricao"] or "")[:35]
+                if len(r["descricao"] or "") > 35:
+                    desc += ".."
                 rev_rows.append([
-                    numero_curto,
-                    cliente_nome,
-                    placa,
-                    periodo,
-                    "R$ {:,.2f}".format(float(ct.valor_total or 0)),
-                    ct.status or "",
+                    data_fmt,
+                    (r["categoria"] or "")[:15],
+                    desc,
+                    "R$ {:,.2f}".format(r["valor"]),
+                    r["status"] or "",
                 ])
-            story.append(_styled_table(rev_rows, col_widths=[2.2*cm, 3.5*cm, 2*cm, 3.5*cm, 3*cm, 2*cm]))
+            rev_rows.append(["", "", "TOTAL", "R$ {:,.2f}".format(receita_total), ""])
+            story.append(_styled_table(rev_rows, col_widths=[2*cm, 3*cm, 5.5*cm, 3.5*cm, 2*cm]))
+            story.append(Spacer(1, 12))
 
-        # Expense details
-        if desp_contrato or desp_veiculo or desp_loja:
-            story.append(Spacer(1, 15))
-            sec_desp = ParagraphStyle("SD", parent=styles["Heading2"], fontSize=13, textColor=colors.HexColor("#dc2626"), spaceAfter=8)
-            story.append(Paragraph("<b>DETALHAMENTO DE DESPESAS</b>", sec_desp))
-
-            if desp_contrato:
-                story.append(Paragraph("<b>Despesas de Contrato</b>", styles["Normal"]))
-                desp_c_rows = [["Tipo", "Descricao", "Valor"]]
-                for d in desp_contrato:
-                    desp_c_rows.append([d.tipo or "", (d.descricao or "")[:30], "R$ {:,.2f}".format(float(d.valor or 0))])
-                desp_c_rows.append(["", "TOTAL", "R$ {:,.2f}".format(total_desp_contrato)])
-                story.append(_styled_table(desp_c_rows, col_widths=[3*cm, 8*cm, 4*cm]))
-                story.append(Spacer(1, 10))
-
-            if desp_veiculo:
-                story.append(Paragraph("<b>Despesas de Veiculo</b>", styles["Normal"]))
-                desp_v_rows = [["Tipo", "Descricao", "Valor"]]
-                for d in desp_veiculo:
-                    desp_v_rows.append([d.tipo or "", (d.descricao or "")[:30], "R$ {:,.2f}".format(float(d.valor or 0))])
-                desp_v_rows.append(["", "TOTAL", "R$ {:,.2f}".format(total_desp_veiculo)])
-                story.append(_styled_table(desp_v_rows, col_widths=[3*cm, 8*cm, 4*cm]))
-                story.append(Spacer(1, 10))
-
-            if desp_loja:
-                story.append(Paragraph("<b>Despesas de Loja</b>", styles["Normal"]))
-                desp_l_rows = [["Categoria", "Descricao", "Mes/Ano", "Valor"]]
-                for d in desp_loja:
-                    desp_l_rows.append([d.categoria or "", (d.descricao or "")[:25], "{}/{}".format(d.mes, d.ano), "R$ {:,.2f}".format(float(d.valor or 0))])
-                desp_l_rows.append(["", "", "TOTAL", "R$ {:,.2f}".format(total_desp_loja)])
-                story.append(_styled_table(desp_l_rows, col_widths=[3*cm, 5*cm, 2.5*cm, 4*cm]))
+        # Despesas detail
+        if despesas:
+            sec_desp = ParagraphStyle("SD", parent=styles["Heading2"], fontSize=12, textColor=colors.HexColor("#dc2626"), spaceAfter=6)
+            story.append(Paragraph("<b>DETALHAMENTO DE DESPESAS ({} registros)</b>".format(len(despesas)), sec_desp))
+            desp_rows = [["Data", "Categoria", "Descricao", "Valor", "Status"]]
+            for r in despesas:
+                data_fmt = ""
+                if r["data"]:
+                    try:
+                        data_fmt = datetime.fromisoformat(r["data"].replace("Z", "+00:00")).strftime("%d/%m/%y")
+                    except Exception:
+                        data_fmt = str(r["data"])[:10]
+                desc = (r["descricao"] or "")[:35]
+                if len(r["descricao"] or "") > 35:
+                    desc += ".."
+                desp_rows.append([
+                    data_fmt,
+                    (r["categoria"] or "")[:15],
+                    desc,
+                    "R$ {:,.2f}".format(r["valor"]),
+                    r["status"] or "",
+                ])
+            desp_rows.append(["", "", "TOTAL", "R$ {:,.2f}".format(despesa_total), ""])
+            story.append(_styled_table(desp_rows, col_widths=[2*cm, 3*cm, 5.5*cm, 3.5*cm, 2*cm]))
 
         _add_footer(story, styles)
         doc.build(story)
