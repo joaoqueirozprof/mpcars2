@@ -320,8 +320,9 @@ def get_nf_comprovante(
     nf = db.query(RelatorioNF).filter(RelatorioNF.id == nf_id).first()
     if not nf or not nf.comprovante_url:
         raise HTTPException(status_code=404, detail="Comprovante nao encontrado")
-    filepath = "/app" + nf.comprovante_url
-    if not os.path.exists(filepath):
+    safe_path = os.path.basename(nf.comprovante_url or "")
+    filepath = os.path.join("/app/uploads/comprovantes", safe_path)
+    if not safe_path or not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Arquivo nao encontrado")
     import mimetypes
     media_type = mimetypes.guess_type(filepath)[0] or "application/octet-stream"

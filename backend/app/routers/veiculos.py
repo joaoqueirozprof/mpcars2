@@ -514,7 +514,9 @@ async def upload_veiculo_foto(
         if os.path.exists(old_path):
             os.remove(old_path)
 
-    ext = os.path.splitext(foto.filename or "photo.jpg")[1] or ".jpg"
+    ext = os.path.splitext(os.path.basename(foto.filename or "photo.jpg"))[1] or ".jpg"
+    if ext.lower() not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        ext = ".jpg"
     filename = "veiculo_{}_{}{}".format(veiculo_id, uuid.uuid4().hex[:8], ext)
     file_path = os.path.join(UPLOAD_DIR, filename)
 
