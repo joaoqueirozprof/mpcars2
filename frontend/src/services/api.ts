@@ -1,11 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios'
 
-const getApiBaseUrl = (): string => {
-  return '/api/v1'
-}
-
 const api: AxiosInstance = axios.create({
-  baseURL: getApiBaseUrl(),
+  baseURL: '/api/v1',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -16,6 +12,24 @@ api.interceptors.request.use(
     const token = localStorage.getItem('access_token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
+    }
+    // Ensure trailing slash ONLY on GET/DELETE to prevent FastAPI 307 redirects
+    // POST/PUT/PATCH must NOT have trailing slash (307 redirect loses request body)
+    const method = (config.method || 'get').toUpperCase()
+    if (method === 'GET' || method === 'DELETE') {
+      if (config.url) {
+        const hasQuery = config.url.includes('?')
+        if (hasQuery) {
+          const idx = config.url.indexOf('?')
+          const path = config.url.substring(0, idx)
+          const query = config.url.substring(idx)
+          if (!path.endsWith('/')) {
+            config.url = path + '/' + query
+          }
+        } else if (!config.url.endsWith('/')) {
+          config.url = config.url + '/'
+        }
+      }
     }
     return config
   },
