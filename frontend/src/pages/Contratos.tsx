@@ -1714,7 +1714,7 @@ const Contratos: React.FC = () => {
                                             min="0"
                                             placeholder="KM rodada no periodo"
                                             value={nfFormData.km_percorrido || ''}
-                                            onChange={e => setNfFormData({...nfFormData, km_percorrido: Number(e.target.value) || ''})}
+                                            onChange={e => setNfFormData({...nfFormData, km_percorrido: e.target.value})}
                                             className="w-full px-4 py-3 bg-white border border-blue-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-700"
                                           />
                                         </div>
@@ -1722,8 +1722,8 @@ const Contratos: React.FC = () => {
                                           <label className="text-[10px] font-black text-blue-900/50 uppercase tracking-widest ml-1">KM Permitida (Franquia)</label>
                                           <input 
                                             type="number" 
-                                            value={nfFormData.km_referencia}
-                                            onChange={e => setNfFormData({...nfFormData, km_referencia: Number(e.target.value)})}
+                                            value={nfFormData.km_referencia || ""}
+                                            onChange={e => setNfFormData({...nfFormData, km_referencia: e.target.value})}
                                             className="w-full px-4 py-3 bg-white border border-blue-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-700"
                                           />
                                         </div>
@@ -2006,7 +2006,7 @@ const Contratos: React.FC = () => {
                           min="0"
                           placeholder="KM rodada no periodo"
                           value={nfFormData.km_percorrido || ''}
-                          onChange={e => setNfFormData({...nfFormData, km_percorrido: Number(e.target.value) || ''})}
+                          onChange={e => setNfFormData({...nfFormData, km_percorrido: e.target.value})}
                           className="input-field bg-white"
                         />
                       </div>
@@ -2014,8 +2014,8 @@ const Contratos: React.FC = () => {
                         <label className="input-label">KM Permitida (Franquia)</label>
                         <input 
                           type="number" 
-                          value={nfFormData.km_referencia}
-                          onChange={e => setNfFormData({...nfFormData, km_referencia: Number(e.target.value)})}
+                          value={nfFormData.km_referencia || ""}
+                          onChange={e => setNfFormData({...nfFormData, km_referencia: e.target.value})}
                           className="input-field bg-white"
                         />
                       </div>
