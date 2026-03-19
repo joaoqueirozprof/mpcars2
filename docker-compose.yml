@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: mpcars2
       POSTGRES_USER: mpcars2
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mpcars2pass}
+      POSTGRES_PASSWORD: ClE7dmebNoSbfv2xTBiAKxrfDwxA3L
     volumes:
       - pgdata:/var/lib/postgresql/data
     command:
@@ -53,7 +53,7 @@ services:
     container_name: mpcars2-pgbouncer
     restart: always
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://mpcars2:mpcars2pass@mpcars2-db:5432/mpcars2}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ClE7dmebNoSbfv2xTBiAKxrfDwxA3L@mpcars2-db:5432/mpcars2}
       POOL_MODE: transaction
       MAX_CLIENT_CONN: 100
       DEFAULT_POOL_SIZE: 20
@@ -95,7 +95,7 @@ services:
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-production}
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-}@mpcars2-redis:6379/0}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://mpcars2:mpcars2pass@mpcars2-pgbouncer:5432/mpcars2}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ClE7dmebNoSbfv2xTBiAKxrfDwxA3L@mpcars2-pgbouncer:5432/mpcars2}
       SECRET_KEY: ${SECRET_KEY}
       ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
       SEED_ON_STARTUP: ${SEED_ON_STARTUP:-false}
@@ -149,7 +149,7 @@ services:
     command: celery -A app.celery_app worker -l info -B --concurrency=4 --max-tasks-per-child=1000
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-production}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://mpcars2:mpcars2pass@mpcars2-pgbouncer:5432/mpcars2}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ClE7dmebNoSbfv2xTBiAKxrfDwxA3L@mpcars2-pgbouncer:5432/mpcars2}
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD:-}@mpcars2-redis:6379/0}
       BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
       BACKUP_DIRECTORY: ${BACKUP_DIRECTORY:-/backups}

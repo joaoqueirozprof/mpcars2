@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_PER_MINUTE: int = 60
 
-    DATABASE_URL: str = "postgresql://mpcars2:mpcars2pass@mpcars2-db:5432/mpcars2"
+    DATABASE_URL: str = "postgresql://mpcars2:ClE7dmebNoSbfv2xTBiAKxrfDwxA3L@mpcars2-db:5432/mpcars2"
     TEST_DATABASE_URL: Optional[str] = None
     REDIS_URL: str = "redis://mpcars2-redis:6379/0"
 
