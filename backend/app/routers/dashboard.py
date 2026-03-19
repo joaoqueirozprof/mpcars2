@@ -8,6 +8,11 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_page_access
 from app.core.cache import cache_service
+
+
+def invalidate_dashboard_cache():
+    """Invalidate dashboard cache. Call after data changes that affect KPIs."""
+    cache_service.delete("dashboard:main")
 from app.models import (
     AlertaHistorico,
     Cliente,
@@ -478,13 +483,28 @@ def get_dashboard(
         .all()
     )
 
+    # Import RelatorioNF for NF-based revenue
+    from app.models import RelatorioNF as _DashNF
+
     for contrato in contratos_mes:
-        _bucket_value(
-            windows,
-            contrato.data_criacao,
-            "receita",
-            float(contrato.valor_total or 0),
-        )
+        if str(contrato.tipo or "").lower() == "empresa":
+            # For empresa contracts, revenue comes from NF periods, not contract valor_total
+            nf_records = db.query(_DashNF).filter(
+                _DashNF.veiculo_id == contrato.veiculo_id,
+            ).all()
+            for nf in nf_records:
+                valor = float(nf.valor_total_periodo or nf.valor_total_extra or 0)
+                if nf.valor_total_periodo:
+                    _bucket_value(windows, nf.data_criacao or contrato.data_criacao, "receita", valor)
+                elif nf.valor_total_extra:
+                    # Fallback: use diaria + extra
+                    valor = float(contrato.valor_diaria or 0) + float(nf.valor_total_extra or 0)
+                    _bucket_value(windows, nf.data_criacao or contrato.data_criacao, "receita", valor)
+            if not nf_records:
+                # No NF yet, use contract valor_total as estimate
+                _bucket_value(windows, contrato.data_criacao, "receita", float(contrato.valor_total or 0))
+        else:
+            _bucket_value(windows, contrato.data_criacao, "receita", float(contrato.valor_total or 0))
 
     for despesa in despesas_contrato:
         _bucket_value(
@@ -527,16 +547,47 @@ def get_dashboard(
             1,
         )
 
+    # Top clientes: PF revenue from Contrato.valor_total + PJ revenue from NF periods
+    from app.models import RelatorioNF as _ClNF
+
+    pf_cli_rev = (
+        db.query(
+            Contrato.cliente_id.label('cid'),
+            sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0).label('rev'),
+        )
+        .filter(Contrato.tipo != 'empresa')
+        .group_by(Contrato.cliente_id)
+        .subquery('pf_cli_rev')
+    )
+
+    nf_cli_rev = (
+        db.query(
+            Contrato.cliente_id.label('cid'),
+            sqlfunc.coalesce(sqlfunc.sum(_ClNF.valor_total_periodo), 0).label('rev'),
+        )
+        .join(Contrato, Contrato.veiculo_id == _ClNF.veiculo_id)
+        .filter(Contrato.tipo == 'empresa')
+        .group_by(Contrato.cliente_id)
+        .subquery('nf_cli_rev')
+    )
+
     top_clientes_query = (
         db.query(
             Cliente.nome.label("nome"),
-            sqlfunc.count(Contrato.id).label("contratos"),
-            sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0).label("valor_total"),
+            sqlfunc.count(sqlfunc.distinct(Contrato.id)).label("contratos"),
+            (
+                sqlfunc.coalesce(pf_cli_rev.c.rev, 0)
+                + sqlfunc.coalesce(nf_cli_rev.c.rev, 0)
+            ).label("valor_total"),
         )
         .join(Contrato, Contrato.cliente_id == Cliente.id)
+        .outerjoin(pf_cli_rev, pf_cli_rev.c.cid == Cliente.id)
+        .outerjoin(nf_cli_rev, nf_cli_rev.c.cid == Cliente.id)
         .filter(Cliente.ativo.is_(True))
-        .group_by(Cliente.id, Cliente.nome)
-        .order_by(sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0).desc())
+        .group_by(Cliente.id, Cliente.nome, pf_cli_rev.c.rev, nf_cli_rev.c.rev)
+        .order_by(
+            (sqlfunc.coalesce(pf_cli_rev.c.rev, 0) + sqlfunc.coalesce(nf_cli_rev.c.rev, 0)).desc()
+        )
         .limit(5)
         .all()
     )
@@ -549,17 +600,49 @@ def get_dashboard(
         for row in top_clientes_query
     ]
 
+    # Top veiculos: combine PF contract revenue + PJ NF period revenue
+    from app.models import RelatorioNF as _TopNF
+
+    # Subquery: PF contract revenue per vehicle
+    pf_rev_sub = (
+        db.query(
+            Contrato.veiculo_id.label('vid'),
+            sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0).label('rev'),
+        )
+        .filter(Contrato.tipo != 'empresa')
+        .group_by(Contrato.veiculo_id)
+        .subquery('pf_rev')
+    )
+
+    # Subquery: NF period revenue per vehicle (empresa/PJ contracts)
+    nf_rev_sub = (
+        db.query(
+            _TopNF.veiculo_id.label('vid'),
+            sqlfunc.coalesce(sqlfunc.sum(_TopNF.valor_total_periodo), 0).label('rev'),
+        )
+        .group_by(_TopNF.veiculo_id)
+        .subquery('nf_rev')
+    )
+
     top_veiculos_query = (
         db.query(
             Veiculo.placa.label("placa"),
             Veiculo.modelo.label("modelo"),
-            sqlfunc.count(Contrato.id).label("alugadas"),
-            sqlfunc.coalesce(sqlfunc.sum(Contrato.valor_total), 0).label("receita"),
+            sqlfunc.count(sqlfunc.distinct(Contrato.id)).label("alugadas"),
+            (
+                sqlfunc.coalesce(pf_rev_sub.c.rev, 0)
+                + sqlfunc.coalesce(nf_rev_sub.c.rev, 0)
+            ).label("receita"),
         )
         .outerjoin(Contrato, Contrato.veiculo_id == Veiculo.id)
+        .outerjoin(pf_rev_sub, pf_rev_sub.c.vid == Veiculo.id)
+        .outerjoin(nf_rev_sub, nf_rev_sub.c.vid == Veiculo.id)
         .filter(Veiculo.ativo.is_(True))
-        .group_by(Veiculo.id, Veiculo.placa, Veiculo.modelo)
-        .order_by(sqlfunc.count(Contrato.id).desc(), Veiculo.placa.asc())
+        .group_by(Veiculo.id, Veiculo.placa, Veiculo.modelo, pf_rev_sub.c.rev, nf_rev_sub.c.rev)
+        .order_by(
+            (sqlfunc.coalesce(pf_rev_sub.c.rev, 0) + sqlfunc.coalesce(nf_rev_sub.c.rev, 0)).desc(),
+            Veiculo.placa.asc(),
+        )
         .limit(5)
         .all()
     )
@@ -606,7 +689,7 @@ def get_dashboard(
     if not alertas:
         alertas = _build_fallback_alertas(contratos_atrasados_query, proximos_vencimentos, now)
 
-    return {
+    result = {
         "total_veiculos": int(total_veiculos),
         "veiculos_alugados": int(veiculos_alugados),
         "veiculos_disponiveis": int(veiculos_disponiveis),
@@ -677,7 +760,7 @@ def get_metricas(
 ):
     dashboard = get_dashboard(db=db, current_user=current_user)
     return {
-        "contratos_mes": len(dashboard["contratos_atrasados"]),
+        "contratos_atrasados_count": len(dashboard["contratos_atrasados"]),
         "taxa_ocupacao": dashboard["taxa_ocupacao"],
         "receita_mes": dashboard["receita_mensal"],
         "clientes": dashboard["total_clientes"],
@@ -695,7 +778,7 @@ def get_alertas(
     if urgencia:
         urgencias = {urgencia, urgencia.replace("critica", "critico")}
         query = query.filter(AlertaHistorico.urgencia.in_(list(urgencias)))
-    return query.order_by(AlertaHistorico.data_criacao.desc()).all()
+    return query.order_by(AlertaHistorico.data_criacao.desc()).limit(100).all()
 
 
 @router.get("/tops")
@@ -755,12 +838,12 @@ def get_graficos(
     return {
         "contratos_por_status": {
             "ativo": dashboard["contratos_ativos"],
-            "finalizado": 0,
+            "finalizado": dashboard.get("contratos_finalizados", 0),
         },
         "veiculos_por_status": {
             "disponivel": dashboard["veiculos_disponiveis"],
             "alugado": dashboard["veiculos_alugados"],
-            "manutencao": 0,
+            "manutencao": dashboard.get("veiculos_manutencao", 0),
         },
         "receita_vs_despesas": dashboard["receita_vs_despesas"],
     }
