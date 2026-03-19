@@ -659,10 +659,10 @@ const Contratos: React.FC = () => {
         setNfFormData({
           periodo_inicio: uso.data_inicio ? uso.data_inicio.split('T')[0] : '',
           periodo_fim: uso.data_fim ? uso.data_fim.split('T')[0] : new Date().toISOString().split('T')[0],
-          km_referencia: uso.km_referencia || 0,
-          valor_diaria: uso.valor_diaria_empresa || 0,
+          km_referencia: uso.km_referencia || '',
+          valor_diaria: uso.valor_diaria_empresa || '',
           km_percorrido: uso.km_percorrido || '',
-          valor_km_extra: uso.valor_km_extra || 0,
+          valor_km_extra: uso.valor_km_extra || '',
         })
         loadNfHistory(uso.id)
       }
@@ -727,8 +727,8 @@ const Contratos: React.FC = () => {
       const veiculos = empresaUsos.map((uso: any) => ({
         uso_id: uso.id,
         km_percorrido: uso.km_percorrido || '',
-        km_referencia: uso.km_referencia || 0,
-        valor_km_extra: uso.valor_km_extra || 0,
+        km_referencia: uso.km_referencia || '',
+        valor_km_extra: uso.valor_km_extra || '',
       }))
       
       const response = await api.post('/relatorios/nf/empresa/pdf', {
@@ -789,7 +789,7 @@ const Contratos: React.FC = () => {
       hora_saida: contrato.hora_saida || '',
       combustivel_saida: contrato.combustivel_saida || '',
       km_livres: contrato.km_livres || 0,
-      valor_diaria: contrato.valor_diaria || 0,
+      valor_diaria: contrato.valor_diaria || '',
       valor_km_excedente: contrato.valor_km_excedente || 0,
       desconto: contrato.desconto || 0,
       observacoes: contrato.observacoes || '',
@@ -1487,10 +1487,10 @@ const Contratos: React.FC = () => {
                               setNfFormData({
                                 periodo_inicio: uso.data_inicio ? uso.data_inicio.split('T')[0] : '',
                                 periodo_fim: uso.data_fim ? uso.data_fim.split('T')[0] : new Date().toISOString().split('T')[0],
-                                km_referencia: uso.km_referencia || 0,
-                                valor_diaria: uso.valor_diaria_empresa || 0,
+                                km_referencia: uso.km_referencia || '',
+                                valor_diaria: uso.valor_diaria_empresa || '',
                                 km_percorrido: uso.km_percorrido || '',
-                                valor_km_extra: uso.valor_km_extra || 0,
+                                valor_km_extra: uso.valor_km_extra || '',
                               });
                               loadNfHistory(uso.id);
                             }}
@@ -2345,7 +2345,7 @@ const Contratos: React.FC = () => {
                         setFormData({
                           ...buildForm(),
                           tipo: event.target.value as 'cliente' | 'empresa',
-                          valor_diaria: config.valor_diaria_padrao || 0,
+                          valor_diaria: config.valor_diaria_padrao || '',
                         })
                       }
                       className="input-field"
